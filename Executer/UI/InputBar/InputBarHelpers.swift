@@ -19,13 +19,27 @@ extension InputBarView {
         return false
     }
 
+    var isPlanning: Bool {
+        if case .planning = appState.inputBarState { return true }
+        return false
+    }
+
+    var isStreaming: Bool {
+        if case .streaming = appState.inputBarState { return true }
+        return false
+    }
+
     var statusText: String {
         let humor = HumorMode.shared
         switch appState.inputBarState {
         case .processing:
             return humor.isEnabled ? humor.funnyThinking() : "Thinking..."
+        case .planning(let summary):
+            return humor.isEnabled ? "cooking up a plan..." : summary
         case .executing(let name, let step, let total):
             return humor.isEnabled ? humor.funnyToolStatus(toolName: name, step: step, total: total) : "Running \(name)... (\(step)/\(total))"
+        case .streaming(let partial):
+            return partial.isEmpty ? "Responding..." : partial
         case .researchChoice:
             return humor.isEnabled ? "Whatcha wanna know?" : "What kind of research?"
         case .voiceListening(let partial):
@@ -47,7 +61,9 @@ extension InputBarView {
         switch appState.inputBarState {
         case .ready: return "sparkle"
         case .processing: return "brain"
+        case .planning: return "list.bullet.clipboard"
         case .executing: return "gearshape.2"
+        case .streaming: return "text.bubble"
         case .voiceListening: return "mic.fill"
         case .researchChoice: return "magnifyingglass"
         case .thoughtRecall: return "brain.fill"
@@ -72,7 +88,7 @@ extension InputBarView {
 
     @ViewBuilder
     var shimmerOverlay: some View {
-        if appState.inputBarState == .processing || isExecuting || isVoiceListening {
+        if appState.inputBarState == .processing || isExecuting || isVoiceListening || isPlanning {
             ShimmerView(animationSpeed: PersonalityEngine.shared.currentPersonality.animationSpeed)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .opacity(0.3)

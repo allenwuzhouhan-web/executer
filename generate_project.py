@@ -63,6 +63,7 @@ swift_files = [
     ("LLM/DeepSeekService.swift", "LLM"),
     ("LLM/LLMProvider.swift", "LLM"),
     ("LLM/LocalCommandRouter.swift", "LLM"),
+    ("LLM/SubAgentCoordinator.swift", "LLM"),
     ("LLM/ToolDefinition.swift", "LLM"),
     ("LLM/ToolRegistry.swift", "LLM"),
     # LLM/CommandMatchers

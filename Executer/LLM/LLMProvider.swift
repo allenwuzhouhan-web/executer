@@ -108,10 +108,40 @@ extension LLMProvider {
     }
 }
 
+// MARK: - Streaming
+
+enum StreamEvent {
+    case textDelta(String)
+    case toolCallStart(id: String, name: String)
+    case toolCallDelta(id: String, argumentsDelta: String)
+    case toolCallComplete(ToolCall)
+    case done(LLMResponse)
+}
+
 // MARK: - Service Protocol
 
 protocol LLMServiceProtocol {
     func sendChatRequest(messages: [ChatMessage], tools: [[String: AnyCodable]]?, maxTokens: Int) async throws -> LLMResponse
+    func streamChatRequest(messages: [ChatMessage], tools: [[String: AnyCodable]]?, maxTokens: Int) -> AsyncThrowingStream<StreamEvent, Error>
+}
+
+extension LLMServiceProtocol {
+    func streamChatRequest(messages: [ChatMessage], tools: [[String: AnyCodable]]?, maxTokens: Int) -> AsyncThrowingStream<StreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let response = try await self.sendChatRequest(messages: messages, tools: tools, maxTokens: maxTokens)
+                    if let text = response.text {
+                        continuation.yield(.textDelta(text))
+                    }
+                    continuation.yield(.done(response))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Service Manager
@@ -245,9 +275,34 @@ class LLMServiceManager: ObservableObject {
 
     **SPEED RULES:**
     - Batch ALL tool calls into as few responses as possible. The system adds small delays between UI actions automatically — you don't need to wait or verify.
+    - Independent tools (file reads, URL fetches, system queries) run IN PARALLEL automatically. Batch them in one response for maximum speed.
     - Do NOT use `capture_screen` between steps to "check if it worked." Trust your commands.
     - Only use `capture_screen` when the user asks you to look at or read something on screen.
     - Never say "I can't interact with web pages." You CAN.
+
+    **Task Decomposition (for complex requests):**
+    - Before executing, mentally decompose complex tasks into discrete steps.
+    - Identify which steps are independent (can run in parallel) vs sequential (depend on previous results).
+    - For independent steps, batch them into a SINGLE response with multiple tool calls — they execute in parallel automatically.
+    - For sequential steps, execute them in order across multiple turns.
+    - Example: "Research X and organize my Downloads" → these are independent, batch both in one response.
+    - Example: "Find my report, read it, then summarize it" → sequential: find first, read next, then summarize.
+
+    **Error Recovery:**
+    - If a tool call fails, DO NOT give up. Try an alternative approach.
+    - AppleScript failure → try `run_shell_command` with osascript or a different automation method.
+    - URL fetch failure → try a different URL or use `search_web` to find an alternative source.
+    - File not found → use `find_files` to search broader directories, or check ~/Documents/works.
+    - Permission denied → suggest the user grant permissions in System Settings.
+    - `click_element` can't find element → use `capture_screen` + `ocr_image` to find it visually, then `click` at coordinates.
+    - Always report what failed and what you tried as alternatives.
+    - Never give up after a single failure. Adapt and try a different approach.
+
+    **Verification:**
+    - After creating, moving, or deleting files, briefly confirm the operation succeeded by noting the result.
+    - After multi-step tasks, provide a brief summary of what was completed.
+    - If a tool result looks wrong (empty response, unexpected format), investigate before proceeding.
+    - For destructive operations (delete, overwrite), double-check the target path before executing.
 
     **Dictionary & Language (instant, no API cost):**
     - For word definitions, use `dictionary_lookup` — it uses the native macOS dictionary, instant and offline.

@@ -187,4 +187,90 @@ class OpenAICompatibleService: LLMServiceProtocol {
             rawMessage: choice.message
         )
     }
+
+    func streamChatRequest(messages: [ChatMessage], tools: [[String: AnyCodable]]?, maxTokens: Int) -> AsyncThrowingStream<StreamEvent, Error> {
+        AsyncThrowingStream { [self] continuation in
+            Task {
+                do {
+                    var request = URLRequest(url: URL(string: provider.config.baseURL)!)
+                    request.httpMethod = "POST"
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue("Bearer \(APIKeyManager.shared.getKey(for: provider) ?? "")", forHTTPHeaderField: "Authorization")
+                    request.timeoutInterval = 120
+
+                    let body = ChatCompletionRequest(
+                        model: model,
+                        messages: messages,
+                        tools: tools?.isEmpty == true ? nil : tools,
+                        tool_choice: tools != nil ? "auto" : nil,
+                        max_tokens: maxTokens,
+                        stream: true
+                    )
+                    request.httpBody = try sharedJSONEncoder.encode(body)
+
+                    let (bytes, httpResponse) = try await URLSession.shared.bytes(for: request)
+
+                    guard let http = httpResponse as? HTTPURLResponse, http.statusCode == 200 else {
+                        throw ExecuterError.apiError("Stream request failed with HTTP \((httpResponse as? HTTPURLResponse)?.statusCode ?? 0)")
+                    }
+
+                    var accumulatedText = ""
+                    var toolCallAccumulators: [Int: (id: String, name: String, arguments: String)] = [:]
+
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data: ") else { continue }
+                        let json = String(line.dropFirst(6))
+                        if json == "[DONE]" { break }
+
+                        guard let data = json.data(using: .utf8),
+                              let chunk = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              let choices = chunk["choices"] as? [[String: Any]],
+                              let delta = choices.first?["delta"] as? [String: Any] else { continue }
+
+                        // Text content delta
+                        if let content = delta["content"] as? String {
+                            accumulatedText += content
+                            continuation.yield(.textDelta(content))
+                        }
+
+                        // Tool call deltas
+                        if let toolCalls = delta["tool_calls"] as? [[String: Any]] {
+                            for tc in toolCalls {
+                                guard let index = tc["index"] as? Int else { continue }
+                                let function = tc["function"] as? [String: Any]
+
+                                if let id = tc["id"] as? String, let name = function?["name"] as? String {
+                                    toolCallAccumulators[index] = (id: id, name: name, arguments: "")
+                                    continuation.yield(.toolCallStart(id: id, name: name))
+                                }
+
+                                if let argDelta = function?["arguments"] as? String {
+                                    toolCallAccumulators[index]?.arguments += argDelta
+                                    if let id = toolCallAccumulators[index]?.id {
+                                        continuation.yield(.toolCallDelta(id: id, argumentsDelta: argDelta))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Build final response
+                    let finalToolCalls: [ToolCall]? = toolCallAccumulators.isEmpty ? nil : toolCallAccumulators.sorted(by: { $0.key < $1.key }).map { (_, acc) in
+                        ToolCall(id: acc.id, type: "function", function: ToolCall.FunctionCall(name: acc.name, arguments: acc.arguments))
+                    }
+
+                    let rawMessage = ChatMessage(
+                        role: "assistant",
+                        content: accumulatedText.isEmpty ? nil : accumulatedText,
+                        tool_calls: finalToolCalls
+                    )
+                    let response = LLMResponse(text: accumulatedText.isEmpty ? nil : accumulatedText, toolCalls: finalToolCalls, rawMessage: rawMessage)
+                    continuation.yield(.done(response))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
 }
