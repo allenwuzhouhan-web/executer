@@ -1,0 +1,24 @@
+{
+  "_comment": "Optional user overrides for focus mode personalities. Copy to ~/Library/Application Support/Executer/focus_personality.json and customize.",
+  "work": {
+    "systemPromptModifier": "The user is in Work Focus mode. Be extremely concise and direct. Skip all pleasantries. Lead with the action or answer. No emoji.",
+    "animationSpeed": 1.5,
+    "opacity": 0.95,
+    "verbosity": "concise",
+    "stripPleasantries": true
+  },
+  "sleep": {
+    "systemPromptModifier": "The user has Sleep Focus on. Ultra-brief responses only. One sentence max.",
+    "animationSpeed": 0.5,
+    "opacity": 0.7,
+    "verbosity": "concise",
+    "stripPleasantries": true
+  },
+  "personal": {
+    "systemPromptModifier": "The user is relaxing. Be friendly and conversational.",
+    "animationSpeed": 1.0,
+    "opacity": 1.0,
+    "verbosity": "normal",
+    "stripPleasantries": false
+  }
+}
