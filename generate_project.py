@@ -10,62 +10,125 @@ def gen_id(name):
 
 # All source files relative to project root
 swift_files = [
+    # App
     ("App/ExecuterApp.swift", "App"),
     ("App/AppDelegate.swift", "App"),
     ("App/AppState.swift", "App"),
-    ("Notch/NotchDetector.swift", "Notch"),
-    ("Notch/ScreenGeometry.swift", "Notch"),
-    ("Notch/NotchWindow.swift", "Notch"),
-    ("UI/InputBar/InputBarPanel.swift", "UI/InputBar"),
-    ("UI/InputBar/InputBarView.swift", "UI/InputBar"),
-    ("UI/Animations/ShimmerView.swift", "UI/Animations"),
-    ("UI/Theming/VisualEffectBackground.swift", "UI/Theming"),
-    ("UI/Onboarding/SettingsView.swift", "UI/Onboarding"),
-    ("LLM/DeepSeekService.swift", "LLM"),
-    ("LLM/LLMProvider.swift", "LLM"),
-    ("LLM/AnthropicService.swift", "LLM"),
-    ("LLM/ToolRegistry.swift", "LLM"),
-    ("LLM/ToolDefinition.swift", "LLM"),
-    ("LLM/APIKeyManager.swift", "LLM"),
+    ("App/AttachedFile.swift", "App"),
+    ("App/ContextualAwareness.swift", "App"),
+    ("App/HealthCheckService.swift", "App"),
+    ("App/HotkeyManager.swift", "App"),
+    ("App/InputBarState.swift", "App"),
+    ("App/SystemContext.swift", "App"),
+    # Automation
+    ("Automation/AutomationExecutor.swift", "Automation"),
+    ("Automation/AutomationRule.swift", "Automation"),
+    ("Automation/AutomationRuleManager.swift", "Automation"),
+    ("Automation/RuleParser.swift", "Automation"),
+    ("Automation/SystemEventBus.swift", "Automation"),
+    # Executors
     ("Executors/AppExecutor.swift", "Executors"),
-    ("Executors/MusicExecutor.swift", "Executors"),
-    ("Executors/SystemSettingsExecutor.swift", "Executors"),
-    ("Executors/PowerExecutor.swift", "Executors"),
+    ("Executors/ClipboardExecutor.swift", "Executors"),
+    ("Executors/ClipboardHistoryExecutor.swift", "Executors"),
+    ("Executors/CursorExecutor.swift", "Executors"),
+    ("Executors/DictionaryExecutor.swift", "Executors"),
+    ("Executors/FileContentExecutor.swift", "Executors"),
     ("Executors/FileExecutor.swift", "Executors"),
+    ("Executors/FileSearchExecutor.swift", "Executors"),
+    ("Executors/KeyboardExecutor.swift", "Executors"),
+    ("Executors/MusicExecutor.swift", "Executors"),
+    ("Executors/NotificationExecutor.swift", "Executors"),
+    ("Executors/PowerExecutor.swift", "Executors"),
+    ("Executors/ProductivityExecutor.swift", "Executors"),
+    ("Executors/SchedulerExecutor.swift", "Executors"),
+    ("Executors/ScreenshotExecutor.swift", "Executors"),
+    ("Executors/SystemInfoExecutor.swift", "Executors"),
+    ("Executors/SystemSettingsExecutor.swift", "Executors"),
+    ("Executors/TerminalExecutor.swift", "Executors"),
+    ("Executors/WeatherExecutor.swift", "Executors"),
+    ("Executors/WebContentExecutor.swift", "Executors"),
     ("Executors/WebExecutor.swift", "Executors"),
     ("Executors/WindowExecutor.swift", "Executors"),
-    ("Executors/ProductivityExecutor.swift", "Executors"),
-    ("Executors/TerminalExecutor.swift", "Executors"),
-    ("Executors/ScreenshotExecutor.swift", "Executors"),
-    ("Executors/ClipboardExecutor.swift", "Executors"),
-    ("Executors/NotificationExecutor.swift", "Executors"),
-    ("Executors/WebContentExecutor.swift", "Executors"),
-    ("Executors/FileContentExecutor.swift", "Executors"),
-    ("Executors/FileSearchExecutor.swift", "Executors"),
-    ("Skills/SkillExecutor.swift", "Skills"),
-    ("Skills/SkillsManager.swift", "Skills"),
+    # FocusPersonality
+    ("FocusPersonality/FocusStateService.swift", "FocusPersonality"),
+    ("FocusPersonality/HumorMode.swift", "FocusPersonality"),
+    ("FocusPersonality/PersonalityEngine.swift", "FocusPersonality"),
+    # Handoff
+    ("Handoff/HandoffBadge.swift", "Handoff"),
+    ("Handoff/HandoffService.swift", "Handoff"),
+    # LLM
+    ("LLM/AgentLoop.swift", "LLM"),
+    ("LLM/AnthropicService.swift", "LLM"),
+    ("LLM/APIKeyManager.swift", "LLM"),
+    ("LLM/DeepSeekService.swift", "LLM"),
+    ("LLM/LLMProvider.swift", "LLM"),
+    ("LLM/LocalCommandRouter.swift", "LLM"),
+    ("LLM/ToolDefinition.swift", "LLM"),
+    ("LLM/ToolRegistry.swift", "LLM"),
+    # LLM/CommandMatchers
+    ("LLM/CommandMatchers/AppCommandMatcher.swift", "LLM/CommandMatchers"),
+    ("LLM/CommandMatchers/CommandParsingHelpers.swift", "LLM/CommandMatchers"),
+    ("LLM/CommandMatchers/CursorCommandMatcher.swift", "LLM/CommandMatchers"),
+    ("LLM/CommandMatchers/DictionaryCommandMatcher.swift", "LLM/CommandMatchers"),
+    ("LLM/CommandMatchers/KeyboardCommandMatcher.swift", "LLM/CommandMatchers"),
+    ("LLM/CommandMatchers/MusicCommandMatcher.swift", "LLM/CommandMatchers"),
+    ("LLM/CommandMatchers/TimerCommandMatcher.swift", "LLM/CommandMatchers"),
+    ("LLM/CommandMatchers/WebCommandMatcher.swift", "LLM/CommandMatchers"),
+    # Memory
     ("Memory/MemoryManager.swift", "Memory"),
     ("Memory/MemoryExecutor.swift", "Memory"),
+    # Notch
+    ("Notch/NotchDetector.swift", "Notch"),
+    ("Notch/NotchWindow.swift", "Notch"),
+    ("Notch/ScreenGeometry.swift", "Notch"),
+    # Permissions
     ("Permissions/PermissionManager.swift", "Permissions"),
-    ("Storage/CommandHistory.swift", "Storage"),
-    ("Storage/KeychainHelper.swift", "Storage"),
+    # Skills
+    ("Skills/SkillExecutor.swift", "Skills"),
+    ("Skills/SkillsManager.swift", "Skills"),
+    # Storage
     ("Storage/AliasManager.swift", "Storage"),
     ("Storage/ClipboardHistory.swift", "Storage"),
+    ("Storage/CommandHistory.swift", "Storage"),
+    ("Storage/FileIndex.swift", "Storage"),
+    ("Storage/KeychainHelper.swift", "Storage"),
     ("Storage/TaskScheduler.swift", "Storage"),
-    ("Executors/ClipboardHistoryExecutor.swift", "Executors"),
-    ("Executors/SystemInfoExecutor.swift", "Executors"),
-    ("Executors/SchedulerExecutor.swift", "Executors"),
-    ("Executors/WeatherExecutor.swift", "Executors"),
+    # ThoughtContinuity
+    ("ThoughtContinuity/TextSnapshotService.swift", "ThoughtContinuity"),
+    ("ThoughtContinuity/ThoughtDatabase.swift", "ThoughtContinuity"),
+    ("ThoughtContinuity/ThoughtRecallCard.swift", "ThoughtContinuity"),
+    ("ThoughtContinuity/ThoughtRecallService.swift", "ThoughtContinuity"),
+    # UI/Animations
+    ("UI/Animations/LaunchGlowView.swift", "UI/Animations"),
+    ("UI/Animations/LaunchGlowWindow.swift", "UI/Animations"),
+    ("UI/Animations/ResponseGlowView.swift", "UI/Animations"),
+    ("UI/Animations/ShimmerView.swift", "UI/Animations"),
+    ("UI/Animations/StartupSound.swift", "UI/Animations"),
+    # UI/InputBar
+    ("UI/InputBar/InputBarHelpers.swift", "UI/InputBar"),
+    ("UI/InputBar/InputBarPanel.swift", "UI/InputBar"),
+    ("UI/InputBar/InputBarView.swift", "UI/InputBar"),
+    ("UI/InputBar/ResultBubbleView.swift", "UI/InputBar"),
+    # UI/Onboarding
+    ("UI/Onboarding/SettingsView.swift", "UI/Onboarding"),
+    # UI/Settings
+    ("UI/Settings/AboutSettingsTab.swift", "UI/Settings"),
+    ("UI/Settings/AIModelSettingsTab.swift", "UI/Settings"),
+    ("UI/Settings/NotchSettingsTab.swift", "UI/Settings"),
+    ("UI/Settings/PermissionsSettingsTab.swift", "UI/Settings"),
+    ("UI/Settings/VoiceSettingsTab.swift", "UI/Settings"),
+    # UI/Theming
+    ("UI/Theming/VisualEffectBackground.swift", "UI/Theming"),
+    # Utilities
     ("Utilities/AppleScriptRunner.swift", "Utilities"),
     ("Utilities/PathSecurity.swift", "Utilities"),
-    ("ThoughtContinuity/ThoughtDatabase.swift", "ThoughtContinuity"),
-    ("ThoughtContinuity/TextSnapshotService.swift", "ThoughtContinuity"),
-    ("ThoughtContinuity/ThoughtRecallService.swift", "ThoughtContinuity"),
-    ("ThoughtContinuity/ThoughtRecallCard.swift", "ThoughtContinuity"),
-    ("FocusPersonality/FocusStateService.swift", "FocusPersonality"),
-    ("FocusPersonality/PersonalityEngine.swift", "FocusPersonality"),
-    ("Handoff/HandoffService.swift", "Handoff"),
-    ("Handoff/HandoffBadge.swift", "Handoff"),
+    # Voice
+    ("Voice/AssistantNameManager.swift", "Voice"),
+    ("Voice/VoiceCalibration.swift", "Voice"),
+    ("Voice/VoiceGlowWindow.swift", "Voice"),
+    ("Voice/VoiceIntegration.swift", "Voice"),
+    ("Voice/VoiceService.swift", "Voice"),
+    ("Voice/VoiceState.swift", "Voice"),
 ]
 
 # Generate IDs
@@ -86,13 +149,16 @@ PRODUCT_REF = gen_id("fileref_Executer.app")
 groups = {
     "main": gen_id("group_Executer"),
     "App": gen_id("group_App"),
+    "Automation": gen_id("group_Automation"),
     "Notch": gen_id("group_Notch"),
     "UI": gen_id("group_UI"),
     "UI/InputBar": gen_id("group_UI_InputBar"),
     "UI/Animations": gen_id("group_UI_Animations"),
     "UI/Theming": gen_id("group_UI_Theming"),
     "UI/Onboarding": gen_id("group_UI_Onboarding"),
+    "UI/Settings": gen_id("group_UI_Settings"),
     "LLM": gen_id("group_LLM"),
+    "LLM/CommandMatchers": gen_id("group_LLM_CommandMatchers"),
     "Executors": gen_id("group_Executors"),
     "Skills": gen_id("group_Skills"),
     "Memory": gen_id("group_Memory"),
@@ -103,6 +169,7 @@ groups = {
     "ThoughtContinuity": gen_id("group_ThoughtContinuity"),
     "FocusPersonality": gen_id("group_FocusPersonality"),
     "Handoff": gen_id("group_Handoff"),
+    "Voice": gen_id("group_Voice"),
     "Products": gen_id("group_Products"),
     "Frameworks": gen_id("group_Frameworks"),
     "root": gen_id("group_root"),
@@ -225,6 +292,7 @@ lines.append('\t\t};')
 # Main Executer group
 main_children = [
     (groups["App"], "App"),
+    (groups["Automation"], "Automation"),
     (groups["Notch"], "Notch"),
     (groups["UI"], "UI"),
     (groups["LLM"], "LLM"),
@@ -237,6 +305,7 @@ main_children = [
     (groups["ThoughtContinuity"], "ThoughtContinuity"),
     (groups["FocusPersonality"], "FocusPersonality"),
     (groups["Handoff"], "Handoff"),
+    (groups["Voice"], "Voice"),
     (groups["Resources"], "Resources"),
     (INFO_PLIST_REF, "Info.plist"),
     (ENTITLEMENTS_REF, "Executer.entitlements"),
@@ -258,7 +327,7 @@ for path, group in swift_files:
         group_files[group] = []
     group_files[group].append((file_refs[path], os.path.basename(path)))
 
-simple_groups = ["App", "Notch", "LLM", "Executors", "Skills", "Memory", "Permissions", "Storage", "Utilities", "ThoughtContinuity", "FocusPersonality", "Handoff"]
+simple_groups = ["App", "Automation", "Notch", "Executors", "Skills", "Memory", "Permissions", "Storage", "Utilities", "ThoughtContinuity", "FocusPersonality", "Handoff", "Voice"]
 for g in simple_groups:
     lines.append(f'\t\t{groups[g]} /* {g} */ = {{')
     lines.append('\t\t\tisa = PBXGroup;')
@@ -278,12 +347,13 @@ lines.append(f'\t\t\t\t{groups["UI/InputBar"]} /* InputBar */,')
 lines.append(f'\t\t\t\t{groups["UI/Animations"]} /* Animations */,')
 lines.append(f'\t\t\t\t{groups["UI/Theming"]} /* Theming */,')
 lines.append(f'\t\t\t\t{groups["UI/Onboarding"]} /* Onboarding */,')
+lines.append(f'\t\t\t\t{groups["UI/Settings"]} /* Settings */,')
 lines.append('\t\t\t);')
 lines.append('\t\t\tpath = UI;')
 lines.append('\t\t\tsourceTree = "<group>";')
 lines.append('\t\t};')
 
-for subg in ["UI/InputBar", "UI/Animations", "UI/Theming", "UI/Onboarding"]:
+for subg in ["UI/InputBar", "UI/Animations", "UI/Theming", "UI/Onboarding", "UI/Settings"]:
     short_name = subg.split("/")[-1]
     lines.append(f'\t\t{groups[subg]} /* {short_name} */ = {{')
     lines.append('\t\t\tisa = PBXGroup;')
@@ -294,6 +364,29 @@ for subg in ["UI/InputBar", "UI/Animations", "UI/Theming", "UI/Onboarding"]:
     lines.append(f'\t\t\tpath = {short_name};')
     lines.append('\t\t\tsourceTree = "<group>";')
     lines.append('\t\t};')
+
+# LLM group (has CommandMatchers subgroup)
+lines.append(f'\t\t{groups["LLM"]} /* LLM */ = {{')
+lines.append('\t\t\tisa = PBXGroup;')
+lines.append('\t\t\tchildren = (')
+for fid, fname in group_files.get("LLM", []):
+    lines.append(f'\t\t\t\t{fid} /* {fname} */,')
+lines.append(f'\t\t\t\t{groups["LLM/CommandMatchers"]} /* CommandMatchers */,')
+lines.append('\t\t\t);')
+lines.append('\t\t\tpath = LLM;')
+lines.append('\t\t\tsourceTree = "<group>";')
+lines.append('\t\t};')
+
+# LLM/CommandMatchers subgroup
+lines.append(f'\t\t{groups["LLM/CommandMatchers"]} /* CommandMatchers */ = {{')
+lines.append('\t\t\tisa = PBXGroup;')
+lines.append('\t\t\tchildren = (')
+for fid, fname in group_files.get("LLM/CommandMatchers", []):
+    lines.append(f'\t\t\t\t{fid} /* {fname} */,')
+lines.append('\t\t\t);')
+lines.append('\t\t\tpath = CommandMatchers;')
+lines.append('\t\t\tsourceTree = "<group>";')
+lines.append('\t\t};')
 
 # Resources group
 lines.append(f'\t\t{groups["Resources"]} /* Resources */ = {{')
