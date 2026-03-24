@@ -13,6 +13,8 @@ class SkillsManager {
     }
 
     private(set) var skills: [Skill] = []
+    /// Cached prompt section string, invalidated when skills change
+    private var cachedPromptSection: String?
 
     private let userSkillsURL: URL = {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -32,6 +34,7 @@ class SkillsManager {
         // Replace if same name exists (in user skills only)
         skills.removeAll { $0.name == skill.name }
         skills.append(skill)
+        cachedPromptSection = nil
         saveUserSkills()
         print("[Skills] Added skill: \(skill.name)")
     }
@@ -42,6 +45,7 @@ class SkillsManager {
         let before = skills.count
         skills.removeAll { $0.name == name }
         if skills.count < before {
+            cachedPromptSection = nil
             saveUserSkills()
             return true
         }
@@ -52,6 +56,7 @@ class SkillsManager {
 
     /// Formats all skills as a prompt section for the LLM system message.
     func promptSection() -> String {
+        if let cached = cachedPromptSection { return cached }
         guard !skills.isEmpty else { return "" }
 
         var lines = [
@@ -76,7 +81,9 @@ class SkillsManager {
             lines.append("")
         }
 
-        return lines.joined(separator: "\n")
+        let result = lines.joined(separator: "\n")
+        cachedPromptSection = result
+        return result
     }
 
     // MARK: - Persistence

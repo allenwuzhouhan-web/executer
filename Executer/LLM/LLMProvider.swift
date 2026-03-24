@@ -29,7 +29,20 @@ struct LLMProviderConfig {
 }
 
 extension LLMProvider {
+    // Cached configs — avoids creating new LLMProviderConfig struct on every .config access
+    private static let configs: [LLMProvider: LLMProviderConfig] = {
+        var map = [LLMProvider: LLMProviderConfig]()
+        for provider in LLMProvider.allCases {
+            map[provider] = provider.buildConfig()
+        }
+        return map
+    }()
+
     var config: LLMProviderConfig {
+        Self.configs[self]!
+    }
+
+    private func buildConfig() -> LLMProviderConfig {
         switch self {
         case .deepseek:
             return LLMProviderConfig(
@@ -243,14 +256,18 @@ class LLMServiceManager: ObservableObject {
     - NEVER call the API for simple word definitions or spelling. These tools are free and instant.
     """
 
+    // Cache the static portion of the system prompt — only changes when provider changes
+    private lazy var cachedBasePrompt: String = {
+        return systemPrompt + agenticPromptSection()
+    }()
+
     func fullSystemPrompt(context: SystemContext, query: String = "") -> String {
         let personality = PersonalityEngine.shared.systemPromptSection()
         let skills = SkillsManager.shared.promptSection()
         let memory = MemoryManager.shared.promptSection(query: query)
         let history = recentHistorySection()
         let humor = HumorMode.shared.isEnabled ? humorPromptSection : ""
-        let agenticGuide = agenticPromptSection()
-        return "\(systemPrompt)\(agenticGuide)\(personality)\(humor)\n\n\(context.systemPromptAddendum)\(skills)\(memory)\(history)"
+        return "\(cachedBasePrompt)\(personality)\(humor)\n\n\(context.systemPromptAddendum)\(skills)\(memory)\(history)"
     }
 
     /// Provider-specific agentic execution guidance. DeepSeek needs explicit

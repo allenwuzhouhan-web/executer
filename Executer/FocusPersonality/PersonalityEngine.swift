@@ -13,6 +13,18 @@ class PersonalityEngine {
     static let shared = PersonalityEngine()
 
     private var userOverrides: [String: PersonalityOverride] = [:]
+    /// Cache personality configs per focus mode to avoid repeated struct allocation
+    private var configCache: [String: PersonalityConfig] = [:]
+
+    private static let pleasantryPrefixes: [String] = [
+        "Sure!", "Sure thing!", "Of course!", "Absolutely!",
+        "Great question!", "Good question!", "Happy to help!",
+        "Certainly!", "No problem!", "You're welcome!",
+        "Sure,", "Of course,", "Absolutely,", "Certainly,",
+        "I'll ", "I've ", "Let me ", "Here's what I ",
+        "I can help ", "I'd be happy to ", "Here you go!",
+        "Here you go,", "Here you go — ", "Here's ",
+    ]
 
     private init() {
         loadUserOverrides()
@@ -34,17 +46,7 @@ class PersonalityEngine {
         var result = text
 
         // Always strip pleasantries — regardless of focus mode
-        let pleasantries = [
-            "Sure!", "Sure thing!", "Of course!", "Absolutely!",
-            "Great question!", "Good question!", "Happy to help!",
-            "Certainly!", "No problem!", "You're welcome!",
-            "Sure,", "Of course,", "Absolutely,", "Certainly,",
-            "I'll ", "I've ", "Let me ", "Here's what I ",
-            "I can help ", "I'd be happy to ", "Here you go!",
-            "Here you go,", "Here you go — ", "Here's ",
-        ]
-
-        for phrase in pleasantries {
+        for phrase in Self.pleasantryPrefixes {
             if result.hasPrefix(phrase) {
                 result = String(result.dropFirst(phrase.count))
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -62,14 +64,19 @@ class PersonalityEngine {
     // MARK: - Mode → Config Mapping
 
     private func configFor(_ mode: FocusMode) -> PersonalityConfig {
+        let cacheKey = mode.displayName.lowercased()
+
         // Check user overrides first
-        if let override = userOverrides[mode.displayName.lowercased()] {
+        if let override = userOverrides[cacheKey] {
             return override.toConfig()
         }
 
+        if let cached = configCache[cacheKey] { return cached }
+
+        let config: PersonalityConfig
         switch mode {
         case .none:
-            return PersonalityConfig(
+            config = PersonalityConfig(
                 systemPromptModifier: "",
                 animationSpeed: 1.0,
                 opacity: 1.0,
@@ -79,7 +86,7 @@ class PersonalityEngine {
             )
 
         case .work:
-            return PersonalityConfig(
+            config = PersonalityConfig(
                 systemPromptModifier: """
                 The user is in Work Focus mode. Be extremely concise and direct. \
                 Skip all pleasantries, filler, and preamble. Lead with the action or answer. \
@@ -93,7 +100,7 @@ class PersonalityEngine {
             )
 
         case .reading:
-            return PersonalityConfig(
+            config = PersonalityConfig(
                 systemPromptModifier: """
                 The user is in Reading Focus mode. Minimize interruptions. \
                 Keep responses very brief unless the user asks for detail. \
@@ -107,7 +114,7 @@ class PersonalityEngine {
             )
 
         case .personalTime:
-            return PersonalityConfig(
+            config = PersonalityConfig(
                 systemPromptModifier: """
                 The user is relaxing. Be friendly and conversational. \
                 You can use casual language and a warm tone.
@@ -120,7 +127,7 @@ class PersonalityEngine {
             )
 
         case .mindfulness:
-            return PersonalityConfig(
+            config = PersonalityConfig(
                 systemPromptModifier: """
                 The user is in a mindfulness session. Be extremely brief and calm. \
                 One sentence responses max. Do not ask follow-up questions. \
@@ -134,7 +141,7 @@ class PersonalityEngine {
             )
 
         case .reduceInterruptions:
-            return PersonalityConfig(
+            config = PersonalityConfig(
                 systemPromptModifier: """
                 The user wants fewer interruptions. Be concise. \
                 Only surface important information. Skip optional details.
@@ -147,7 +154,7 @@ class PersonalityEngine {
             )
 
         case .sleep:
-            return PersonalityConfig(
+            config = PersonalityConfig(
                 systemPromptModifier: """
                 The user has Sleep Focus on. Ultra-brief responses only. \
                 Keep everything dim-friendly and minimal. One sentence max.
@@ -160,7 +167,7 @@ class PersonalityEngine {
             )
 
         case .doNotDisturb:
-            return PersonalityConfig(
+            config = PersonalityConfig(
                 systemPromptModifier: """
                 The user has Do Not Disturb enabled. Be concise and direct. \
                 No unnecessary elaboration.
@@ -173,7 +180,7 @@ class PersonalityEngine {
             )
 
         case .driving:
-            return PersonalityConfig(
+            config = PersonalityConfig(
                 systemPromptModifier: """
                 The user is driving. Safety first. Refuse any task that requires \
                 sustained visual attention. One-sentence responses only. \
@@ -187,7 +194,7 @@ class PersonalityEngine {
             )
 
         case .custom:
-            // Custom modes default to Work-like behavior
+            // Custom modes default to Work-like behavior — don't cache since displayName varies
             return PersonalityConfig(
                 systemPromptModifier: """
                 The user has a custom Focus mode active (\(mode.displayName)). \
@@ -200,6 +207,9 @@ class PersonalityEngine {
                 stripPleasantries: false
             )
         }
+
+        configCache[cacheKey] = config
+        return config
     }
 
     // MARK: - User Overrides

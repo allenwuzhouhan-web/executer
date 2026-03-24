@@ -2,7 +2,12 @@ import Foundation
 import AppKit
 
 /// Shared helpers used by LocalCommandRouter and its matchers.
+/// Regex patterns and CharacterSets are cached as static to avoid recompilation per call.
 extension LocalCommandRouter {
+
+    // Cached regex patterns — NSRegularExpression compilation is expensive (~0.5ms each)
+    private static let percentagePattern = try! NSRegularExpression(pattern: #"(\d+)\s*%?"#)
+    private static let timerPattern = try! NSRegularExpression(pattern: #"(\d+)\s*(minute|min|minutes|mins|second|seconds|sec|secs|hour|hours|hr|hrs)"#)
 
     func matches(_ words: Set<String>, required: Set<String>) -> Bool {
         return required.isSubset(of: words)
@@ -27,10 +32,10 @@ extension LocalCommandRouter {
 
     /// Extract a number from phrases like "set volume to 50" or "50%"
     func extractPercentage(from input: String) -> Int? {
-        let pattern = #"(\d+)\s*%?"#
-        if let match = input.range(of: pattern, options: .regularExpression) {
-            let numStr = input[match].trimmingCharacters(in: CharacterSet(charactersIn: "% "))
-            return Int(numStr)
+        let nsRange = NSRange(input.startIndex..., in: input)
+        if let match = Self.percentagePattern.firstMatch(in: input, range: nsRange),
+           let range = Range(match.range(at: 1), in: input) {
+            return Int(input[range])
         }
         // Also try "to [number]"
         if let toRange = input.range(of: "to ") {
@@ -45,11 +50,12 @@ extension LocalCommandRouter {
 
     /// Extract seconds from timer phrases like "5 minutes", "30 seconds", "1 hour"
     func extractTimerSeconds(from input: String) -> Int? {
-        let pattern = #"(\d+)\s*(minute|min|minutes|mins|second|seconds|sec|secs|hour|hours|hr|hrs)"#
-        guard let match = input.range(of: pattern, options: .regularExpression) else { return nil }
-        let matched = String(input[match])
-        let numStr = matched.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
-        guard let num = Int(numStr) else { return nil }
+        let nsRange = NSRange(input.startIndex..., in: input)
+        guard let result = Self.timerPattern.firstMatch(in: input, range: nsRange),
+              let numRange = Range(result.range(at: 1), in: input),
+              let unitRange = Range(result.range(at: 2), in: input) else { return nil }
+        guard let num = Int(input[numRange]) else { return nil }
+        let matched = String(input[unitRange])
 
         if matched.contains("hour") || matched.contains("hr") {
             return num * 3600

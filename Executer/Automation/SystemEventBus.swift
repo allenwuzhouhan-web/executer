@@ -20,6 +20,14 @@ class SystemEventBus {
     func start() {
         print("[EventBus] Starting system event monitoring")
 
+        // Remove existing observers to prevent duplicates on repeated start() calls
+        if !workspaceObservers.isEmpty {
+            for obs in workspaceObservers {
+                NSWorkspace.shared.notificationCenter.removeObserver(obs)
+            }
+            workspaceObservers.removeAll()
+        }
+
         // Capture initial state
         displayCount = NSScreen.screens.count
         currentWifi = getCurrentWifi()

@@ -1,5 +1,9 @@
 import Foundation
 
+// Cached JSON coders — avoid re-creating per API call (~0.3ms each)
+private let sharedJSONEncoder = JSONEncoder()
+private let sharedJSONDecoder = JSONDecoder()
+
 // MARK: - API Types (OpenAI-compatible format)
 
 struct ChatMessage: Codable {
@@ -135,8 +139,7 @@ class OpenAICompatibleService: LLMServiceProtocol {
             stream: false
         )
 
-        let encoder = JSONEncoder()
-        request.httpBody = try encoder.encode(body)
+        request.httpBody = try sharedJSONEncoder.encode(body)
 
         let (data, httpResponse) = try await URLSession.shared.data(for: request)
 
@@ -165,7 +168,7 @@ class OpenAICompatibleService: LLMServiceProtocol {
 
         let decoded: ChatCompletionResponse
         do {
-            decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
+            decoded = try sharedJSONDecoder.decode(ChatCompletionResponse.self, from: data)
         } catch {
             let preview = String(data: data, encoding: .utf8)?.prefix(200) ?? "unreadable"
             if preview.contains("<html") || preview.contains("<!DOCTYPE") {

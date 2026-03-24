@@ -5,6 +5,8 @@ class ToolRegistry {
     static let shared = ToolRegistry()
 
     private let tools: [String: ToolDefinition]
+    // Cached schema array — avoids 220+ AnyCodable allocations per API call (~500KB saved)
+    private let cachedSchemas: [[String: AnyCodable]]
 
     private init() {
         let allTools: [ToolDefinition] = [
@@ -209,15 +211,17 @@ class ToolRegistry {
         ]
 
         var dict: [String: ToolDefinition] = [:]
+        dict.reserveCapacity(allTools.count)
         for tool in allTools {
             dict[tool.name] = tool
         }
         self.tools = dict
+        self.cachedSchemas = dict.values.map { $0.toAPISchema() }
     }
 
     /// Returns all tool definitions formatted for the DeepSeek API (OpenAI function calling format).
     func toolDefinitions() -> [[String: AnyCodable]] {
-        tools.values.map { $0.toAPISchema() }
+        cachedSchemas
     }
 
     /// Execute a tool by name with the given JSON arguments string.

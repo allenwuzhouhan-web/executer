@@ -214,7 +214,7 @@ class MemoryManager {
         let words = text.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { $0.count > 2 && !Self.stopWords.contains($0) }
-        return Array(Set(words)).sorted()
+        return Array(Set(words))
     }
 
     // MARK: - Persistence

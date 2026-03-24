@@ -179,6 +179,7 @@ class VoiceService: ObservableObject {
     /// When speech is detected, spins up a short SFSpeech session to check for wake word.
     private func beginBackgroundVAD() {
         guard !isBackgroundActive else { return }
+        guard backgroundEngine == nil else { return }
 
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
@@ -199,6 +200,7 @@ class VoiceService: ObservableObject {
         } catch {
             print("[Voice] Failed to start background VAD: \(error)")
             inputNode.removeTap(onBus: 0)
+            backgroundEngine = nil
             return
         }
 

@@ -5,6 +5,7 @@ import Carbon
 class HotkeyManager {
     private var hotkeyRef: EventHotKeyRef?
     private var voiceHotkeyRef: EventHotKeyRef?
+    private var eventHandlerRef: EventHandlerRef?
 
     private var onToggle: (() -> Void)?
     private var onVoice: (() -> Void)?
@@ -39,7 +40,7 @@ class HotkeyManager {
         }
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(GetApplicationEventTarget(), handler, 1, &eventType, selfPtr, nil)
+        InstallEventHandler(GetApplicationEventTarget(), handler, 1, &eventType, selfPtr, &eventHandlerRef)
 
         // Register Cmd+Shift+Space
         // Space = keycode 49, Cmd = cmdKey, Shift = shiftKey
@@ -70,5 +71,6 @@ class HotkeyManager {
     deinit {
         if let ref = hotkeyRef { UnregisterEventHotKey(ref) }
         if let ref = voiceHotkeyRef { UnregisterEventHotKey(ref) }
+        if let ref = eventHandlerRef { RemoveEventHandler(ref) }
     }
 }

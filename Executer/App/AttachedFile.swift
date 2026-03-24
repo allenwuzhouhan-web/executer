@@ -37,12 +37,29 @@ struct AttachedFile: Identifiable {
         } else if ext == "docx" {
             content = extractDocx(url: url)
         } else {
-            // Plain text / code files
-            guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-                print("[AttachedFile] Failed to read: \(name)")
-                return nil
+            // Plain text / code files — stream-read only what we need instead of loading entire file
+            let maxChars = 30_000
+            if let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int,
+               fileSize > maxChars * 4 {
+                // Large file: read only first 30KB to avoid OOM on huge files
+                guard let handle = FileHandle(forReadingAtPath: url.path) else {
+                    print("[AttachedFile] Failed to open: \(name)")
+                    return nil
+                }
+                defer { handle.closeFile() }
+                let data = handle.readData(ofLength: maxChars * 4) // ~120KB max for UTF-8
+                guard let text = String(data: data, encoding: .utf8), !text.isEmpty else {
+                    print("[AttachedFile] Failed to decode: \(name)")
+                    return nil
+                }
+                content = String(text.prefix(maxChars)) + "\n\n[... truncated at \(maxChars) characters]"
+            } else {
+                guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+                    print("[AttachedFile] Failed to read: \(name)")
+                    return nil
+                }
+                content = text
             }
-            content = text
         }
 
         guard !content.isEmpty else {
@@ -50,7 +67,7 @@ struct AttachedFile: Identifiable {
             return nil
         }
 
-        // Truncate very large files
+        // Truncate very large files (for PDF/RTF/DOCX paths)
         let maxChars = 30_000
         let truncated = content.count > maxChars
             ? String(content.prefix(maxChars)) + "\n\n[... truncated at \(maxChars) characters]"

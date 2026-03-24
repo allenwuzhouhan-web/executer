@@ -71,6 +71,8 @@ class TaskScheduler {
     // MARK: - Timer Management
 
     private func scheduleTimer(for task: ScheduledTask) {
+        timers[task.id]?.invalidate()
+
         let interval = task.scheduledDate.timeIntervalSinceNow
         if interval <= 0 {
             // Task is overdue — fire immediately

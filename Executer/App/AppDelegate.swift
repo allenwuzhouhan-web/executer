@@ -31,12 +31,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         SystemEventBus.shared.start()
 
         print("[AppDelegate] setup complete")
-
-        // AUTO-TEST: Show the command bar 3 seconds after launch to verify it works
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            print("[AppDelegate] AUTO-TEST: Showing command bar now!")
-            self?.appState.showInputBar()
-        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

@@ -112,8 +112,12 @@ extension LocalCommandRouter {
             return "https://\(clean)"
         }
 
-        // Common site shortcuts
-        let shortcuts: [String: String] = [
+        // Common site shortcuts — static to avoid 40+ allocations per call
+        return Self.siteShortcuts[clean]
+    }
+
+    // Cached outside resolveURL to avoid re-creating 40-entry dict on every call
+    private static let siteShortcuts: [String: String] = [
             "youtube": "https://www.youtube.com",
             "google": "https://www.google.com",
             "gmail": "https://mail.google.com",
@@ -157,13 +161,6 @@ extension LocalCommandRouter {
             "ebay": "https://www.ebay.com",
             "apple music": "https://music.apple.com",
         ]
-
-        if let url = shortcuts[clean] {
-            return url
-        }
-
-        return nil
-    }
 
     // MARK: - Search Query Extraction
 

@@ -12,6 +12,9 @@ class ContextualAwareness {
     private var lastNudge: Date = .distantPast
     private let nudgeCooldown: TimeInterval = 600 // Don't nudge more than once per 10 minutes
 
+    // Cached EKEventStore — expensive to create (~5ms), reuse across calls
+    private lazy var eventStore = EKEventStore()
+
     /// Called once on app launch to mark the start of the work session.
     func markSessionStart() {
         sessionStart = Date()
@@ -93,8 +96,6 @@ class ContextualAwareness {
     }
 
     private func checkUpcomingMeeting() async -> String? {
-        let store = EKEventStore()
-
         // Check authorization without prompting
         let status = EKEventStore.authorizationStatus(for: .event)
         guard status == .fullAccess || status == .authorized else { return nil }
@@ -102,8 +103,8 @@ class ContextualAwareness {
         let now = Date()
         let soon = now.addingTimeInterval(15 * 60) // next 15 minutes
 
-        let predicate = store.predicateForEvents(withStart: now, end: soon, calendars: nil)
-        let events = store.events(matching: predicate)
+        let predicate = eventStore.predicateForEvents(withStart: now, end: soon, calendars: nil)
+        let events = eventStore.events(matching: predicate)
             .filter { !$0.isAllDay } // Skip all-day events
             .sorted { $0.startDate < $1.startDate }
 

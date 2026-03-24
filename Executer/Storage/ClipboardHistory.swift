@@ -15,6 +15,7 @@ class ClipboardHistoryManager {
     private var entries: [ClipboardEntry] = []
     private var timer: Timer?
     private var lastChangeCount: Int = 0
+    private var lastSaveTime: Date = .distantPast
     private let maxEntries = 500
 
     private let storageURL: URL = {
@@ -66,7 +67,9 @@ class ClipboardHistoryManager {
             entries = Array(entries.prefix(maxEntries))
         }
 
+        guard Date().timeIntervalSince(lastSaveTime) > 10 else { return }
         saveToDisk()
+        lastSaveTime = Date()
         print("[ClipboardHistory] Captured entry from \(sourceApp ?? "unknown") (\(text.prefix(50))...)")
     }
 

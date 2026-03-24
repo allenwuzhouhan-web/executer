@@ -4,6 +4,28 @@ import Foundation
 /// Extracted from AppState to isolate LLM execution concerns.
 class AgentLoop {
 
+    // Static: avoid re-creating these dictionaries on every iteration (was 3,300 allocations per loop)
+    private static let friendlyNames: [String: String] = [
+        "launch_app": "Opening app", "quit_app": "Closing app",
+        "click": "Clicking", "click_element": "Clicking",
+        "type_text": "Typing", "press_key": "Pressing key",
+        "hotkey": "Shortcut", "scroll": "Scrolling",
+        "move_cursor": "Moving cursor", "drag": "Dragging",
+        "capture_screen": "Looking", "ocr_image": "Reading screen",
+        "open_url": "Opening URL", "open_url_in_safari": "Opening Safari",
+        "search_web": "Searching", "dictionary_lookup": "Looking up",
+        "music_play_song": "Playing", "music_pause": "Pausing",
+    ]
+
+    // Static delay lookup — avoids O(n) .contains() on array per tool call
+    private static let toolDelays: [String: UInt64] = [
+        "launch_app": 1_000_000_000,
+        "click": 200_000_000, "click_element": 200_000_000,
+        "type_text": 200_000_000, "press_key": 200_000_000,
+        "hotkey": 200_000_000, "scroll": 200_000_000,
+        "move_cursor": 200_000_000,
+    ]
+
     /// Execute a command through the multi-turn agent loop.
     /// Returns a cancellable Task.
     func execute(
@@ -36,6 +58,9 @@ class AgentLoop {
                         ChatMessage(role: "user", content: fullCommand)
                     ]
                 }
+
+                // Pre-allocate to avoid repeated array reallocation during agent loop
+                messages.reserveCapacity(messages.count + maxIterations * 3)
 
                 var finalText = "Done."
 
@@ -72,18 +97,7 @@ class AgentLoop {
                             return
                         }
 
-                        let friendlyNames: [String: String] = [
-                            "launch_app": "Opening app", "quit_app": "Closing app",
-                            "click": "Clicking", "click_element": "Clicking",
-                            "type_text": "Typing", "press_key": "Pressing key",
-                            "hotkey": "Shortcut", "scroll": "Scrolling",
-                            "move_cursor": "Moving cursor", "drag": "Dragging",
-                            "capture_screen": "Looking", "ocr_image": "Reading screen",
-                            "open_url": "Opening URL", "open_url_in_safari": "Opening Safari",
-                            "search_web": "Searching", "dictionary_lookup": "Looking up",
-                            "music_play_song": "Playing", "music_pause": "Pausing",
-                        ]
-                        let displayName = friendlyNames[call.function.name] ?? call.function.name
+                        let displayName = Self.friendlyNames[call.function.name] ?? call.function.name
                         print("[Agent] Tool call: \(call.function.name)(\(call.function.arguments))")
                         await MainActor.run {
                             onStateChange(.executing(toolName: displayName, step: iteration + 1, total: maxIterations))
@@ -100,11 +114,9 @@ class AgentLoop {
                         }
                         print("[Agent] Result: \(result)")
 
-                        // Brief delay after UI interaction tools so the OS processes each action
-                        if call.function.name == "launch_app" {
-                            try await Task.sleep(nanoseconds: 1_000_000_000) // 1s for app launch
-                        } else if ["click", "click_element", "type_text", "press_key", "hotkey", "scroll", "move_cursor"].contains(call.function.name) {
-                            try await Task.sleep(nanoseconds: 200_000_000) // 200ms for UI actions
+                        // Brief delay after UI interaction tools — O(1) lookup instead of O(n) .contains()
+                        if let delay = Self.toolDelays[call.function.name] {
+                            try await Task.sleep(nanoseconds: delay)
                         }
 
                         messages.append(ChatMessage(

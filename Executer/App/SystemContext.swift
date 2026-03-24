@@ -15,12 +15,21 @@ struct SystemContext {
     let activeDisplayCount: Int
     let focusMode: String?
 
+    // Cached DateFormatter — creating one per call is expensive (~1ms each)
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a"
+        return f
+    }()
+
+    // Cached Documents folder listing — only refreshed every 60s
+    private static var cachedDocsFolders: [String] = []
+    private static var docsLastRefresh: Date = .distantPast
+
     static func current() -> SystemContext {
         let frontApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a"
-        let time = formatter.string(from: Date())
+        let time = timeFormatter.string(from: Date())
 
         let darkMode = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
 
@@ -126,17 +135,21 @@ struct SystemContext {
             lines.append("- Focus mode: \(focus)")
         }
 
-        // Include top-level Documents folder structure so the AI knows where files are
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let docsPath = "\(home)/Documents"
-        if let contents = try? FileManager.default.contentsOfDirectory(atPath: docsPath) {
-            let folders = contents
-                .filter { !$0.hasPrefix(".") }
-                .sorted()
-                .prefix(30)
-            if !folders.isEmpty {
-                lines.append("- Documents folders: \(folders.joined(separator: ", "))")
+        // Include top-level Documents folder structure — cached to avoid repeated disk I/O
+        if Date().timeIntervalSince(Self.docsLastRefresh) > 60 {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            let docsPath = "\(home)/Documents"
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: docsPath) {
+                Self.cachedDocsFolders = contents
+                    .filter { !$0.hasPrefix(".") }
+                    .sorted()
+                    .prefix(30)
+                    .map { String($0) }
             }
+            Self.docsLastRefresh = Date()
+        }
+        if !Self.cachedDocsFolders.isEmpty {
+            lines.append("- Documents folders: \(Self.cachedDocsFolders.joined(separator: ", "))")
         }
 
         return lines.joined(separator: "\n")

@@ -8,6 +8,8 @@ class NotchDetector {
     private var runLoopSource: CFRunLoopSource?
     private var globalMonitor: Any?
     private let onNotchClick: () -> Void
+    /// Cached screen height to avoid repeated NSScreen lookups in CGEvent callback
+    private var cachedScreenHeight: CGFloat = 982
 
     /// The click zone in CG coordinates (origin = top-left of main display).
     /// Defaults to auto-detected notch area; can be overridden by the user.
@@ -69,6 +71,7 @@ class NotchDetector {
 
     func start() {
         loadSavedZone()
+        cachedScreenHeight = NSScreen.main?.frame.height ?? 982
         print("[NotchDetector] Starting with click zone: \(clickZone)")
 
         // Strategy 1: CGEvent tap — intercepts clicks at the lowest level,
@@ -81,8 +84,7 @@ class NotchDetector {
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
             guard let self = self else { return }
             let nsPoint = NSEvent.mouseLocation
-            let screenHeight = NSScreen.main?.frame.height ?? 982
-            let cgPoint = CGPoint(x: nsPoint.x, y: screenHeight - nsPoint.y)
+            let cgPoint = CGPoint(x: nsPoint.x, y: self.cachedScreenHeight - nsPoint.y)
 
             if self.clickZone.contains(cgPoint) {
                 print("[NotchDetector] Global monitor: click in zone at CG(\(cgPoint.x), \(cgPoint.y))")
@@ -113,10 +115,10 @@ class NotchDetector {
                 if detector.clickZone.contains(location) {
                     // Check if the click is on our own window (input bar) — if so, ignore
                     // to prevent closing the bar when clicking on it
+                    let screenH = detector.cachedScreenHeight
                     let isOnOurWindow = NSApp.windows.contains { window in
                         guard window.isVisible, !window.ignoresMouseEvents else { return false }
                         // Convert CG coords to NS coords for comparison
-                        let screenH = NSScreen.main?.frame.height ?? 982
                         let nsPoint = NSPoint(x: location.x, y: screenH - location.y)
                         return window.frame.contains(nsPoint)
                     }
