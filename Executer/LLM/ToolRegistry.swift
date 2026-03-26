@@ -7,6 +7,7 @@ enum ToolCategory: String, CaseIterable {
     case skills, webContent, fileContent, fileSearch, memory
     case aliases, clipboardHistory, systemInfo, automation
     case cursor, keyboard, language, scheduler, weather
+    case academicResearch
 }
 
 /// Central registry of all tools the LLM can invoke.
@@ -411,6 +412,11 @@ class ToolRegistry {
     /// Get a tool by name.
     func tool(named name: String) -> ToolDefinition? {
         tools[name]
+    }
+
+    /// Execute a tool directly by name — used by SecurityGateway after permission checks.
+    func executeDirectly(toolName: String, arguments: String) async throws -> String {
+        try await execute(toolName: toolName, arguments: arguments)
     }
 
     /// Total number of registered tools.

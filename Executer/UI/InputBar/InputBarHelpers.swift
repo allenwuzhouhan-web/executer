@@ -70,6 +70,7 @@ extension InputBarView {
         case .result: return "checkmark.circle.fill"
         case .error: return "xmark.circle.fill"
         case .healthCard: return "heart.circle.fill"
+        case .newsBriefing: return "newspaper.fill"
         case .idle: return "sparkle"
         }
     }

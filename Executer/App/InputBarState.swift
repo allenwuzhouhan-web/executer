@@ -13,4 +13,5 @@ enum InputBarState: Equatable {
     case thoughtRecall(ThoughtRecall)
     case healthCard(message: String)
     case voiceListening(partial: String)
+    case newsBriefing(articles: [NewsBriefingArticle])
 }

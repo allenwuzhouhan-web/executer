@@ -26,6 +26,24 @@ struct SystemContext {
     private static var cachedDocsFolders: [String] = []
     private static var docsLastRefresh: Date = .distantPast
 
+    /// Synchronously fetch the current battery percentage (used by DirectResponseHandler).
+    static func fetchBatterySync() -> Int? {
+        guard let result = try? ShellRunner.run("pmset -g batt", timeout: 5) else { return nil }
+        guard let range = result.output.range(of: #"\d+%"#, options: .regularExpression) else { return nil }
+        let pctStr = String(result.output[range]).replacingOccurrences(of: "%", with: "")
+        return Int(pctStr)
+    }
+
+    /// Synchronously fetch the current Wi-Fi network name (used by DirectResponseHandler).
+    static func fetchWifiSync() -> String? {
+        guard let result = try? ShellRunner.run("networksetup -getairportnetwork en0", timeout: 5) else { return nil }
+        if result.output.contains("Current Wi-Fi Network:") {
+            return result.output.replacingOccurrences(of: "Current Wi-Fi Network: ", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
     static func current() -> SystemContext {
         let frontApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
 
