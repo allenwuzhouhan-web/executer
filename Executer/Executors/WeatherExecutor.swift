@@ -137,6 +137,10 @@ enum WeatherKeyStore {
         _ = KeychainHelper.save(key: keychainKey, data: data)
     }
 
+    static func delete() {
+        KeychainHelper.delete(key: keychainKey)
+    }
+
     static func hasKey() -> Bool {
         getKey() != nil
     }
