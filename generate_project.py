@@ -20,6 +20,7 @@ swift_files = [
     ("App/HotkeyManager.swift", "App"),
     ("App/InputBarState.swift", "App"),
     ("App/SystemContext.swift", "App"),
+    ("App/NewsBriefingService.swift", "App"),
     # Automation
     ("Automation/AutomationExecutor.swift", "Automation"),
     ("Automation/AutomationRule.swift", "Automation"),
@@ -49,6 +50,8 @@ swift_files = [
     ("Executors/WebContentExecutor.swift", "Executors"),
     ("Executors/WebExecutor.swift", "Executors"),
     ("Executors/WindowExecutor.swift", "Executors"),
+    ("Executors/NewsExecutor.swift", "Executors"),
+    ("Executors/SemanticScholarExecutor.swift", "Executors"),
     # FocusPersonality
     ("FocusPersonality/FocusStateService.swift", "FocusPersonality"),
     ("FocusPersonality/HumorMode.swift", "FocusPersonality"),
@@ -84,6 +87,7 @@ swift_files = [
     ("Notch/ScreenGeometry.swift", "Notch"),
     # Permissions
     ("Permissions/PermissionManager.swift", "Permissions"),
+    ("Permissions/PermissionSetupView.swift", "Permissions"),
     # Skills
     ("Skills/SkillExecutor.swift", "Skills"),
     ("Skills/SkillsManager.swift", "Skills"),
@@ -130,6 +134,22 @@ swift_files = [
     ("Voice/VoiceIntegration.swift", "Voice"),
     ("Voice/VoiceService.swift", "Voice"),
     ("Voice/VoiceState.swift", "Voice"),
+    # Security
+    ("Security/AuditLog.swift", "Security"),
+    ("Security/InputSanitizer.swift", "Security"),
+    ("Security/SecureStorage.swift", "Security"),
+    ("Security/SecurityGateway.swift", "Security"),
+    ("Security/ShellSanitizer.swift", "Security"),
+    ("Security/ToolSafetyClassifier.swift", "Security"),
+    # WeChat
+    ("WeChat/MessageParser.swift", "WeChat"),
+    ("WeChat/MessageRouter.swift", "WeChat"),
+    ("WeChat/WeChatAccessibility.swift", "WeChat"),
+    ("WeChat/WeChatConfirmCard.swift", "WeChat"),
+    ("WeChat/WeChatExecutor.swift", "WeChat"),
+    ("WeChat/WeChatMCPClient.swift", "WeChat"),
+    ("WeChat/WeChatSentLog.swift", "WeChat"),
+    ("WeChat/WeChatService.swift", "WeChat"),
 ]
 
 # Generate IDs
@@ -171,6 +191,8 @@ groups = {
     "FocusPersonality": gen_id("group_FocusPersonality"),
     "Handoff": gen_id("group_Handoff"),
     "Voice": gen_id("group_Voice"),
+    "Security": gen_id("group_Security"),
+    "WeChat": gen_id("group_WeChat"),
     "Products": gen_id("group_Products"),
     "Frameworks": gen_id("group_Frameworks"),
     "root": gen_id("group_root"),
@@ -307,6 +329,8 @@ main_children = [
     (groups["FocusPersonality"], "FocusPersonality"),
     (groups["Handoff"], "Handoff"),
     (groups["Voice"], "Voice"),
+    (groups["Security"], "Security"),
+    (groups["WeChat"], "WeChat"),
     (groups["Resources"], "Resources"),
     (INFO_PLIST_REF, "Info.plist"),
     (ENTITLEMENTS_REF, "Executer.entitlements"),
@@ -328,7 +352,7 @@ for path, group in swift_files:
         group_files[group] = []
     group_files[group].append((file_refs[path], os.path.basename(path)))
 
-simple_groups = ["App", "Automation", "Notch", "Executors", "Skills", "Memory", "Permissions", "Storage", "Utilities", "ThoughtContinuity", "FocusPersonality", "Handoff", "Voice"]
+simple_groups = ["App", "Automation", "Notch", "Executors", "Skills", "Memory", "Permissions", "Storage", "Utilities", "ThoughtContinuity", "FocusPersonality", "Handoff", "Voice", "Security", "WeChat"]
 for g in simple_groups:
     lines.append(f'\t\t{groups[g]} /* {g} */ = {{')
     lines.append('\t\t\tisa = PBXGroup;')
