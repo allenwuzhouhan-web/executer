@@ -7,7 +7,7 @@ enum ToolCategory: String, CaseIterable {
     case skills, webContent, fileContent, fileSearch, memory
     case aliases, clipboardHistory, systemInfo, automation
     case cursor, keyboard, language, scheduler, weather
-    case academicResearch
+    case messaging, academicResearch
 }
 
 /// Central registry of all tools the LLM can invoke.
@@ -222,6 +222,23 @@ class ToolRegistry {
             DictionaryLookupTool(),
             ThesaurusLookupTool(),
             SpellCheckTool(),
+
+            // Messaging (WeChat + iMessage)
+            SendMessageTool(),
+            SendWeChatMessageTool(),
+            FetchWeChatMessagesTool(),
+            ReadMessagesTool(),
+            SetContactPlatformTool(),
+            WeChatSentHistoryTool(),
+
+            // News
+            FetchNewsTool(),
+            SetNewsKeyTool(),
+
+            // Academic Research
+            SemanticScholarSearchTool(),
+            GetPaperDetailsTool(),
+            SetSemanticScholarKeyTool(),
         ]
 
         var dict: [String: ToolDefinition] = [:]
@@ -315,6 +332,15 @@ class ToolRegistry {
             "type_text": .keyboard, "press_key": .keyboard, "hotkey": .keyboard, "select_all_text": .keyboard,
             // Language
             "dictionary_lookup": .language, "thesaurus_lookup": .language, "spell_check": .language,
+            // Messaging
+            "send_message": .messaging, "send_wechat_message": .messaging,
+            "fetch_wechat_messages": .messaging, "read_messages": .messaging,
+            "set_contact_platform": .messaging, "wechat_sent_history": .messaging,
+            // News
+            "fetch_news": .academicResearch, "set_news_key": .academicResearch,
+            // Academic Research
+            "semantic_scholar_search": .academicResearch, "get_paper_details": .academicResearch,
+            "set_semantic_scholar_key": .academicResearch,
         ]
         self.toolCategories = categoryMap
 
@@ -372,6 +398,9 @@ class ToolRegistry {
         (["alias", "shortcut"], [.aliases]),
         (["system info", "about this mac"], [.systemInfo]),
         (["notification", "announce", "say ", "speak"], [.notifications]),
+        (["tell", "text", "message", "msg", "send message", "wechat", "imessage"], [.messaging]),
+        (["news", "headlines", "article"], [.academicResearch]),
+        (["paper", "research paper", "scholar", "academic", "semantic scholar"], [.academicResearch]),
     ]
 
     // Always include these categories — universally useful

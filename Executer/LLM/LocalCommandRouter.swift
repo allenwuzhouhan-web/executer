@@ -34,6 +34,7 @@ class LocalCommandRouter {
         if let result = await tryKeyboardCommand(input) { return result }
         if let result = await tryDictionaryCommand(input) { return result }
         if let result = await tryTranslation(input) { return result }
+        if let result = await tryMessagingCommand(command) { return result }
 
         // --- Keyword-based matching ---
 
@@ -192,5 +193,21 @@ class LocalCommandRouter {
 
         // Not a simple command — fall through to LLM
         return nil
+    }
+
+    // MARK: - Messaging
+
+    /// Handles "tell mom hi", "text Allen hey", "给妈妈发晚上好" etc.
+    /// Uses MessageParser for extraction and SendMessageTool for delivery.
+    private func tryMessagingCommand(_ command: String) async -> String? {
+        guard let parsed = MessageParser.parse(command) else { return nil }
+
+        let contactJSON = parsed.contact.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let messageJSON = parsed.message.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+
+        let args = "{\"contact\": \"\(contactJSON)\", \"message\": \"\(messageJSON)\", \"platform\": \"auto\"}"
+        return try? await SendMessageTool().execute(arguments: args)
     }
 }
