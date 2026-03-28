@@ -1,7 +1,9 @@
 import Foundation
 
+// MARK: - User Action
+
 /// Represents a single user action observed via Accessibility APIs.
-struct UserAction: Codable {
+struct UserAction: Codable, Hashable, Sendable {
     let type: ActionType
     let appName: String
     let elementRole: String
@@ -9,7 +11,7 @@ struct UserAction: Codable {
     let elementValue: String
     let timestamp: Date
 
-    enum ActionType: String, Codable {
+    enum ActionType: String, Codable, Hashable, Sendable {
         case focus       // User focused on an element
         case click       // User clicked a button/menu item
         case textEdit    // User typed or changed text
@@ -17,31 +19,46 @@ struct UserAction: Codable {
         case menuSelect  // Menu item selected
         case tabSwitch   // Tab changed
     }
-}
 
-/// A sequence of actions that forms a workflow pattern.
-struct WorkflowPattern: Codable, Identifiable {
-    let id: UUID
-    let appName: String
-    let name: String            // Auto-generated: "Create New Slide in Keynote"
-    let actions: [PatternAction]
-    var frequency: Int          // How many times this pattern was observed
-    let firstSeen: Date
-    var lastSeen: Date
-
-    struct PatternAction: Codable {
-        let type: UserAction.ActionType
-        let elementRole: String
-        let elementTitle: String
-        let elementValue: String  // Template: actual value or "" for variable content
+    /// Action signature for pattern matching (ignores variable content)
+    var signature: String {
+        "\(type.rawValue):\(elementRole):\(elementTitle)"
     }
 }
 
+// MARK: - Workflow Pattern
+
+/// A sequence of actions that forms a recurring workflow pattern.
+struct WorkflowPattern: Codable, Identifiable, Equatable, Sendable {
+    let id: UUID
+    let appName: String
+    let name: String
+    let actions: [PatternAction]
+    var frequency: Int
+    let firstSeen: Date
+    var lastSeen: Date
+
+    struct PatternAction: Codable, Hashable, Sendable {
+        let type: UserAction.ActionType
+        let elementRole: String
+        let elementTitle: String
+        let elementValue: String
+    }
+
+    static func == (lhs: WorkflowPattern, rhs: WorkflowPattern) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+// MARK: - Legacy Profile (for JSON migration only)
+
 /// Per-app collection of observed actions and extracted patterns.
+/// Used during migration from JSON files to SQLite. After migration,
+/// data lives in LearningDatabase tables instead.
 struct AppLearningProfile: Codable {
     let appName: String
-    var recentActions: [UserAction]       // Rolling buffer, max 500
-    var patterns: [WorkflowPattern]       // Extracted recurring workflows, max 20
+    var recentActions: [UserAction]
+    var patterns: [WorkflowPattern]
     var totalActionsObserved: Int
     var lastUpdated: Date
 
@@ -50,7 +67,7 @@ struct AppLearningProfile: Codable {
         guard !patterns.isEmpty else { return "" }
 
         var lines = ["## Learned Patterns for \(appName) (from observing the user):"]
-        let topPatterns = patterns.sorted { $0.frequency > $1.frequency }.prefix(10)
+        let topPatterns = patterns.sorted { $0.frequency > $1.frequency }.prefix(LearningConstants.maxPatternsInPrompt)
 
         for pattern in topPatterns {
             lines.append("### \(pattern.name) (observed \(pattern.frequency)x)")

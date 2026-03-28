@@ -249,6 +249,20 @@ class ToolRegistry {
             ReadAppTextTool(),
             GetLearnedPatternsTool(),
             ListLearnedAppsTool(),
+            GetCurrentSessionTool(),
+            GetTodayContextTool(),
+            RecallWorkContextTool(),
+            GetDailySummaryTool(),
+            GetUserGoalsTool(),
+            GetCurrentIntentTool(),
+
+            // Phase 4-10: Prediction, Templates, Autonomy
+            GetPredictionsTool(),
+            GetRoutinesTool(),
+            ListWorkflowTemplatesTool(),
+            GetAutonomyStatusTool(),
+            GetDayPlanTool(),
+            CompilePatternTool(),
         ]
 
         var dict: [String: ToolDefinition] = [:]
@@ -355,6 +369,16 @@ class ToolRegistry {
             // Screen Reading & Learning
             "read_screen": .screenshot, "read_app_text": .screenshot,
             "get_learned_patterns": .memory, "list_learned_apps": .memory,
+            "get_current_session": .memory, "get_today_context": .memory,
+            "recall_work_context": .memory, "get_daily_summary": .memory,
+            "get_user_goals": .memory,
+            "get_current_intent": .memory,
+            "get_predictions": .memory,
+            "get_routines": .memory,
+            "list_workflow_templates": .memory,
+            "get_autonomy_status": .memory,
+            "get_day_plan": .memory,
+            "compile_pattern_to_template": .memory,
             "set_semantic_scholar_key": .academicResearch,
         ]
         self.toolCategories = categoryMap

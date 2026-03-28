@@ -1,0 +1,221 @@
+import Foundation
+import AppKit
+
+/// Orchestrates all learning: observes user actions, extracts patterns,
+/// and provides LLM-injectable context.
+/// Phase 0 refactoring: delegates storage to LearningDatabase (SQLite),
+/// pattern extraction to PatternLearner, and keeps only orchestration logic.
+class LearningManager {
+    static let shared = LearningManager()
+
+    private var actionBuffer: ContiguousArray<UserAction> = []
+    private let bufferLock = NSLock()
+    private var flushTimer: Timer?
+    private var screenSampleTimer: Timer?
+    private var lastExtraction: Date = .distantPast
+
+    var isEnabled: Bool {
+        get { LearningConfig.shared.isLearningEnabled }
+        set { LearningConfig.shared.isLearningEnabled = newValue }
+    }
+
+    private init() {
+        // Run one-time migration from JSON to SQLite
+        LearningMigration.migrateIfNeeded()
+        // Prune old observations
+        LearningDatabase.shared.pruneObservations(olderThanDays: LearningConstants.observationRetentionDays)
+    }
+
+    // MARK: - Start / Stop
+
+    func start() {
+        guard isEnabled else { return }
+
+        AppObserver.shared.onAction = { [weak self] action in
+            self?.recordAction(action)
+        }
+        AppObserver.shared.start()
+
+        // Periodic flush timer
+        flushTimer = Timer.scheduledTimer(withTimeInterval: LearningConstants.bufferFlushInterval, repeats: true) { [weak self] _ in
+            self?.flushBuffer()
+        }
+
+        // Start summary scheduler
+        SummaryScheduler.shared.start()
+
+        // Screen sampling timer (60s, reads visible text for attention extractors)
+        if LearningConfig.shared.isScreenSamplingEnabled {
+            screenSampleTimer = Timer.scheduledTimer(withTimeInterval: LearningConfig.shared.screenSamplingInterval, repeats: true) { [weak self] _ in
+                self?.sampleScreen()
+            }
+        }
+
+        print("[Learning] Started — observing user workflows")
+    }
+
+    func stop() {
+        AppObserver.shared.stop()
+        flushTimer?.invalidate()
+        flushTimer = nil
+        SummaryScheduler.shared.stop()
+        screenSampleTimer?.invalidate()
+        screenSampleTimer = nil
+        flushBuffer()
+        print("[Learning] Stopped")
+    }
+
+    // MARK: - Action Recording
+
+    private func recordAction(_ action: UserAction) {
+        bufferLock.lock()
+        actionBuffer.append(action)
+        let shouldFlush = actionBuffer.count >= LearningConstants.bufferFlushThreshold
+        bufferLock.unlock()
+
+        if shouldFlush {
+            flushBuffer()
+        }
+    }
+
+    private func flushBuffer() {
+        bufferLock.lock()
+        guard !actionBuffer.isEmpty else {
+            bufferLock.unlock()
+            return
+        }
+        let actions = Array(actionBuffer)
+        actionBuffer.removeAll(keepingCapacity: true)
+        bufferLock.unlock()
+
+        // Batch insert into SQLite
+        LearningDatabase.shared.insertObservations(actions)
+
+        // Periodically extract patterns
+        if Date().timeIntervalSince(lastExtraction) > LearningConstants.patternExtractionInterval {
+            extractPatterns(forActions: actions)
+            lastExtraction = Date()
+        }
+
+        // Phase 2: Route through attention extractors
+        let groupedByApp = Dictionary(grouping: actions, by: \.appName)
+        for (appName, appActions) in groupedByApp {
+            let observations = AttentionRouter.route(actions: appActions, appName: appName)
+            if !observations.isEmpty {
+                AttentionTracker.shared.record(observations)
+                SessionDetector.shared.ingest(observations)
+            }
+        }
+
+        // Phase 3: Process completed sessions through GoalTracker
+        for session in SessionDetector.shared.completedSessions {
+            GoalTracker.shared.processSession(session)
+        }
+    }
+
+    // MARK: - Pattern Extraction
+
+    private func extractPatterns(forActions actions: [UserAction]) {
+        // Group by app and extract patterns
+        let appNames = Set(actions.map(\.appName))
+        for appName in appNames {
+            let recentActions = LearningDatabase.shared.recentObservations(forApp: appName, limit: LearningConstants.maxRecentObservations)
+            let existingPatterns = LearningDatabase.shared.topPatterns(forApp: appName, limit: LearningConstants.maxPatternsPerApp)
+
+            // Build a temporary profile for PatternLearner (it still uses the old interface)
+            var profile = AppLearningProfile(
+                appName: appName,
+                recentActions: recentActions,
+                patterns: existingPatterns,
+                totalActionsObserved: recentActions.count,
+                lastUpdated: Date()
+            )
+
+            PatternLearner.shared.extractPatterns(from: &profile)
+
+            // Save updated patterns back to SQLite
+            LearningDatabase.shared.replacePatterns(forApp: appName, patterns: profile.patterns)
+        }
+        print("[Learning] Extracted patterns for \(appNames.count) apps")
+    }
+
+    // MARK: - Screen Sampling
+
+    private func sampleScreen() {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              let name = app.localizedName,
+              app.bundleIdentifier != "com.allenwu.executer" else { return }
+
+        let texts = ScreenReader.readVisibleText(pid: app.processIdentifier)
+        guard !texts.isEmpty else { return }
+
+        // Route screen text through attention extractors (text is transient, never stored)
+        let observations = AttentionRouter.route(actions: [], appName: name, screenText: texts)
+        if !observations.isEmpty {
+            AttentionTracker.shared.record(observations)
+            SessionDetector.shared.ingest(observations)
+        }
+    }
+
+    // MARK: - LLM Context Injection
+
+    /// Returns learned patterns for the specified app, formatted for LLM prompt injection.
+    func promptSection(forApp appName: String) -> String {
+        let patterns = LearningDatabase.shared.topPatterns(forApp: appName, limit: LearningConstants.maxPatternsInPrompt)
+        guard !patterns.isEmpty else { return "" }
+
+        var lines = ["## Learned Patterns for \(appName) (from observing the user):"]
+        for pattern in patterns {
+            lines.append("### \(pattern.name) (observed \(pattern.frequency)x)")
+            for (i, action) in pattern.actions.enumerated() {
+                var step = "  \(i + 1). \(action.type.rawValue)"
+                if !action.elementTitle.isEmpty { step += " → \"\(action.elementTitle)\"" }
+                if !action.elementRole.isEmpty { step += " [\(action.elementRole)]" }
+                if !action.elementValue.isEmpty { step += " = \"\(action.elementValue.prefix(80))\"" }
+                lines.append(step)
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Returns learned patterns for the frontmost app.
+    func promptSectionForFrontmostApp() -> String {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              let name = app.localizedName else { return "" }
+        return promptSection(forApp: name)
+    }
+
+    /// Returns a summary of all learned apps and their pattern counts.
+    func overallSummary() -> String {
+        let apps = LearningDatabase.shared.allAppNames()
+        guard !apps.isEmpty else { return "No app patterns learned yet." }
+
+        var lines = ["Learned app patterns:"]
+        for (name, patternCount, obsCount) in apps {
+            lines.append("  \(name): \(patternCount) patterns, \(obsCount) actions observed")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Returns a full UI tree reading of the frontmost app (on-demand, not cached).
+    func readCurrentScreen() -> String? {
+        return ScreenReader.summarizeFrontmostApp()
+    }
+
+    // MARK: - Data Management
+
+    /// Clears all learned data for a specific app.
+    func clearApp(_ appName: String) {
+        LearningDatabase.shared.deleteApp(appName)
+    }
+
+    /// Clears all learned data.
+    func clearAll() {
+        LearningDatabase.shared.deleteAllData()
+    }
+
+    /// List of all apps with learned profiles.
+    var learnedApps: [(name: String, patternCount: Int, actionCount: Int)] {
+        LearningDatabase.shared.allAppNames().map { ($0.name, $0.patternCount, $0.observationCount) }
+    }
+}

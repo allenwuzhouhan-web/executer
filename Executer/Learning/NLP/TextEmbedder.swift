@@ -1,0 +1,147 @@
+import Foundation
+import NaturalLanguage
+import Accelerate
+
+/// On-device text embedding using NLEmbedding (runs on Neural Engine).
+/// Uses Accelerate framework for fast cosine similarity on AMX coprocessor.
+enum TextEmbedder {
+
+    /// Dimension of the word embedding vectors.
+    static let embeddingDimension = 512
+
+    // MARK: - Word Embedding
+
+    /// Get the embedding vector for a single word.
+    /// Returns nil if the word is not in the vocabulary.
+    static func wordVector(_ word: String, language: NLLanguage = .english) -> [Double]? {
+        guard let embedding = NLEmbedding.wordEmbedding(for: language) else { return nil }
+        return embedding.vector(for: word)
+    }
+
+    /// Get a sentence-level embedding by averaging word vectors.
+    /// This is a simple but effective approach for semantic similarity.
+    static func sentenceVector(_ text: String, language: NLLanguage = .english) -> [Double]? {
+        guard let embedding = NLEmbedding.wordEmbedding(for: language) else { return nil }
+
+        // Tokenize and get vectors for each word
+        let words = text.lowercased().split(separator: " ").map(String.init)
+        var vectors: [[Double]] = []
+
+        for word in words {
+            if let vector = embedding.vector(for: word) {
+                vectors.append(vector)
+            }
+        }
+
+        guard !vectors.isEmpty else { return nil }
+
+        // Average all word vectors
+        let dim = vectors[0].count
+        var result = [Double](repeating: 0, count: dim)
+
+        for vector in vectors {
+            vDSP_vaddD(result, 1, vector, 1, &result, 1, vDSP_Length(dim))
+        }
+
+        var count = Double(vectors.count)
+        vDSP_vsdivD(result, 1, &count, &result, 1, vDSP_Length(dim))
+
+        return result
+    }
+
+    // MARK: - Similarity
+
+    /// Cosine similarity between two vectors using Accelerate.
+    /// Returns a value between -1.0 (opposite) and 1.0 (identical).
+    static func cosineSimilarity(_ a: [Double], _ b: [Double]) -> Double {
+        guard a.count == b.count, !a.isEmpty else { return 0.0 }
+
+        let n = vDSP_Length(a.count)
+
+        var dotProduct: Double = 0
+        vDSP_dotprD(a, 1, b, 1, &dotProduct, n)
+
+        var normA: Double = 0
+        vDSP_svesqD(a, 1, &normA, n)
+
+        var normB: Double = 0
+        vDSP_svesqD(b, 1, &normB, n)
+
+        let denominator = sqrt(normA) * sqrt(normB)
+        guard denominator > 0 else { return 0.0 }
+
+        return dotProduct / denominator
+    }
+
+    /// Cosine similarity between two Float vectors (for SQLite BLOB storage).
+    static func cosineSimilarityFloat(_ a: [Float], _ b: [Float]) -> Float {
+        guard a.count == b.count, !a.isEmpty else { return 0.0 }
+
+        let n = vDSP_Length(a.count)
+
+        var dotProduct: Float = 0
+        vDSP_dotpr(a, 1, b, 1, &dotProduct, n)
+
+        var normA: Float = 0
+        vDSP_svesq(a, 1, &normA, n)
+
+        var normB: Float = 0
+        vDSP_svesq(b, 1, &normB, n)
+
+        let denominator = sqrtf(normA) * sqrtf(normB)
+        guard denominator > 0 else { return 0.0 }
+
+        return dotProduct / denominator
+    }
+
+    // MARK: - Topic Similarity
+
+    /// Compute semantic similarity between two text strings.
+    /// Returns 0.0 to 1.0 (higher = more similar).
+    static func textSimilarity(_ textA: String, _ textB: String, language: NLLanguage = .english) -> Double {
+        guard let vecA = sentenceVector(textA, language: language),
+              let vecB = sentenceVector(textB, language: language) else {
+            // Fallback to keyword overlap if embeddings unavailable
+            return keywordOverlap(textA, textB)
+        }
+
+        // Map cosine similarity from [-1, 1] to [0, 1]
+        return (cosineSimilarity(vecA, vecB) + 1.0) / 2.0
+    }
+
+    /// Jaccard similarity of keyword sets (fallback when embeddings unavailable).
+    private static func keywordOverlap(_ a: String, _ b: String) -> Double {
+        let wordsA = Set(a.lowercased().split(separator: " ").map(String.init))
+        let wordsB = Set(b.lowercased().split(separator: " ").map(String.init))
+        let intersection = wordsA.intersection(wordsB)
+        let union = wordsA.union(wordsB)
+        guard !union.isEmpty else { return 0 }
+        return Double(intersection.count) / Double(union.count)
+    }
+
+    // MARK: - Serialization Helpers
+
+    /// Convert a Double vector to Float array for compact BLOB storage.
+    static func toFloatArray(_ doubles: [Double]) -> [Float] {
+        var result = [Float](repeating: 0, count: doubles.count)
+        vDSP_vdpsp(doubles, 1, &result, 1, vDSP_Length(doubles.count))
+        return result
+    }
+
+    /// Convert a Float array back to Double vector.
+    static func toDoubleArray(_ floats: [Float]) -> [Double] {
+        var result = [Double](repeating: 0, count: floats.count)
+        vDSP_vspdp(floats, 1, &result, 1, vDSP_Length(floats.count))
+        return result
+    }
+
+    /// Serialize Float array to Data for SQLite BLOB storage.
+    static func serialize(_ vector: [Float]) -> Data {
+        vector.withUnsafeBufferPointer { Data(buffer: $0) }
+    }
+
+    /// Deserialize Data back to Float array.
+    static func deserialize(_ data: Data) -> [Float] {
+        data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+    }
+}

@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 // MARK: - Provider Enum
 
@@ -323,7 +324,8 @@ class LLMServiceManager: ObservableObject {
         let history = recentHistorySection()
         let humor = HumorMode.shared.isEnabled ? humorPromptSection : ""
         let language = LanguageManager.shared.systemPromptLanguageInstruction()
-        let learned = LearningManager.shared.promptSectionForFrontmostApp()
+        let frontmostApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
+        let learned = LearningContextProvider.fullContextSection(forApp: frontmostApp, query: query)
         let learnedSection = learned.isEmpty ? "" : "\n\n\(learned)"
         return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\n\n\(context.systemPromptAddendum)\(skills)\(memory)\(history)"
     }
