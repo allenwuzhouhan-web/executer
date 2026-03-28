@@ -11,6 +11,8 @@ struct SettingsView: View {
                 .tabItem { Label("Permissions", systemImage: "lock.shield") }
             VoiceSettingsTab()
                 .tabItem { Label("Voice", systemImage: "mic.circle") }
+            LanguageSettingsTab()
+                .tabItem { Label("Language", systemImage: "globe") }
             NotchSettingsTab()
                 .environmentObject(appState)
                 .tabItem { Label("Notch", systemImage: "rectangle.topthird.inset.filled") }

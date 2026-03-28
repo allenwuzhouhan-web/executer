@@ -223,12 +223,13 @@ class ToolRegistry {
             ThesaurusLookupTool(),
             SpellCheckTool(),
 
-            // Messaging (WeChat + iMessage)
+            // Messaging (WeChat, iMessage, WhatsApp)
             SendMessageTool(),
             SendWeChatMessageTool(),
+            SendIMessageTool(),
+            SendWhatsAppMessageTool(),
             FetchWeChatMessagesTool(),
             ReadMessagesTool(),
-            SetContactPlatformTool(),
             WeChatSentHistoryTool(),
 
             // News
@@ -239,6 +240,9 @@ class ToolRegistry {
             SemanticScholarSearchTool(),
             GetPaperDetailsTool(),
             SetSemanticScholarKeyTool(),
+
+            // Instant Search (DuckDuckGo)
+            InstantSearchTool(),
         ]
 
         var dict: [String: ToolDefinition] = [:]
@@ -334,12 +338,14 @@ class ToolRegistry {
             "dictionary_lookup": .language, "thesaurus_lookup": .language, "spell_check": .language,
             // Messaging
             "send_message": .messaging, "send_wechat_message": .messaging,
+            "send_imessage": .messaging, "send_whatsapp_message": .messaging,
             "fetch_wechat_messages": .messaging, "read_messages": .messaging,
-            "set_contact_platform": .messaging, "wechat_sent_history": .messaging,
+            "wechat_sent_history": .messaging,
             // News
             "fetch_news": .academicResearch, "set_news_key": .academicResearch,
             // Academic Research
             "semantic_scholar_search": .academicResearch, "get_paper_details": .academicResearch,
+            "instant_search": .webContent,
             "set_semantic_scholar_key": .academicResearch,
         ]
         self.toolCategories = categoryMap
@@ -398,7 +404,7 @@ class ToolRegistry {
         (["alias", "shortcut"], [.aliases]),
         (["system info", "about this mac"], [.systemInfo]),
         (["notification", "announce", "say ", "speak"], [.notifications]),
-        (["tell", "text", "message", "msg", "send message", "wechat", "imessage"], [.messaging]),
+        (["tell", "text", "message", "msg", "send message", "wechat"], [.messaging]),
         (["news", "headlines", "article"], [.academicResearch]),
         (["paper", "research paper", "scholar", "academic", "semantic scholar"], [.academicResearch]),
     ]
@@ -446,6 +452,12 @@ class ToolRegistry {
     /// Execute a tool directly by name — used by SecurityGateway after permission checks.
     func executeDirectly(toolName: String, arguments: String) async throws -> String {
         try await execute(toolName: toolName, arguments: arguments)
+    }
+
+    /// Returns the API schema for a single tool, or nil if not found.
+    func singleToolSchema(_ name: String) -> [[String: AnyCodable]]? {
+        guard let tool = tools[name] else { return nil }
+        return [tool.toAPISchema()]
     }
 
     /// Total number of registered tools.

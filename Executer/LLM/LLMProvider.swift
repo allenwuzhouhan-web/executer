@@ -322,7 +322,8 @@ class LLMServiceManager: ObservableObject {
         let memory = MemoryManager.shared.promptSection(query: query)
         let history = recentHistorySection()
         let humor = HumorMode.shared.isEnabled ? humorPromptSection : ""
-        return "\(cachedBasePrompt)\(personality)\(humor)\n\n\(context.systemPromptAddendum)\(skills)\(memory)\(history)"
+        let language = LanguageManager.shared.systemPromptLanguageInstruction()
+        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\n\n\(context.systemPromptAddendum)\(skills)\(memory)\(history)"
     }
 
     /// Provider-specific agentic execution guidance. DeepSeek needs explicit

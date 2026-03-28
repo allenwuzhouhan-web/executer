@@ -165,6 +165,21 @@ struct AIModelSettingsTab: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Messaging") {
+                Picker("Default Platform", selection: Binding(
+                    get: { MessagingManager.shared.preferredPlatform },
+                    set: { MessagingManager.shared.preferredPlatform = $0 }
+                )) {
+                    ForEach(MessagingPlatform.allCases, id: \.self) { p in
+                        Label(p.displayName, systemImage: p.icon).tag(p)
+                    }
+                }
+
+                Text("Used when you say \"tell mom hi\" without specifying a platform.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Personality") {
                 Toggle("Humor Mode", isOn: Binding(
                     get: { HumorMode.shared.isEnabled },

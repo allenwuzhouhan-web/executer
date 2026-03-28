@@ -374,5 +374,179 @@ RULES:
                 "Use `type_text` to type the recognized text into the focused field."
             ]
         ),
+
+        // MARK: Additional Built-in Skills
+
+        Skill(
+            name: "explain_code",
+            description: "Explain code from clipboard or user input. Breaks down what the code does line-by-line.",
+            exampleTriggers: ["explain this code", "what does this code do", "explain my code", "code explanation"],
+            steps: [
+                "If the user provided code directly, use that. Otherwise use `get_clipboard_text` to get code from the clipboard.",
+                "Read through the code and identify the language, key patterns, and overall purpose.",
+                "Explain the code line-by-line or block-by-block, highlighting key patterns, idioms, and concepts.",
+                "Summarize the overall purpose and any potential issues or improvements."
+            ]
+        ),
+        Skill(
+            name: "convert_units",
+            description: "Convert between units with contextual explanation. For complex conversions the local calculator can't handle.",
+            exampleTriggers: ["convert 5 miles to nautical miles", "how many cups in a gallon", "unit conversion"],
+            steps: [
+                "Parse the source value, source unit, and target unit from the user's request.",
+                "Calculate the conversion using the appropriate conversion factor.",
+                "Present the result with the conversion factor shown (e.g. '1 mile = 1.15078 nautical miles') so the user learns the relationship.",
+                "If the conversion is ambiguous (e.g. fluid vs dry ounces), clarify which interpretation was used."
+            ]
+        ),
+        Skill(
+            name: "lookup_formula",
+            description: "Search the web for a formula or equation not in the local database.",
+            exampleTriggers: ["find formula for", "look up equation", "search for theorem"],
+            steps: [
+                "Use `instant_search` (DuckDuckGo) with a query like '[topic] formula equation' to find the formula.",
+                "Extract the relevant formula from the search results or follow up with `fetch_url_content` on the most promising result.",
+                "Present the formula in Unicode math notation for readability.",
+                "Include a brief explanation of each variable and when the formula applies.",
+                "Use `set_clipboard_text` to copy the formula to the clipboard."
+            ]
+        ),
+        Skill(
+            name: "generate_password",
+            description: "Generate a secure random password and copy to clipboard.",
+            exampleTriggers: ["generate password", "new password", "random password", "secure password"],
+            steps: [
+                "Use `run_shell_command` with `openssl rand -base64 24` to generate a random 32-character password.",
+                "If the user specified requirements (length, no special chars, etc.), adjust: e.g. `openssl rand -hex 16` for alphanumeric only.",
+                "Use `set_clipboard_text` to copy the generated password to the clipboard.",
+                "Report: 'Password generated and copied to clipboard.' Do NOT display the full password in the response for security — show only the first 4 characters followed by dots."
+            ]
+        ),
+        Skill(
+            name: "quick_math",
+            description: "Solve a math problem step-by-step, showing work.",
+            exampleTriggers: ["solve this equation", "step by step math", "show the work", "solve for x"],
+            steps: [
+                "Parse the math problem from the user's request or clipboard.",
+                "Break the problem into clear steps, showing each algebraic or arithmetic operation.",
+                "Present each step on its own line with a brief explanation of what was done.",
+                "State the final answer clearly and verify it by substituting back if applicable."
+            ]
+        ),
+        Skill(
+            name: "text_transform",
+            description: "Transform text: uppercase, lowercase, title case, camelCase, snake_case, reverse, word count.",
+            exampleTriggers: ["uppercase this", "make lowercase", "to camelCase", "to snake_case", "reverse text", "word count"],
+            steps: [
+                "If the user provided text directly, use that. Otherwise use `get_clipboard_text` to get text from the clipboard.",
+                "Apply the requested transformation (uppercase, lowercase, title case, camelCase, snake_case, reverse, or word count).",
+                "Use `set_clipboard_text` to copy the transformed result to the clipboard.",
+                "Report the result and confirm it was copied to clipboard."
+            ]
+        ),
+        Skill(
+            name: "batch_rename",
+            description: "Rename multiple files in a directory with a pattern.",
+            exampleTriggers: ["rename files", "batch rename", "rename all files in"],
+            steps: [
+                "Use `run_shell_command` with `ls` on the target directory to list files that match the criteria.",
+                "Generate a preview of the new filenames based on the user's pattern (e.g. prefix, suffix, numbering, find-replace).",
+                "Present the before/after preview and ask the user to confirm.",
+                "After confirmation, use `run_shell_command` with `mv` for each file to rename them.",
+                "Report: 'Renamed N files in [directory].'"
+            ]
+        ),
+        Skill(
+            name: "git_summary",
+            description: "Summarize recent git activity in the current or specified directory.",
+            exampleTriggers: ["git summary", "recent commits", "git activity", "what changed in git"],
+            steps: [
+                "Use `run_shell_command` with `git -C [dir] log --oneline -20` to get recent commit messages.",
+                "Use `run_shell_command` with `git -C [dir] diff --stat` to see uncommitted changes.",
+                "Use `run_shell_command` with `git -C [dir] branch -a` to list branches.",
+                "Present a clean summary: recent commits as a bullet list, uncommitted changes highlighted, current branch noted."
+            ]
+        ),
+        Skill(
+            name: "open_project",
+            description: "Open a development project with IDE, terminal, and browser.",
+            exampleTriggers: ["open project", "start coding", "open my project", "dev setup"],
+            steps: [
+                "Identify the project directory from the user's request or recent memory. Use `run_shell_command` to verify the directory exists.",
+                "Detect the project type by checking for .xcodeproj (Xcode), package.json (VS Code + Node), Cargo.toml (Rust), etc.",
+                "Use `launch_app` to open the appropriate IDE (Xcode for Swift, VS Code for web/JS/Python projects).",
+                "Use `run_shell_command` to open a terminal in the project directory: `open -a Terminal [dir]`.",
+                "If the project has a web component (package.json with a start script), optionally open http://localhost:3000 in the browser.",
+                "Report: 'Project [name] opened — IDE, terminal ready.'"
+            ]
+        ),
+        Skill(
+            name: "translate_clipboard",
+            description: "Translate whatever's on the clipboard, auto-detecting the source language.",
+            exampleTriggers: ["translate clipboard", "translate what I copied", "translate my clipboard"],
+            steps: [
+                "Use `get_clipboard_text` to get the current clipboard contents.",
+                "Detect the source language from the text.",
+                "Translate the text to English by default, or to the user's specified target language.",
+                "Use `set_clipboard_text` to copy the translated text to the clipboard.",
+                "Report: 'Translated from [source language] to [target language] — copied to clipboard.' Show the translation in the response."
+            ]
+        ),
+        Skill(
+            name: "schedule_message",
+            description: "Schedule a message to be sent at a specific time.",
+            exampleTriggers: ["schedule message", "send later", "remind me to text", "send message at"],
+            steps: [
+                "Parse the recipient, message body, and target send time from the user's request.",
+                "Calculate the delay from now until the target time.",
+                "Use `set_timer` with the calculated delay and a label like 'Send message to [recipient]: [message preview]'.",
+                "Use `save_memory` with category 'scheduled_message' to persist the full details (recipient, message, time) so it survives restarts.",
+                "Report: 'Message to [recipient] scheduled for [time]. I'll remind you when it's time to send.'"
+            ]
+        ),
+        Skill(
+            name: "summarize_clipboard",
+            description: "Summarize whatever text is on the clipboard.",
+            exampleTriggers: ["summarize clipboard", "summarize what I copied", "tldr clipboard"],
+            steps: [
+                "Use `get_clipboard_text` to get the current clipboard contents.",
+                "Analyze the text and provide a concise summary: one-sentence overview followed by 3-5 bullet points of key information.",
+                "Use `set_clipboard_text` to copy the summary to the clipboard.",
+                "Report the summary and confirm it was copied to clipboard."
+            ]
+        ),
+        Skill(
+            name: "define_word",
+            description: "Get a rich word definition with etymology, pronunciation, and usage examples.",
+            exampleTriggers: ["define", "what does the word mean", "etymology of", "definition of"],
+            steps: [
+                "Use `dictionary_lookup` to get the primary definition and pronunciation of the word.",
+                "Use `instant_search` with a query like '[word] etymology origin' to find etymology information.",
+                "Present the result: pronunciation (phonetic), part of speech, primary definition, etymology/origin, and 2-3 example sentences showing the word in context.",
+                "If the word has multiple meanings, list the top 2-3 most common ones."
+            ]
+        ),
+        Skill(
+            name: "countdown",
+            description: "Calculate days/hours until a specific date or event.",
+            exampleTriggers: ["countdown to", "how many days until", "time until", "days left"],
+            steps: [
+                "Parse the target date or event from the user's request. If it's a named event (e.g. 'Christmas'), resolve to the next occurrence.",
+                "Calculate the difference from the current date/time to the target date.",
+                "Present in human-readable format: X days, Y hours, Z minutes remaining.",
+                "If the event is a recurring one, also mention when the following occurrence is."
+            ]
+        ),
+        Skill(
+            name: "screen_break",
+            description: "Remind to take a break with timer and notification.",
+            exampleTriggers: ["screen break", "break reminder", "eye rest", "take a break", "20-20-20"],
+            steps: [
+                "Use `set_timer` with the user's specified duration, or default to 20 minutes, with label 'Screen Break — Look 20 feet away for 20 seconds'.",
+                "Use `show_notification` to confirm: 'Break timer set for [duration]. I'll notify you when it's time.'",
+                "When the timer fires, use `show_notification` with title 'Screen Break' and body '20-20-20: Look at something 20 feet away for 20 seconds. Blink and stretch!'",
+                "Optionally, if the user requested it, use `run_shell_command` with `pmset displaysleepnow` to briefly sleep the display as a forcing function."
+            ]
+        ),
     ]
 }

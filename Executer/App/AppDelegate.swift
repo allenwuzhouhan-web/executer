@@ -17,6 +17,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         startupSound = StartupSound()
         startupSound?.play()
 
+        // Pre-load formula database (checks disk, builds index)
+        _ = FormulaDatabase.shared
+
         // Start services that don't need special permissions
         FocusStateService.shared.start()
         ClipboardHistoryManager.shared.startMonitoring()

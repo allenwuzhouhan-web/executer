@@ -1,52 +1,78 @@
 import Foundation
 
-/// Parses messaging commands into (contact, message) pairs.
+/// Parses messaging commands into (contact, message, platform) tuples.
 /// Runs synchronously on the main thread — no async, no actor, no race conditions.
 enum MessageParser {
 
     /// Try to parse a command as a messaging intent.
-    /// Returns (contact, message) if matched, nil otherwise.
+    /// Returns (contact, message, platform) if matched, nil otherwise.
+    /// Platform is nil for generic commands ("tell mom hi") — caller uses preferred platform.
     /// Preserves original casing from the user's input.
-    static func parse(_ command: String) -> (contact: String, message: String)? {
+    static func parse(_ command: String) -> (contact: String, message: String, platform: MessagingPlatform?)? {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
 
-        // English patterns: "tell/text/message [contact] [message]"
+        // Platform-specific prefixes (checked first)
+        let platformPrefixes: [(String, MessagingPlatform)] = [
+            ("use wechat to tell ", .wechat), ("use wechat to message ", .wechat), ("use wechat to text ", .wechat),
+            ("wechat message ", .wechat), ("wechat ", .wechat),
+            ("use imessage to tell ", .imessage), ("use imessage to message ", .imessage), ("use imessage to text ", .imessage),
+            ("imessage ", .imessage), ("iMessage ", .imessage), ("text via imessage ", .imessage),
+            ("use whatsapp to tell ", .whatsapp), ("use whatsapp to message ", .whatsapp), ("use whatsapp to text ", .whatsapp),
+            ("whatsapp message ", .whatsapp), ("whatsapp ", .whatsapp), ("wa ", .whatsapp),
+        ]
+
+        for (prefix, platform) in platformPrefixes {
+            guard lower.hasPrefix(prefix) else { continue }
+            let rest = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+            if var result = splitContactAndMessage(rest) {
+                stripConnectors(&result)
+                return (result.contact, result.message, platform)
+            }
+        }
+
+        // Chinese with platform: "微信给X发Y"
+        if lower.hasPrefix("微信") {
+            let rest = String(trimmed.dropFirst(2))
+            if let result = parseChinesePattern(rest, splitChar: "发", prefix: "给") {
+                return (result.0, result.1, .wechat)
+            }
+        }
+
+        // Generic prefixes (no explicit platform)
         let prefixes = [
             "tell ", "text ", "message ", "msg ",
             "send message to ", "send a message to ",
-            "wechat ", "wechat message ",
-            "use wechat to tell ", "use wechat to message ", "use wechat to text ",
         ]
 
         for prefix in prefixes {
             guard lower.hasPrefix(prefix) else { continue }
-            // Use original casing for the rest (not lowercased)
             let rest = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
             if var result = splitContactAndMessage(rest) {
-                // Strip connector words: "tell X that Y" → message is Y, not "that Y"
-                let msgLower = result.message.lowercased()
-                for connector in ["that ", "to "] {
-                    if msgLower.hasPrefix(connector) {
-                        result.message = String(result.message.dropFirst(connector.count))
-                        break
-                    }
-                }
-                return result
+                stripConnectors(&result)
+                return (result.contact, result.message, nil)
             }
         }
 
-        // Chinese: "给X发Y"
+        // Chinese: "给X发Y" / "跟X说Y" (no explicit platform)
         if let result = parseChinesePattern(trimmed, splitChar: "发", prefix: "给") {
-            return result
+            return (result.0, result.1, nil)
         }
-
-        // Chinese: "跟X说Y"
         if let result = parseChinesePattern(trimmed, splitChar: "说", prefix: "跟") {
-            return result
+            return (result.0, result.1, nil)
         }
 
         return nil
+    }
+
+    private static func stripConnectors(_ result: inout (contact: String, message: String)) {
+        let msgLower = result.message.lowercased()
+        for connector in ["that ", "to "] {
+            if msgLower.hasPrefix(connector) {
+                result.message = String(result.message.dropFirst(connector.count))
+                break
+            }
+        }
     }
 
     // Words that signal the start of the message, never part of a contact name
@@ -80,7 +106,7 @@ enum MessageParser {
         guard words.count >= 2 else { return nil }
 
         // Check known contacts first (longest match, case-insensitive)
-        let knownContacts = MessageRouter.shared.allRoutes().map(\.contact)
+        let knownContacts = MessageRouter.shared.allContacts()
         for contact in knownContacts.sorted(by: { $0.count > $1.count }) {
             if text.lowercased().hasPrefix(contact.lowercased()) {
                 let afterContact = String(text.dropFirst(contact.count)).trimmingCharacters(in: .whitespaces)

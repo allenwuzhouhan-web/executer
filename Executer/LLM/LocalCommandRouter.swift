@@ -197,17 +197,20 @@ class LocalCommandRouter {
 
     // MARK: - Messaging
 
-    /// Handles "tell mom hi", "text Allen hey", "给妈妈发晚上好" etc.
-    /// Uses MessageParser for extraction and SendMessageTool for delivery.
+    /// Handles "tell mom hi", "imessage Allen hey", "whatsapp John hello", "给妈妈发晚上好" etc.
+    /// Routes through MessagingManager for platform-aware delivery.
     private func tryMessagingCommand(_ command: String) async -> String? {
         guard let parsed = MessageParser.parse(command) else { return nil }
 
-        let contactJSON = parsed.contact.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let messageJSON = parsed.message.replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-
-        let args = "{\"contact\": \"\(contactJSON)\", \"message\": \"\(messageJSON)\", \"platform\": \"auto\"}"
-        return try? await SendMessageTool().execute(arguments: args)
+        let platform = parsed.platform ?? MessagingManager.shared.preferredPlatform
+        do {
+            try await MessagingManager.shared.sendMessage(
+                to: parsed.contact, text: parsed.message, platform: platform
+            )
+            MessageRouter.shared.addContact(parsed.contact)
+            return "Sent to \(parsed.contact) via \(platform.displayName)."
+        } catch {
+            return "Failed to send: \(error.localizedDescription)"
+        }
     }
 }

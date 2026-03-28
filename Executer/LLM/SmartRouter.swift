@@ -142,6 +142,47 @@ class SmartRouter {
             "Search for academic papers using semantic_scholar_search. Present results as a numbered list with titles, authors, year, and citation count.",
             1024
         ),
+        // Knowledge / factual queries (LLM-only, no tool — must be LAST to avoid shadowing)
+        (
+            { cmd in
+                // Exclude system/action queries that should go to other handlers
+                let actionPrefixes = ["open ", "launch ", "play ", "close ", "quit ", "set ", "turn ",
+                                      "toggle ", "switch ", "move ", "delete ", "create ", "send ",
+                                      "search ", "find file", "run "]
+                if actionPrefixes.contains(where: { cmd.hasPrefix($0) }) { return false }
+                let actionWords = ["my battery", "my volume", "my brightness", "my wifi",
+                                   "this mac", "current app", "running apps", "dark mode"]
+                if actionWords.contains(where: { cmd.contains($0) }) { return false }
+
+                // Knowledge triggers
+                let prefixes = ["what is ", "what are ", "what was ", "what were ",
+                                "who is ", "who was ", "who are ", "who were ",
+                                "how does ", "how do ", "how is ", "how are ",
+                                "explain ", "describe ", "why is ", "why do ", "why does ",
+                                "when was ", "when did ", "when is ",
+                                "where is ", "where was ", "where are "]
+                let suffixes = [" formula", " equation", " theorem", " law",
+                                " principle", " definition", " constant"]
+                let keywords = ["formula", "equation", "theorem", "derivative", "integral",
+                                "proof", "definition", "half angle", "double angle", "pythagorean",
+                                "quadratic", "binomial", "taylor", "capital of", "population of",
+                                "speed of light", "boiling point", "meaning of", "history of"]
+
+                if prefixes.contains(where: { cmd.hasPrefix($0) }) { return true }
+                if suffixes.contains(where: { cmd.hasSuffix($0) }) { return true }
+                if keywords.contains(where: { cmd.contains($0) }) { return true }
+                // Short questions
+                if cmd.hasSuffix("?") && cmd.count < 80 { return true }
+                return false
+            },
+            nil,
+            """
+            Answer the user's question directly and concisely.
+            For math: use Unicode symbols (sin(θ/2) = ±√((1−cos θ)/2), x², ∑, ∫, π, ∞, ≤, ≥, ≠).
+            Give the answer first, then a brief explanation if needed. Under 150 words. No preamble.
+            """,
+            512
+        ),
     ]
 
     // Cached formatter for injecting current date into prompts

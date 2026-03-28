@@ -239,15 +239,40 @@ class AppState: ObservableObject {
         if !isFollowUp {
             inputBarState = .processing
             Task { [weak self] in
+                // Tier 1: Local command routing (zero API, pattern matching)
                 if let result = await LocalCommandRouter.shared.tryLocalExecution(resolvedCommand) {
                     await MainActor.run {
                         self?.inputBarState = .result(message: result)
                         CommandHistory.shared.add(command: resolvedCommand, result: result)
-                        // No auto-dismiss — user closes with Escape / hotkey / notch click
                     }
                     return
                 }
-                // Not a simple command — fall through to LLM
+
+                // Tier 2: Smart calculator (zero API, unit-aware math)
+                if let result = SmartCalculator.evaluate(resolvedCommand) {
+                    await MainActor.run {
+                        self?.inputBarState = .result(message: result)
+                        CommandHistory.shared.add(command: resolvedCommand, result: result)
+                    }
+                    return
+                }
+
+                // Tier 3: Formula database (zero API, local lookup)
+                if let result = FormulaDatabase.shared.lookup(resolvedCommand) {
+                    await MainActor.run {
+                        self?.inputBarState = .result(message: result)
+                        CommandHistory.shared.add(command: resolvedCommand, result: result)
+                    }
+                    return
+                }
+
+                // Tier 4: SmartRouter (minimal LLM call — single tool or direct answer)
+                if let match = SmartRouter.shared.trySingleToolRoute(resolvedCommand) {
+                    await self?.executeSmartRoute(resolvedCommand, match: match)
+                    return
+                }
+
+                // Tier 5: Full AgentLoop
                 await MainActor.run {
                     self?.executeCommand(resolvedCommand, isFollowUp: isFollowUp)
                 }
@@ -257,6 +282,61 @@ class AppState: ObservableObject {
 
         inputBarState = .processing
         executeCommand(resolvedCommand, isFollowUp: isFollowUp)
+    }
+
+    /// Executes a SmartRouter match: minimal LLM call with optional single tool.
+    private func executeSmartRoute(_ command: String, match: SmartRouter.SingleToolMatch) async {
+        // Check cache first
+        if let cached = await ResponseCache.shared.get(command) {
+            await MainActor.run { [weak self] in
+                self?.inputBarState = .result(message: cached)
+                CommandHistory.shared.add(command: command, result: cached)
+            }
+            return
+        }
+
+        do {
+            let service = LLMServiceManager.shared.currentService
+            let messages: [ChatMessage] = [
+                ChatMessage(role: "system", content: match.minimalPrompt),
+                ChatMessage(role: "user", content: command)
+            ]
+            let tools: [[String: AnyCodable]]? = match.toolName.flatMap {
+                ToolRegistry.shared.singleToolSchema($0)
+            }
+            let response = try await service.sendChatRequest(
+                messages: messages, tools: tools, maxTokens: match.maxTokens
+            )
+
+            // If the LLM wants to call a tool, execute it and send result back
+            let finalText: String
+            if let toolCalls = response.toolCalls, let first = toolCalls.first {
+                let toolResult = try await ToolRegistry.shared.execute(toolName: first.function.name, arguments: first.function.arguments)
+                // Send tool result back for formatting
+                var followUp = messages
+                followUp.append(response.rawMessage)
+                followUp.append(ChatMessage(role: "tool", content: toolResult, tool_call_id: first.id))
+                let formatted = try await service.sendChatRequest(
+                    messages: followUp, tools: nil, maxTokens: match.maxTokens
+                )
+                finalText = formatted.text ?? toolResult
+            } else {
+                finalText = response.text ?? "No response."
+            }
+
+            // Cache the result
+            await ResponseCache.shared.set(command, response: finalText)
+
+            await MainActor.run { [weak self] in
+                self?.inputBarState = .result(message: finalText)
+                CommandHistory.shared.add(command: command, result: finalText)
+            }
+        } catch {
+            // Fallback to full AgentLoop on error
+            await MainActor.run { [weak self] in
+                self?.executeCommand(command, isFollowUp: false)
+            }
+        }
     }
 
     private func executeCommand(_ resolvedCommand: String, isFollowUp: Bool = false) {

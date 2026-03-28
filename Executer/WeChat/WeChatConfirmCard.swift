@@ -1,35 +1,25 @@
 import SwiftUI
 
-/// Confirmation card shown before sending a message via WeChat or iMessage.
-/// Displays recipient, message preview, and Send/Cancel buttons.
+/// Confirmation card shown before sending a message via any platform.
+/// Displays platform badge, recipient, message preview, and Send/Cancel buttons.
 struct WeChatConfirmCard: View {
     let recipient: String
     let messageText: String
-    let platform: MessageRouter.MessagePlatform
     let onSend: () -> Void
     let onCancel: () -> Void
+    var platform: MessagingPlatform = .wechat
 
-    private var platformColor: Color {
-        platform == .wechat ? Color(red: 0.027, green: 0.757, blue: 0.373) : .blue
-    }
-
-    private var platformLabel: String {
-        platform == .wechat ? "WeChat" : "iMessage"
-    }
-
-    private var platformIcon: String {
-        platform == .wechat ? "bubble.left.fill" : "message.fill"
-    }
+    private var platformColor: Color { platform.color }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Header: platform badge + recipient
             HStack(spacing: 8) {
-                Image(systemName: platformIcon)
+                Image(systemName: platform.icon)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(platformColor)
 
-                Text(platformLabel)
+                Text(platform.displayName)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(platformColor)
                     .padding(.horizontal, 6)

@@ -16,6 +16,14 @@ struct ResultBubbleView: View {
     // Speech synthesizer for read-aloud (shared instance to avoid re-creation)
     private static let synthesizer = NSSpeechSynthesizer()
 
+    /// Detects responses containing Unicode math symbols for serif font rendering.
+    private var isMathHeavy: Bool {
+        let mathChars: Set<Character> = ["∫", "∑", "√", "θ", "π", "∞", "±", "≤", "≥", "≠", "²", "³",
+                                          "λ", "Δ", "Σ", "Ω", "α", "β", "γ", "ε", "μ", "σ", "ω", "φ",
+                                          "ℏ", "∂", "∇", "→", "⊥", "∈", "⊂", "∪", "∩", "ⁿ", "ₙ"]
+        return message.contains(where: { mathChars.contains($0) })
+    }
+
     var body: some View {
         let isShort = message.count < 100
         let displayText = isShort ? typewriterText : message
@@ -31,12 +39,12 @@ struct ResultBubbleView: View {
                     if let attributed = try? AttributedString(markdown: isShort ? displayText : message,
                                                                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
                         Text(attributed)
-                            .font(.system(size: 12, weight: .regular, design: .rounded))
+                            .font(.system(size: 12, weight: .regular, design: isMathHeavy ? .serif : .rounded))
                             .foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Text(isShort ? displayText : message)
-                            .font(.system(size: 12, weight: .regular, design: .rounded))
+                            .font(.system(size: 12, weight: .regular, design: isMathHeavy ? .serif : .rounded))
                             .foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }

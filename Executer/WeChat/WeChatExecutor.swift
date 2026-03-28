@@ -18,6 +18,7 @@ struct SendWeChatMessageTool: ToolDefinition {
         let message = try requiredString("message", from: args)
 
         try await WeChatService.shared.sendMessage(to: chatName, text: message)
+        MessageRouter.shared.addContact(chatName)
         return "Message sent to \(chatName) via WeChat."
     }
 }
@@ -53,15 +54,11 @@ struct FetchWeChatMessagesTool: ToolDefinition {
 
 struct SendMessageTool: ToolDefinition {
     let name = "send_message"
-    let description = "Send a message to a contact via the best platform (iMessage or WeChat). Automatically routes based on contact preferences. If unsure, specify the platform."
+    let description = "Send a message to a contact via the user's preferred messaging platform (WeChat, iMessage, or WhatsApp)."
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
             "contact": JSONSchema.string(description: "The recipient's name"),
             "message": JSONSchema.string(description: "The message text to send"),
-            "platform": JSONSchema.enumString(
-                description: "Which platform to use. 'auto' will pick based on contact preferences and language.",
-                values: ["auto", "wechat", "imessage"]
-            ),
         ], required: ["contact", "message"])
     }
 
@@ -69,55 +66,63 @@ struct SendMessageTool: ToolDefinition {
         let args = try parseArguments(arguments)
         let contact = try requiredString("contact", from: args)
         let message = try requiredString("message", from: args)
-        let platformStr = optionalString("platform", from: args) ?? "auto"
 
-        let platform: MessageRouter.MessagePlatform
+        try await MessagingManager.shared.sendMessage(to: contact, text: message)
+        MessageRouter.shared.addContact(contact)
+        let platform = MessagingManager.shared.preferredPlatform
+        return "Message sent to \(contact) via \(platform.displayName)."
+    }
+}
 
-        if platformStr == "auto" {
-            // Let the router decide
-            guard let routed = MessageRouter.shared.route(contact: contact, messageText: message) else {
-                return "I'm not sure whether to send this via iMessage or WeChat. Please specify: send_message with platform 'wechat' or 'imessage'."
-            }
-            platform = routed
-        } else if platformStr == "wechat" {
-            platform = .wechat
-        } else {
-            platform = .imessage
-        }
+struct SendIMessageTool: ToolDefinition {
+    let name = "send_imessage"
+    let description = "Send a message via iMessage (Apple Messages app)."
+    var parameters: [String: Any] {
+        JSONSchema.object(properties: [
+            "contact": JSONSchema.string(description: "The recipient's name or phone number"),
+            "message": JSONSchema.string(description: "The message text to send"),
+        ], required: ["contact", "message"])
+    }
 
-        switch platform {
-        case .wechat:
-            try await WeChatService.shared.sendMessage(to: contact, text: message)
-            // Remember this route for future
-            MessageRouter.shared.setRoute(contact: contact, platform: .wechat)
-            return "Message sent to \(contact) via WeChat."
+    func execute(arguments: String) async throws -> String {
+        let args = try parseArguments(arguments)
+        let contact = try requiredString("contact", from: args)
+        let message = try requiredString("message", from: args)
 
-        case .imessage:
-            // Use existing AppleScript approach for iMessage
-            let escaped = AppleScriptRunner.escape(message)
-            let contactEscaped = AppleScriptRunner.escape(contact)
-            let script = """
-            tell application "Messages"
-                set targetBuddy to buddy "\(contactEscaped)" of service "iMessage"
-                send "\(escaped)" to targetBuddy
-            end tell
-            """
-            try AppleScriptRunner.runThrowing(script)
-            WeChatSentLog.shared.log(recipient: contact, text: message, platform: "imessage")
-            MessageRouter.shared.setRoute(contact: contact, platform: .imessage)
-            return "Message sent to \(contact) via iMessage."
-        }
+        try await MessagingManager.shared.sendMessage(to: contact, text: message, platform: .imessage)
+        MessageRouter.shared.addContact(contact)
+        return "Message sent to \(contact) via iMessage."
+    }
+}
+
+struct SendWhatsAppMessageTool: ToolDefinition {
+    let name = "send_whatsapp_message"
+    let description = "Send a message via WhatsApp."
+    var parameters: [String: Any] {
+        JSONSchema.object(properties: [
+            "contact": JSONSchema.string(description: "The recipient's name"),
+            "message": JSONSchema.string(description: "The message text to send"),
+        ], required: ["contact", "message"])
+    }
+
+    func execute(arguments: String) async throws -> String {
+        let args = try parseArguments(arguments)
+        let contact = try requiredString("contact", from: args)
+        let message = try requiredString("message", from: args)
+
+        try await MessagingManager.shared.sendMessage(to: contact, text: message, platform: .whatsapp)
+        MessageRouter.shared.addContact(contact)
+        return "Message sent to \(contact) via WhatsApp."
     }
 }
 
 struct ReadMessagesTool: ToolDefinition {
     let name = "read_messages"
-    let description = "Read recent messages from a contact. Checks WeChat if the contact is mapped there, otherwise describes how to check iMessage."
+    let description = "Read recent messages from a WeChat contact or group chat"
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
             "contact": JSONSchema.string(description: "The contact name to read messages from"),
             "count": JSONSchema.integer(description: "Number of messages (default 10)", minimum: 1, maximum: 50),
-            "platform": JSONSchema.enumString(description: "Platform to check", values: ["auto", "wechat"]),
         ], required: ["contact"])
     }
 
@@ -125,42 +130,13 @@ struct ReadMessagesTool: ToolDefinition {
         let args = try parseArguments(arguments)
         let contact = try requiredString("contact", from: args)
         let count = optionalInt("count", from: args) ?? 10
-        let platformStr = optionalString("platform", from: args) ?? "auto"
 
-        let useWeChat = platformStr == "wechat" ||
-            (platformStr == "auto" && MessageRouter.shared.route(contact: contact, messageText: "") == .wechat)
-
-        if useWeChat {
-            let messages = try await WeChatService.shared.fetchMessages(chatName: contact, count: count)
-            if messages.isEmpty {
-                return "No recent messages found from \(contact) on WeChat."
-            }
-            let formatted = messages.map { "\($0.sender): \($0.text)" }.joined(separator: "\n")
-            return "Recent WeChat messages from \(contact):\n\(formatted)"
-        } else {
-            return "iMessage reading is not directly supported. Please open Messages.app to view messages from \(contact)."
+        let messages = try await WeChatService.shared.fetchMessages(chatName: contact, count: count)
+        if messages.isEmpty {
+            return "No recent messages found from \(contact) on WeChat."
         }
-    }
-}
-
-struct SetContactPlatformTool: ToolDefinition {
-    let name = "set_contact_platform"
-    let description = "Set a contact's preferred messaging platform (iMessage or WeChat). Used when user says things like 'mom is on WeChat'."
-    var parameters: [String: Any] {
-        JSONSchema.object(properties: [
-            "contact": JSONSchema.string(description: "The contact name"),
-            "platform": JSONSchema.enumString(description: "The platform", values: ["wechat", "imessage"]),
-        ], required: ["contact", "platform"])
-    }
-
-    func execute(arguments: String) async throws -> String {
-        let args = try parseArguments(arguments)
-        let contact = try requiredString("contact", from: args)
-        let platformStr = try requiredString("platform", from: args)
-
-        let platform: MessageRouter.MessagePlatform = platformStr == "wechat" ? .wechat : .imessage
-        MessageRouter.shared.setRoute(contact: contact, platform: platform)
-        return "Got it — \(contact) is on \(platform.rawValue). Future messages will go there by default."
+        let formatted = messages.map { "\($0.sender): \($0.text)" }.joined(separator: "\n")
+        return "Recent WeChat messages from \(contact):\n\(formatted)"
     }
 }
 
