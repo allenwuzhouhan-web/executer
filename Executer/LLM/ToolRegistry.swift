@@ -243,6 +243,12 @@ class ToolRegistry {
 
             // Instant Search (DuckDuckGo)
             InstantSearchTool(),
+
+            // Screen Reading & Learning (Accessibility-based, no screen recording)
+            ReadScreenTool(),
+            ReadAppTextTool(),
+            GetLearnedPatternsTool(),
+            ListLearnedAppsTool(),
         ]
 
         var dict: [String: ToolDefinition] = [:]
@@ -346,6 +352,9 @@ class ToolRegistry {
             // Academic Research
             "semantic_scholar_search": .academicResearch, "get_paper_details": .academicResearch,
             "instant_search": .webContent,
+            // Screen Reading & Learning
+            "read_screen": .screenshot, "read_app_text": .screenshot,
+            "get_learned_patterns": .memory, "list_learned_apps": .memory,
             "set_semantic_scholar_key": .academicResearch,
         ]
         self.toolCategories = categoryMap

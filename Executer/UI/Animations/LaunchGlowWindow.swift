@@ -32,6 +32,9 @@ class LaunchGlowWindow {
         containerView.layer?.addSublayer(glow)
 
         win.contentView = containerView
+        win.contentView?.wantsLayer = true
+        win.contentView?.layer?.cornerRadius = 12
+        win.contentView?.layer?.masksToBounds = true
         window = win
         glowLayer = glow
 

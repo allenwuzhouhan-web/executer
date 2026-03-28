@@ -3,6 +3,7 @@ import SwiftUI
 struct LanguageSettingsTab: View {
     @State private var selectedLanguage: AppLanguage = LanguageManager.shared.currentLanguage
     @State private var humorEnabled: Bool = HumorMode.shared.isEnabled
+    @State private var showRestartAlert = false
 
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
 
@@ -71,6 +72,19 @@ struct LanguageSettingsTab: View {
             }
             .padding(20)
         }
+        .alert("Language Changed", isPresented: $showRestartAlert) {
+            Button("Relaunch Now") {
+                let appPath = Bundle.main.bundlePath
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/bin/sh")
+                task.arguments = ["-c", "sleep 1 && open \"\(appPath)\""]
+                try? task.run()
+                NSApplication.shared.terminate(nil)
+            }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text("Executer will now respond in \(selectedLanguage.nativeName). Relaunch for the full experience.")
+        }
     }
 
     // MARK: - Language Card
@@ -80,9 +94,13 @@ struct LanguageSettingsTab: View {
         let isSelected = selectedLanguage == lang
 
         Button {
+            let changed = selectedLanguage != lang
             withAnimation(.spring(response: 0.3)) {
                 selectedLanguage = lang
                 LanguageManager.shared.currentLanguage = lang
+            }
+            if changed {
+                showRestartAlert = true
             }
         } label: {
             VStack(spacing: 6) {

@@ -28,9 +28,15 @@ class LaunchGlowLayer: CALayer {
         let h = bounds.height
         guard w > 0, h > 0 else { return }
 
+        masksToBounds = true
+        cornerRadius = 12.0
+
         // Create multiple border layers, each offset in color for the rainbow sweep
         let layerCount = 4
-        let path = CGPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5), transform: nil)
+        let cornerRadius: CGFloat = 12.0
+        let path = CGPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                          cornerWidth: cornerRadius, cornerHeight: cornerRadius,
+                          transform: nil)
 
         for i in 0..<layerCount {
             let border = CAShapeLayer()

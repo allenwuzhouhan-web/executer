@@ -323,7 +323,9 @@ class LLMServiceManager: ObservableObject {
         let history = recentHistorySection()
         let humor = HumorMode.shared.isEnabled ? humorPromptSection : ""
         let language = LanguageManager.shared.systemPromptLanguageInstruction()
-        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\n\n\(context.systemPromptAddendum)\(skills)\(memory)\(history)"
+        let learned = LearningManager.shared.promptSectionForFrontmostApp()
+        let learnedSection = learned.isEmpty ? "" : "\n\n\(learned)"
+        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\n\n\(context.systemPromptAddendum)\(skills)\(memory)\(history)"
     }
 
     /// Provider-specific agentic execution guidance. DeepSeek needs explicit

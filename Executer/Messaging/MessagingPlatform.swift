@@ -62,16 +62,11 @@ enum MessagingError: LocalizedError {
 
 // MARK: - Manager
 
-class MessagingManager {
+class MessagingManager: ObservableObject {
     static let shared = MessagingManager()
 
-    var preferredPlatform: MessagingPlatform {
-        get {
-            if let raw = UserDefaults.standard.string(forKey: "messaging_platform"),
-               let p = MessagingPlatform(rawValue: raw) { return p }
-            return .wechat
-        }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "messaging_platform") }
+    @Published var preferredPlatform: MessagingPlatform {
+        didSet { UserDefaults.standard.set(preferredPlatform.rawValue, forKey: "messaging_platform") }
     }
 
     private let services: [MessagingPlatform: MessagingService] = [
@@ -93,7 +88,14 @@ class MessagingManager {
         WeChatSentLog.shared.log(recipient: contact, text: text, platform: target.rawValue)
     }
 
-    private init() {}
+    private init() {
+        if let raw = UserDefaults.standard.string(forKey: "messaging_platform"),
+           let p = MessagingPlatform(rawValue: raw) {
+            self.preferredPlatform = p
+        } else {
+            self.preferredPlatform = .wechat
+        }
+    }
 }
 
 // MARK: - WeChat Adapter

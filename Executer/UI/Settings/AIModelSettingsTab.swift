@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AIModelSettingsTab: View {
     @ObservedObject private var llmManager = LLMServiceManager.shared
+    @ObservedObject private var messagingManager = MessagingManager.shared
     @State private var apiKey: String = ""
     @State private var showKey = false
     @State private var keySaved = false
@@ -166,10 +167,7 @@ struct AIModelSettingsTab: View {
             }
 
             Section("Messaging") {
-                Picker("Default Platform", selection: Binding(
-                    get: { MessagingManager.shared.preferredPlatform },
-                    set: { MessagingManager.shared.preferredPlatform = $0 }
-                )) {
+                Picker("Default Platform", selection: $messagingManager.preferredPlatform) {
                     ForEach(MessagingPlatform.allCases, id: \.self) { p in
                         Label(p.displayName, systemImage: p.icon).tag(p)
                     }
