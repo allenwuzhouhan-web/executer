@@ -16,6 +16,8 @@ struct SettingsView: View {
             NotchSettingsTab()
                 .environmentObject(appState)
                 .tabItem { Label("Notch", systemImage: "rectangle.topthird.inset.filled") }
+            UpdateSettingsTab()
+                .tabItem { Label("Update", systemImage: "arrow.triangle.2.circlepath") }
             AboutSettingsTab()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }

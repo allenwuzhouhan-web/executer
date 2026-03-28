@@ -40,6 +40,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.permissionSetup = nil
         }
 
+        // Check for updates silently on launch
+        AppUpdater.shared.checkForUpdates()
+
         print("[AppDelegate] setup complete")
     }
 
