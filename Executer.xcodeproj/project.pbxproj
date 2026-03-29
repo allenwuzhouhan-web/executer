@@ -151,6 +151,7 @@
 		A1B2C3D4E5F6A7B8C9D0E1F9 /* WhatsAppService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A2B3C4D5E6F7A8B9C0D1E6 /* WhatsAppService.swift */; };
 		D8B9C0E1F2A3B4C5D6E7F8A9 /* AppUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A8B9D0E1F2A3B4C5D6E7F8 /* AppUpdater.swift */; };
 		F0D1E2A3B4C5D6E7F8A9B0C1 /* UpdateSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C0D1F2A3B4C5D6E7F8A9B0 /* UpdateSettingsTab.swift */; };
+		LS0000000000000000000002 /* LearningSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = LS0000000000000000000001 /* LearningSettingsTab.swift */; };
 		4B2C3D4E5F60A1B2C3D40801 /* ScreenReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1B2C3D4E5F60A1B2C3D401 /* ScreenReader.swift */; };
 		4B2C3D4E5F60A1B2C3D40802 /* ActionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1B2C3D4E5F60A1B2C3D402 /* ActionModels.swift */; };
 		4B2C3D4E5F60A1B2C3D40803 /* AppObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A1B2C3D4E5F60A1B2C3D403 /* AppObserver.swift */; };
@@ -393,6 +394,7 @@
 		F1A2B3C4D5E6F7A8B9C0D1E6 /* WhatsAppService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhatsAppService.swift; sourceTree = "<group>"; };
 		C7A8B9D0E1F2A3B4C5D6E7F8 /* AppUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdater.swift; sourceTree = "<group>"; };
 		E9C0D1F2A3B4C5D6E7F8A9B0 /* UpdateSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateSettingsTab.swift; sourceTree = "<group>"; };
+		LS0000000000000000000001 /* LearningSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningSettingsTab.swift; sourceTree = "<group>"; };
 		3A1B2C3D4E5F60A1B2C3D401 /* ScreenReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenReader.swift; sourceTree = "<group>"; };
 		3A1B2C3D4E5F60A1B2C3D402 /* ActionModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionModels.swift; sourceTree = "<group>"; };
 		3A1B2C3D4E5F60A1B2C3D403 /* AppObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppObserver.swift; sourceTree = "<group>"; };
@@ -836,6 +838,7 @@
 				AC96ADD8795505976BA8030A /* PermissionsSettingsTab.swift */,
 				B42FC8C08637D8CBBB0E57C9 /* VoiceSettingsTab.swift */,
 				E9C0D1F2A3B4C5D6E7F8A9B0 /* UpdateSettingsTab.swift */,
+				LS0000000000000000000001 /* LearningSettingsTab.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -1298,6 +1301,7 @@
 				A1B2C3D4E5F6A7B8C9D0E1F9 /* WhatsAppService.swift in Sources */,
 				D8B9C0E1F2A3B4C5D6E7F8A9 /* AppUpdater.swift in Sources */,
 				F0D1E2A3B4C5D6E7F8A9B0C1 /* UpdateSettingsTab.swift in Sources */,
+				LS0000000000000000000002 /* LearningSettingsTab.swift in Sources */,
 				4B2C3D4E5F60A1B2C3D40801 /* ScreenReader.swift in Sources */,
 				4B2C3D4E5F60A1B2C3D40802 /* ActionModels.swift in Sources */,
 				4B2C3D4E5F60A1B2C3D40803 /* AppObserver.swift in Sources */,

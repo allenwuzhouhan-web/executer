@@ -9,6 +9,8 @@ struct SettingsView: View {
                 .tabItem { Label("AI Model", systemImage: "cpu") }
             PermissionsSettingsTab()
                 .tabItem { Label("Permissions", systemImage: "lock.shield") }
+            LearningSettingsTab()
+                .tabItem { Label("Learning", systemImage: "brain") }
             VoiceSettingsTab()
                 .tabItem { Label("Voice", systemImage: "mic.circle") }
             LanguageSettingsTab()
