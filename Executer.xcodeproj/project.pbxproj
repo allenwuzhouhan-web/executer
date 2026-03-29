@@ -232,6 +232,16 @@
 		AV000000000000000000001B /* HandoffProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = AU000000000000000000001B /* HandoffProtocol.swift */; };
 		AV000000000000000000001C /* AutonomyDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AU000000000000000000001C /* AutonomyDashboard.swift */; };
 		TU0000000000000000000001 /* AutonomyTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = TT0000000000000000000001 /* AutonomyTools.swift */; };
+		SB0000000000000000000001 /* ContentFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SA0000000000000000000001 /* ContentFilter.swift */; };
+		SB0000000000000000000002 /* AppAllowlist.swift in Sources */ = {isa = PBXBuildFile; fileRef = SA0000000000000000000002 /* AppAllowlist.swift */; };
+		SB0000000000000000000003 /* TeachMeMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = SA0000000000000000000003 /* TeachMeMode.swift */; };
+		SB0000000000000000000004 /* FileMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = SA0000000000000000000004 /* FileMonitor.swift */; };
+		SB0000000000000000000005 /* ClipboardObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = SA0000000000000000000005 /* ClipboardObserver.swift */; };
+		SB0000000000000000000006 /* WeeklyDigest.swift in Sources */ = {isa = PBXBuildFile; fileRef = SA0000000000000000000006 /* WeeklyDigest.swift */; };
+		SB0000000000000000000007 /* CostTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = SA0000000000000000000007 /* CostTracker.swift */; };
+		SB0000000000000000000008 /* OllamaRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SA0000000000000000000008 /* OllamaRouter.swift */; };
+		SB0000000000000000000009 /* BiometricGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = SA0000000000000000000009 /* BiometricGate.swift */; };
+		SB000000000000000000000A /* LocalAuthentication.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = SA000000000000000000000A /* LocalAuthentication.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -463,6 +473,16 @@
 		AU000000000000000000001B /* HandoffProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandoffProtocol.swift; sourceTree = "<group>"; };
 		AU000000000000000000001C /* AutonomyDashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutonomyDashboard.swift; sourceTree = "<group>"; };
 		TT0000000000000000000001 /* AutonomyTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutonomyTools.swift; sourceTree = "<group>"; };
+		SA0000000000000000000001 /* ContentFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentFilter.swift; sourceTree = "<group>"; };
+		SA0000000000000000000002 /* AppAllowlist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAllowlist.swift; sourceTree = "<group>"; };
+		SA0000000000000000000003 /* TeachMeMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeachMeMode.swift; sourceTree = "<group>"; };
+		SA0000000000000000000004 /* FileMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileMonitor.swift; sourceTree = "<group>"; };
+		SA0000000000000000000005 /* ClipboardObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardObserver.swift; sourceTree = "<group>"; };
+		SA0000000000000000000006 /* WeeklyDigest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyDigest.swift; sourceTree = "<group>"; };
+		SA0000000000000000000007 /* CostTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostTracker.swift; sourceTree = "<group>"; };
+		SA0000000000000000000008 /* OllamaRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OllamaRouter.swift; sourceTree = "<group>"; };
+		SA0000000000000000000009 /* BiometricGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricGate.swift; sourceTree = "<group>"; };
+		SA000000000000000000000A /* LocalAuthentication.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = LocalAuthentication.framework; path = System/Library/Frameworks/LocalAuthentication.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -477,6 +497,7 @@
 				06FAF38BF73F44F8811E03EB /* IOBluetooth.framework in Frameworks */,
 				5EE8AF2DDBC5A79DD042D53F /* AVFoundation.framework in Frameworks */,
 				049CE24D97483D4021270191 /* Vision.framework in Frameworks */,
+				SB000000000000000000000A /* LocalAuthentication.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -510,6 +531,7 @@
 				FE6D2793B319099DC7937CD8 /* IOBluetooth.framework */,
 				AD6CBD24C7158E374A454127 /* AVFoundation.framework */,
 				F98B99473DE65D4EEFE74CA5 /* Vision.framework */,
+				SA000000000000000000000A /* LocalAuthentication.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -722,6 +744,7 @@
 			isa = PBXGroup;
 			children = (
 				7CF58811D2C51D5AAB0145F0 /* AuditLog.swift */,
+				SA0000000000000000000009 /* BiometricGate.swift */,
 				8B50D22EE188F14E1A42887E /* InputSanitizer.swift */,
 				4DBF18FD85C4E59328B3C22D /* SecureStorage.swift */,
 				EA28A59BD4A1F5EEC83A6D6D /* SecurityGateway.swift */,
@@ -820,9 +843,11 @@
 				C48EE295FD8EDA374E2A7A64 /* AgentLoop.swift */,
 				65EB5EEB5BF36FF62FBE6972 /* AnthropicService.swift */,
 				A12206B3EAF198D0E76125D8 /* APIKeyManager.swift */,
+				SA0000000000000000000007 /* CostTracker.swift */,
 				F5CDE5D4ED29CD5C4AA6C5C3 /* DeepSeekService.swift */,
 				30C56188C9770DC5D9661FE0 /* LLMProvider.swift */,
 				6028B17DA25A8F17F2F7843E /* LocalCommandRouter.swift */,
+				SA0000000000000000000008 /* OllamaRouter.swift */,
 				B1F3F3A3F7C63B796E592317 /* SubAgentCoordinator.swift */,
 				C1D87788E90D57929075A14A /* ToolDefinition.swift */,
 				55C3862CC3271CB12888A8D0 /* ToolRegistry.swift */,
@@ -875,11 +900,14 @@
 			isa = PBXGroup;
 			children = (
 				3A1B2C3D4E5F60A1B2C3D402 /* ActionModels.swift */,
+				SA0000000000000000000002 /* AppAllowlist.swift */,
+				SA0000000000000000000001 /* ContentFilter.swift */,
 				AA0000000000000000000004 /* LearningConfig.swift */,
 				AA0000000000000000000003 /* LearningConstants.swift */,
 				AA0000000000000000000002 /* LearningError.swift */,
 				3A1B2C3D4E5F60A1B2C3D405 /* LearningManager.swift */,
 				AA0000000000000000000001 /* LearningProtocols.swift */,
+				SA0000000000000000000003 /* TeachMeMode.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -888,6 +916,8 @@
 			isa = PBXGroup;
 			children = (
 				3A1B2C3D4E5F60A1B2C3D403 /* AppObserver.swift */,
+				SA0000000000000000000005 /* ClipboardObserver.swift */,
+				SA0000000000000000000004 /* FileMonitor.swift */,
 				3A1B2C3D4E5F60A1B2C3D401 /* ScreenReader.swift */,
 			);
 			path = Observation;
@@ -982,6 +1012,7 @@
 				DD0000000000000000000013 /* DailySummary.swift */,
 				DD0000000000000000000014 /* DailySummaryGenerator.swift */,
 				DD0000000000000000000015 /* SummaryScheduler.swift */,
+				SA0000000000000000000006 /* WeeklyDigest.swift */,
 			);
 			path = Summary;
 			sourceTree = "<group>";
@@ -1345,6 +1376,15 @@
 				AV000000000000000000001B /* HandoffProtocol.swift in Sources */,
 				AV000000000000000000001C /* AutonomyDashboard.swift in Sources */,
 				TU0000000000000000000001 /* AutonomyTools.swift in Sources */,
+				SB0000000000000000000001 /* ContentFilter.swift in Sources */,
+				SB0000000000000000000002 /* AppAllowlist.swift in Sources */,
+				SB0000000000000000000003 /* TeachMeMode.swift in Sources */,
+				SB0000000000000000000004 /* FileMonitor.swift in Sources */,
+				SB0000000000000000000005 /* ClipboardObserver.swift in Sources */,
+				SB0000000000000000000006 /* WeeklyDigest.swift in Sources */,
+				SB0000000000000000000007 /* CostTracker.swift in Sources */,
+				SB0000000000000000000008 /* OllamaRouter.swift in Sources */,
+				SB0000000000000000000009 /* BiometricGate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

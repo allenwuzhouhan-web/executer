@@ -55,6 +55,9 @@ class AppObserver {
         // Don't observe ourselves
         if app.bundleIdentifier == "com.allenwu.executer" { return }
 
+        // Check app allowlist
+        if !AppAllowlist.isAllowed(app.bundleIdentifier) { return }
+
         if pid != currentPID {
             stopObservingCurrentApp()
             startObservingApp(pid: pid, name: name)

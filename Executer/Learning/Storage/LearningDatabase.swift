@@ -13,6 +13,7 @@ final class LearningDatabase {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dbPath = dir.appendingPathComponent(LearningConstants.databaseFilename).path
 
+        decryptForUse(at: dbPath)
         if sqlite3_open(dbPath, &db) != SQLITE_OK {
             print("[LearningDB] Failed to open, recreating")
             try? FileManager.default.removeItem(atPath: dbPath)
@@ -54,7 +55,8 @@ final class LearningDatabase {
             sqlite3_bind_null(stmt, 3) // bundle_id populated later by Attention layer
             sqlite3_bind_text(stmt, 4, (action.elementRole as NSString).utf8String, -1, nil)
             sqlite3_bind_text(stmt, 5, (action.elementTitle as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(stmt, 6, (action.elementValue as NSString).utf8String, -1, nil)
+            let sanitizedValue = ContentFilter.sanitize(action.elementValue)
+            sqlite3_bind_text(stmt, 6, (sanitizedValue as NSString).utf8String, -1, nil)
             sqlite3_bind_null(stmt, 7) // window_title populated later
             sqlite3_bind_double(stmt, 8, action.timestamp.timeIntervalSince1970)
 
@@ -85,7 +87,8 @@ final class LearningDatabase {
                 sqlite3_bind_null(stmt, 3)
                 sqlite3_bind_text(stmt, 4, (action.elementRole as NSString).utf8String, -1, nil)
                 sqlite3_bind_text(stmt, 5, (action.elementTitle as NSString).utf8String, -1, nil)
-                sqlite3_bind_text(stmt, 6, (action.elementValue as NSString).utf8String, -1, nil)
+                let sanitizedValue = ContentFilter.sanitize(action.elementValue)
+                sqlite3_bind_text(stmt, 6, (sanitizedValue as NSString).utf8String, -1, nil)
                 sqlite3_bind_null(stmt, 7)
                 sqlite3_bind_double(stmt, 8, action.timestamp.timeIntervalSince1970)
                 sqlite3_step(stmt)
@@ -305,6 +308,58 @@ final class LearningDatabase {
             sqlite3_bind_text(stmt, 1, (appName as NSString).utf8String, -1, nil)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
+        }
+    }
+
+    // MARK: - At-Rest Encryption
+
+    /// Encrypt the database file when the app closes.
+    /// Call from LearningManager.stop().
+    func encryptAtRest() {
+        queue.sync {
+            // Close the database connection first
+            sqlite3_close(db)
+            db = nil
+        }
+
+        let fm = FileManager.default
+        let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent(LearningConstants.appSupportSubdirectory, isDirectory: true)
+        let dbPath = dir.appendingPathComponent(LearningConstants.databaseFilename)
+
+        guard let plainData = try? Data(contentsOf: dbPath) else {
+            print("[LearningDB] Cannot read database file for encryption")
+            return
+        }
+
+        do {
+            try SecureStorage.writeEncrypted(plainData, to: dbPath)
+            print("[LearningDB] Database encrypted at rest")
+        } catch {
+            print("[LearningDB] Encryption failed: \(error)")
+        }
+    }
+
+    /// Decrypt the database file when the app opens.
+    /// Called automatically during init.
+    private func decryptForUse(at path: String) {
+        let url = URL(fileURLWithPath: path)
+
+        // Check if the file is encrypted (SQLite files start with "SQLite format 3\0")
+        guard let header = try? Data(contentsOf: url).prefix(16) else { return }
+        let sqliteHeader = "SQLite format 3\0".data(using: .utf8)!
+
+        if header != sqliteHeader.prefix(16) {
+            // File appears encrypted — try to decrypt
+            do {
+                let decrypted = try SecureStorage.readEncrypted(from: url)
+                try decrypted.write(to: url, options: .atomic)
+                print("[LearningDB] Database decrypted for use")
+            } catch {
+                print("[LearningDB] Decryption failed, database may be corrupted: \(error)")
+                // Delete and start fresh
+                try? FileManager.default.removeItem(at: url)
+            }
         }
     }
 

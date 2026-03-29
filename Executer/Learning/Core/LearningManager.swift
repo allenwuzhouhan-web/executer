@@ -44,6 +44,34 @@ class LearningManager {
         // Start summary scheduler
         SummaryScheduler.shared.start()
 
+        // Start file and clipboard monitors
+        FileMonitor.shared.onFileEvent = { [weak self] event in
+            // Convert file events to semantic observations
+            let obs = SemanticObservation(
+                appName: event.appName,
+                category: .other,
+                intent: "File \(event.eventType.rawValue) in \(event.directory) (\(event.fileExtension))",
+                details: ["directory": event.directory, "extension": event.fileExtension, "event": event.eventType.rawValue],
+                relatedTopics: [event.directory, event.fileExtension]
+            )
+            AttentionTracker.shared.record([obs])
+            SessionDetector.shared.ingest([obs])
+        }
+        FileMonitor.shared.start()
+
+        ClipboardObserver.shared.onClipboardFlow = { flow in
+            let obs = SemanticObservation(
+                appName: flow.sourceApp,
+                category: .other,
+                intent: "Clipboard: \(flow.sourceApp) → \(flow.destinationApp) (\(flow.contentType.rawValue), \(flow.contentLength) chars)",
+                details: ["source": flow.sourceApp, "destination": flow.destinationApp, "type": flow.contentType.rawValue],
+                relatedTopics: [flow.sourceApp, flow.destinationApp]
+            )
+            AttentionTracker.shared.record([obs])
+            SessionDetector.shared.ingest([obs])
+        }
+        ClipboardObserver.shared.start()
+
         // Screen sampling timer (60s, reads visible text for attention extractors)
         if LearningConfig.shared.isScreenSamplingEnabled {
             screenSampleTimer = Timer.scheduledTimer(withTimeInterval: LearningConfig.shared.screenSamplingInterval, repeats: true) { [weak self] _ in
@@ -56,12 +84,16 @@ class LearningManager {
 
     func stop() {
         AppObserver.shared.stop()
+        FileMonitor.shared.stop()
+        ClipboardObserver.shared.stop()
         flushTimer?.invalidate()
         flushTimer = nil
         SummaryScheduler.shared.stop()
         screenSampleTimer?.invalidate()
         screenSampleTimer = nil
         flushBuffer()
+        // Encrypt database at rest
+        LearningDatabase.shared.encryptAtRest()
         print("[Learning] Stopped")
     }
 
@@ -70,6 +102,8 @@ class LearningManager {
     private func recordAction(_ action: UserAction) {
         bufferLock.lock()
         actionBuffer.append(action)
+        // Feed to TeachMe mode if active
+        TeachMeMode.shared.recordAction(action)
         let shouldFlush = actionBuffer.count >= LearningConstants.bufferFlushThreshold
         bufferLock.unlock()
 
