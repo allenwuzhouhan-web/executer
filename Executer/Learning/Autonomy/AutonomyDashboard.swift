@@ -6,12 +6,16 @@ enum AutonomyDashboard {
     /// Generate a full status report.
     static func statusReport() -> String {
         var lines = ["## Autonomy Dashboard"]
+        lines.append("NOTE: All data below is from REAL observations. If a section says 0 or empty, report it as-is. Do NOT invent or estimate any numbers.")
 
         // Learning stats
         let apps = LearningDatabase.shared.allAppNames()
         lines.append("\n### Learning Stats:")
         lines.append("- Apps observed: \(apps.count)")
         lines.append("- Total patterns: \(apps.reduce(0) { $0 + $1.patternCount })")
+        if apps.isEmpty {
+            lines.append("- No apps observed yet. Learning is still collecting data.")
+        }
 
         // Goals
         let goals = GoalTracker.shared.topGoals(limit: 5)

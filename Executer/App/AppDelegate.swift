@@ -56,14 +56,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Show welcome on top if needed (doesn't block permissions)
         if needsOnboarding {
-            // Small delay so permission window settles first
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            // Delay to ensure welcome appears ABOVE permission window
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                 self?.welcomeWindow = WelcomeWindowController()
                 self?.welcomeWindow?.show {
                     self?.welcomeWindow = nil
                 }
+                // Welcome window is already .floating level from WelcomeWindowController
             }
         }
+
+        print("[AppDelegate] needsOnboarding=\(needsOnboarding), lastVersion=\(lastOnboardedVersion), current=\(AppModel.version)")
 
         // Check for updates silently on launch
         AppUpdater.shared.checkForUpdates()

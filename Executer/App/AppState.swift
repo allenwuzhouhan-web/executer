@@ -136,9 +136,15 @@ class AppState: ObservableObject {
         }
     }
 
+    /// The app the user was in BEFORE opening the input bar.
+    /// Captured here because once the bar opens, Executer becomes frontmost.
+    var lastFrontmostAppName: String = ""
+
     func showInputBar() {
         guard !inputBarVisible else { return }
-        print("[AppState] showInputBar()")
+        // Capture frontmost app BEFORE we steal focus
+        lastFrontmostAppName = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
+        print("[AppState] showInputBar() — user was in: \(lastFrontmostAppName)")
         inputBarVisible = true
         inputBarState = .ready
         currentInput = ""
@@ -222,6 +228,12 @@ class AppState: ObservableObject {
     func submitCommand(_ command: String) {
         guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
+        // Handle internal commands (not user-facing)
+        if command.hasPrefix("__internal_") {
+            handleInternalCommand(command)
+            return
+        }
+
         // Resolve aliases before processing
         let resolvedCommand = AliasManager.shared.resolve(command)
         lastSubmittedPrompt = command
@@ -282,6 +294,37 @@ class AppState: ObservableObject {
 
         inputBarState = .processing
         executeCommand(resolvedCommand, isFollowUp: isFollowUp)
+    }
+
+    /// Handles internal commands dispatched by TaskScheduler or other subsystems.
+    private func handleInternalCommand(_ command: String) {
+        switch command {
+        case "__internal_verify_pending_skills":
+            Task {
+                let results = await SkillVerifier.shared.verifyAllPending()
+                var promoted = 0
+                var rejected = 0
+                for result in results {
+                    if result.status == .verified {
+                        SkillsManager.shared.promoteSkill(named: result.skillName)
+                        promoted += 1
+                    } else {
+                        SkillsManager.shared.rejectSkill(named: result.skillName, reason: result.rejectionReason ?? "Failed safety check")
+                        rejected += 1
+                    }
+                }
+                if promoted > 0 || rejected > 0 {
+                    print("[SkillVerifier] Batch complete: \(promoted) promoted, \(rejected) rejected")
+                    // Show notification to user
+                    let message = "\(promoted) skill(s) verified and activated, \(rejected) rejected. Use list_pending_skills for details."
+                    await MainActor.run { [weak self] in
+                        self?.inputBarState = .result(message: "[Skill Verification Complete] \(message)")
+                    }
+                }
+            }
+        default:
+            print("[AppState] Unknown internal command: \(command)")
+        }
     }
 
     /// Executes a SmartRouter match: minimal LLM call with optional single tool.

@@ -88,11 +88,11 @@ class NotchWindow: NSPanel {
         }
         setFrame(notchRect, display: true)
 
-        // Center learning dot at bottom of notch
+        // Learning dot: right side of notch, vertically centered, outside the Apple notch cutout
         let dotSize: CGFloat = 6
         learningDot.frame = CGRect(
-            x: (notchRect.width - dotSize) / 2,
-            y: 4,
+            x: notchRect.width - dotSize - 8,
+            y: (notchRect.height - dotSize) / 2,
             width: dotSize,
             height: dotSize
         )
