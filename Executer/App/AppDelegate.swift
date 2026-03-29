@@ -45,18 +45,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         SystemEventBus.shared.start()
         Task { await WeChatService.shared.initialize() }
 
-        // Show welcome on first launch OR after major version update
+        // Always show welcome first on first launch or version change.
+        // Permission setup comes AFTER welcome completes (or immediately if no welcome needed).
         let lastOnboardedVersion = UserDefaults.standard.string(forKey: "onboarded_version") ?? ""
         let needsOnboarding = !UserDefaults.standard.bool(forKey: "has_completed_onboarding") || lastOnboardedVersion != AppModel.version
+
+        // Start permission-dependent services regardless of welcome state
+        // (permissions may already be granted from previous install)
+        showPermissionSetupIfNeeded()
+
+        // Show welcome on top if needed (doesn't block permissions)
         if needsOnboarding {
-            welcomeWindow = WelcomeWindowController()
-            welcomeWindow?.show { [weak self] in
-                self?.welcomeWindow = nil
-                // After onboarding, proceed to permission setup
-                self?.showPermissionSetupIfNeeded()
+            // Small delay so permission window settles first
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.welcomeWindow = WelcomeWindowController()
+                self?.welcomeWindow?.show {
+                    self?.welcomeWindow = nil
+                }
             }
-        } else {
-            showPermissionSetupIfNeeded()
         }
 
         // Check for updates silently on launch
