@@ -85,6 +85,14 @@ class AgentLoop {
         if matchCount >= 2 { return .complex }
         if matchCount == 1 && lower.count > 60 { return .complex }
 
+        // Compound UI automation — multiple actions chained together
+        let uiActions = ["click", "fullscreen", "type", "press", "scroll", "drag", "move cursor"]
+        let conjunctions = [" and ", " then ", " after ", " next "]
+        let hasUIAction = uiActions.contains(where: { lower.contains($0) })
+        let hasConjunction = conjunctions.contains(where: { lower.contains($0) })
+        if hasUIAction && hasConjunction { return .complex }
+        if hasUIAction && lower.count > 30 { return .medium }
+
         let simpleIndicators = ["open ", "play ", "pause", "set volume", "mute",
                                 "lock", "what time", "what's playing", "screenshot",
                                 "dark mode", "light mode", "volume up", "volume down",

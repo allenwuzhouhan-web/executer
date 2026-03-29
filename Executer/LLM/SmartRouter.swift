@@ -148,11 +148,20 @@ class SmartRouter {
                 // Exclude system/action queries that should go to other handlers
                 let actionPrefixes = ["open ", "launch ", "play ", "close ", "quit ", "set ", "turn ",
                                       "toggle ", "switch ", "move ", "delete ", "create ", "send ",
-                                      "search ", "find file", "run "]
+                                      "search ", "find file", "run ", "fullscreen ", "click ",
+                                      "type ", "press ", "maximize ", "minimize ", "resize ",
+                                      "scroll ", "drag ", "hotkey "]
                 if actionPrefixes.contains(where: { cmd.hasPrefix($0) }) { return false }
                 let actionWords = ["my battery", "my volume", "my brightness", "my wifi",
                                    "this mac", "current app", "running apps", "dark mode"]
                 if actionWords.contains(where: { cmd.contains($0) }) { return false }
+                // UI action keywords anywhere in command → must go to AgentLoop
+                let uiActionKeywords = ["click", "fullscreen", "maximize", "minimize", "resize",
+                                        "type text", "press key", "hotkey", "scroll", "drag",
+                                        "move cursor", "and then", "after that", "and click",
+                                        "then click", "then type", "then press", "and open",
+                                        "and close", "and play", "and search"]
+                if uiActionKeywords.contains(where: { cmd.contains($0) }) { return false }
 
                 // Knowledge triggers
                 let prefixes = ["what is ", "what are ", "what was ", "what were ",

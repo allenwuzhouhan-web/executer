@@ -10,6 +10,7 @@ class SkillsManager {
         let description: String
         let exampleTriggers: [String]
         let steps: [String]
+        var verificationStatus: String?  // "pending", "verified", "rejected" (nil = built-in = verified)
     }
 
     private(set) var skills: [Skill] = []
@@ -23,9 +24,28 @@ class SkillsManager {
         return dir.appendingPathComponent("user_skills.json")
     }()
 
+    private let pendingSkillsURL: URL = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("Executer", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("pending_skills.json")
+    }()
+
+    private let rejectedSkillsURL: URL = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("Executer", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("rejected_skills.json")
+    }()
+
+    private(set) var stagedPendingSkills: [Skill] = []
+    private(set) var stagedRejectedSkills: [Skill] = []
+
     private init() {
         skills = Self.defaultSkills + loadUserSkills()
-        print("[Skills] Loaded \(skills.count) skills (\(Self.defaultSkills.count) built-in, \(skills.count - Self.defaultSkills.count) user)")
+        stagedPendingSkills = loadSkills(from: pendingSkillsURL)
+        stagedRejectedSkills = loadSkills(from: rejectedSkillsURL)
+        print("[Skills] Loaded \(skills.count) active (\(Self.defaultSkills.count) built-in, \(skills.count - Self.defaultSkills.count) user), \(stagedPendingSkills.count) pending, \(stagedRejectedSkills.count) rejected")
     }
 
     // MARK: - Add / Remove
@@ -52,12 +72,102 @@ class SkillsManager {
         return false
     }
 
+    // MARK: - Staged Skills (Safety Pipeline)
+
+    /// Add a skill to the pending queue (not yet verified).
+    func addPendingSkill(_ skill: Skill) {
+        var pending = skill
+        pending.verificationStatus = "pending"
+        // Remove if already exists in any stage
+        stagedPendingSkills.removeAll { $0.name == skill.name }
+        stagedRejectedSkills.removeAll { $0.name == skill.name }
+        skills.removeAll { $0.name == skill.name }
+        stagedPendingSkills.append(pending)
+        saveSkills(stagedPendingSkills, to: pendingSkillsURL)
+        saveSkills(stagedRejectedSkills, to: rejectedSkillsURL)
+        print("[Skills] Added pending skill: \(skill.name)")
+    }
+
+    /// Promote a pending/rejected skill to active (verified).
+    func promoteSkill(named name: String) {
+        // Find in pending or rejected
+        if let skill = stagedPendingSkills.first(where: { $0.name == name }) ??
+           stagedRejectedSkills.first(where: { $0.name == name }) {
+            var verified = skill
+            verified.verificationStatus = "verified"
+            stagedPendingSkills.removeAll { $0.name == name }
+            stagedRejectedSkills.removeAll { $0.name == name }
+            // Add to active skills
+            skills.removeAll { $0.name == name }
+            skills.append(verified)
+            cachedPromptSection = nil
+            saveUserSkills()
+            saveSkills(stagedPendingSkills, to: pendingSkillsURL)
+            saveSkills(stagedRejectedSkills, to: rejectedSkillsURL)
+            print("[Skills] Promoted skill to active: \(name)")
+        }
+    }
+
+    /// Reject a pending skill with a reason.
+    func rejectSkill(named name: String, reason: String) {
+        if var skill = stagedPendingSkills.first(where: { $0.name == name }) {
+            skill.verificationStatus = "rejected"
+            stagedPendingSkills.removeAll { $0.name == name }
+            stagedRejectedSkills.removeAll { $0.name == name }
+            stagedRejectedSkills.append(skill)
+            saveSkills(stagedPendingSkills, to: pendingSkillsURL)
+            saveSkills(stagedRejectedSkills, to: rejectedSkillsURL)
+            print("[Skills] Rejected skill: \(name) — \(reason)")
+        }
+    }
+
+    /// Returns all pending skills.
+    func pendingSkills() -> [Skill] {
+        return stagedPendingSkills
+    }
+
+    /// Returns all rejected skills.
+    func rejectedSkills() -> [Skill] {
+        return stagedRejectedSkills
+    }
+
+    /// Batch import skills — routes through safety pipeline.
+    func importSkills(_ newSkills: [Skill]) -> (added: Int, skipped: Int) {
+        var added = 0
+        var skipped = 0
+        for skill in newSkills {
+            // Skip if already exists (active, pending, or rejected)
+            if skills.contains(where: { $0.name == skill.name }) ||
+               stagedPendingSkills.contains(where: { $0.name == skill.name }) {
+                skipped += 1
+                continue
+            }
+            // Quick safety check — auto-promote if obviously safe
+            if SkillVerifier.shared.quickSafetyCheck(skill) {
+                var verified = skill
+                verified.verificationStatus = "verified"
+                skills.append(verified)
+                cachedPromptSection = nil
+                saveUserSkills()
+                added += 1
+                print("[Skills] Auto-promoted safe skill: \(skill.name)")
+            } else {
+                addPendingSkill(skill)
+                added += 1
+            }
+        }
+        return (added, skipped)
+    }
+
     // MARK: - Prompt Injection
 
-    /// Formats all skills as a prompt section for the LLM system message.
+    /// Formats all active (verified) skills as a prompt section for the LLM system message.
     func promptSection() -> String {
         if let cached = cachedPromptSection { return cached }
-        guard !skills.isEmpty else { return "" }
+
+        // Only include built-in (nil status) or verified skills
+        let activeSkills = skills.filter { $0.verificationStatus == nil || $0.verificationStatus == "verified" }
+        guard !activeSkills.isEmpty else { return "" }
 
         var lines = [
             "",
@@ -68,7 +178,7 @@ class SkillsManager {
             ""
         ]
 
-        for skill in skills {
+        for skill in activeSkills {
             lines.append("### \(skill.name)")
             lines.append(skill.description)
             if !skill.exampleTriggers.isEmpty {
@@ -89,12 +199,16 @@ class SkillsManager {
     // MARK: - Persistence
 
     private func loadUserSkills() -> [Skill] {
-        guard FileManager.default.fileExists(atPath: userSkillsURL.path) else { return [] }
+        return loadSkills(from: userSkillsURL)
+    }
+
+    private func loadSkills(from url: URL) -> [Skill] {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
         do {
-            let data = try Data(contentsOf: userSkillsURL)
+            let data = try Data(contentsOf: url)
             return try JSONDecoder().decode([Skill].self, from: data)
         } catch {
-            print("[Skills] Failed to load user skills: \(error)")
+            print("[Skills] Failed to load skills from \(url.lastPathComponent): \(error)")
             return []
         }
     }
@@ -102,13 +216,17 @@ class SkillsManager {
     private func saveUserSkills() {
         let builtInNames = Set(Self.defaultSkills.map(\.name))
         let userOnly = skills.filter { !builtInNames.contains($0.name) }
+        saveSkills(userOnly, to: userSkillsURL)
+    }
+
+    private func saveSkills(_ skillList: [Skill], to url: URL) {
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(userOnly)
-            try data.write(to: userSkillsURL, options: .atomic)
+            let data = try encoder.encode(skillList)
+            try data.write(to: url, options: .atomic)
         } catch {
-            print("[Skills] Failed to save user skills: \(error)")
+            print("[Skills] Failed to save skills to \(url.lastPathComponent): \(error)")
         }
     }
 
@@ -546,6 +664,123 @@ RULES:
                 "Use `show_notification` to confirm: 'Break timer set for [duration]. I'll notify you when it's time.'",
                 "When the timer fires, use `show_notification` with title 'Screen Break' and body '20-20-20: Look at something 20 feet away for 20 seconds. Blink and stretch!'",
                 "Optionally, if the user requested it, use `run_shell_command` with `pmset displaysleepnow` to briefly sleep the display as a forcing function."
+            ]
+        ),
+
+        // MARK: Document Creation & Style Skills
+
+        Skill(
+            name: "create_presentation",
+            description: "Create a PowerPoint presentation from the user's description. Applies saved style if available.",
+            exampleTriggers: ["create a presentation", "make slides", "powerpoint about", "create a deck", "make a pptx"],
+            steps: [
+                "Check if python-pptx is installed: call `setup_python_docs` if needed.",
+                "Check available styles with `list_document_styles`. If the user has a saved style, use it.",
+                "Plan the slide structure from the user's description: title slide, content slides with bullets, conclusion slide.",
+                "Call `create_document` with format='pptx', the planned content JSON, and style_profile if available.",
+                "Open the created file with `open_file`.",
+                "Report: 'Created [N]-slide presentation at [path].'"
+            ]
+        ),
+        Skill(
+            name: "learn_document_style",
+            description: "Extract and save the visual style from an existing document for future reuse.",
+            exampleTriggers: ["learn my style", "extract style from", "remember this format", "copy this style", "learn my presentation style"],
+            steps: [
+                "If no file path given, use `find_files` to search ~/Documents/works for recent .pptx/.docx files.",
+                "Call `extract_document_style` with the file path and a descriptive profile name.",
+                "Report what was extracted: fonts, colors, layout count, dimensions.",
+                "Use `save_memory` to remember the user's preferred style for this type of document."
+            ]
+        ),
+        Skill(
+            name: "read_office_document",
+            description: "Read and summarize a Word, PowerPoint, or Excel file.",
+            exampleTriggers: ["read this pptx", "summarize this word doc", "what's in this spreadsheet", "open and read this document"],
+            steps: [
+                "Call `setup_python_docs` if needed (first time only).",
+                "Call `read_document` with the file path and format='structure' for full content.",
+                "Summarize the content: for PPTX list slide titles and key points, for DOCX summarize sections, for XLSX describe sheets and data.",
+                "Copy the summary to clipboard with `set_clipboard_text`."
+            ]
+        ),
+        Skill(
+            name: "create_word_document",
+            description: "Create a Word document with formatted sections, headings, and bullets.",
+            exampleTriggers: ["create a word doc", "write a document", "make a docx", "create a report"],
+            steps: [
+                "Check if python-docx is installed: call `setup_python_docs` if needed.",
+                "Check available styles with `list_document_styles`. If the user has a saved DOCX style, use it.",
+                "Plan the document structure: sections with headings, body paragraphs, and bullet points.",
+                "Call `create_document` with format='docx', the planned content JSON, and style_profile if available.",
+                "Open the created file with `open_file`.",
+                "Report: 'Created document at [path].'"
+            ]
+        ),
+        Skill(
+            name: "create_spreadsheet",
+            description: "Create an Excel spreadsheet with structured data.",
+            exampleTriggers: ["create a spreadsheet", "make an excel", "create xlsx", "make a data table"],
+            steps: [
+                "Check if openpyxl is installed: call `setup_python_docs` if needed.",
+                "Plan the spreadsheet structure: sheet names, header rows, and data rows.",
+                "Call `create_document` with format='xlsx' and the planned content JSON.",
+                "Open the created file with `open_file`.",
+                "Report: 'Created spreadsheet at [path].'"
+            ]
+        ),
+
+        // MARK: UI Automation & App Control Skills
+
+        Skill(
+            name: "fullscreen_app",
+            description: "Switch to an app and make it fullscreen.",
+            exampleTriggers: ["fullscreen minecraft", "make safari fullscreen", "fullscreen this app", "maximize PowerPoint"],
+            steps: [
+                "Use `switch_to_app` to bring the target app to front. If not running, use `launch_app` first.",
+                "Wait briefly for the app to activate.",
+                "Use `fullscreen_window` to toggle fullscreen mode on the active window.",
+                "Report: '[App] is now fullscreen.'"
+            ]
+        ),
+        Skill(
+            name: "app_automation",
+            description: "Perform a sequence of UI actions in an app: launch, click buttons, type text, navigate menus.",
+            exampleTriggers: ["click play in minecraft", "press the start button", "navigate to settings in", "interact with"],
+            steps: [
+                "Use `switch_to_app` or `launch_app` to ensure the target app is frontmost.",
+                "Use `read_screen` to see all visible UI elements and their positions.",
+                "Identify the target element (button, menu item, text field) from the UI tree.",
+                "Use `click_element` with the element's description to click it. If that fails, use `click` at the element's coordinates.",
+                "For text input: use `click_element` on the text field, then `type_text` to enter text, then `press_key` return if needed.",
+                "Report what was done: 'Clicked [element] in [app].'"
+            ]
+        ),
+        Skill(
+            name: "multi_step_ui",
+            description: "Execute multiple UI actions in sequence: fullscreen, click, type, navigate across apps.",
+            exampleTriggers: ["fullscreen and click play", "open and then click", "switch to app and do", "do this then that"],
+            steps: [
+                "Break the user's request into individual actions (e.g., 'fullscreen' + 'click play').",
+                "Execute each action in order using the appropriate tools:",
+                "  - App switching: `switch_to_app` or `launch_app`",
+                "  - Window control: `fullscreen_window`, `resize_window`, `minimize_window`",
+                "  - Clicking: `click_element` (by description) or `click` (by coordinates)",
+                "  - Typing: `type_text`, `press_key`, `hotkey`",
+                "  - Scrolling: `scroll`",
+                "Wait briefly between actions to let the UI settle.",
+                "Report each completed action."
+            ]
+        ),
+        Skill(
+            name: "navigate_menu",
+            description: "Navigate an app's menu bar to find and click a specific menu item.",
+            exampleTriggers: ["go to file menu", "click edit paste", "find in menu", "menu bar"],
+            steps: [
+                "Use `read_screen` to see the current app's UI and menu bar items.",
+                "Use `click_element` on the target menu item (e.g., 'File' in the menu bar).",
+                "If a submenu is needed, use `click_element` again on the submenu item.",
+                "Report: 'Selected [menu item] from [menu].'"
             ]
         ),
     ]
