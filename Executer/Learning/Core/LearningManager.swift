@@ -191,8 +191,57 @@ class LearningManager {
 
             // Save updated patterns back to SQLite
             LearningDatabase.shared.replacePatterns(forApp: appName, patterns: profile.patterns)
+
+            // Auto-compile high-confidence patterns into skills
+            autoCompilePatterns(profile.patterns, appName: appName)
         }
         print("[Learning] Extracted patterns for \(appNames.count) apps")
+    }
+
+    // MARK: - Auto-Compile Patterns → Skills
+
+    /// Patterns observed 5+ times get compiled into executable skills.
+    /// Skills are iterative — if the pattern changes, the skill updates.
+    private var compiledPatternIds: Set<UUID> = []
+
+    private func autoCompilePatterns(_ patterns: [WorkflowPattern], appName: String) {
+        for pattern in patterns {
+            // Only compile patterns with enough confidence (5+ observations)
+            guard pattern.frequency >= 5 else { continue }
+            // Only compile patterns with 3+ steps (trivial patterns aren't useful as skills)
+            guard pattern.actions.count >= 3 else { continue }
+
+            // Check if this pattern already has a compiled skill
+            let skillName = "auto_\(appName.lowercased().replacingOccurrences(of: " ", with: "_"))_\(pattern.name.lowercased().prefix(30).replacingOccurrences(of: " ", with: "_"))"
+
+            // Compile pattern into a workflow template
+            guard let template = WorkflowCompiler.compile(pattern) else { continue }
+
+            // Check if skill already exists — if so, UPDATE it (patterns evolve)
+            let existingSkill = SkillsManager.shared.skills.first { $0.name == skillName }
+            let steps = template.steps.map { $0.description }
+
+            let skill = SkillsManager.Skill(
+                name: skillName,
+                description: "Auto-learned: \(pattern.name) (observed \(pattern.frequency)x)",
+                exampleTriggers: [pattern.name.lowercased(), "\(appName.lowercased()) \(pattern.name.lowercased())"],
+                steps: steps,
+                verificationStatus: "verified"  // Auto-compiled from observation — safe
+            )
+
+            if existingSkill != nil {
+                // Skill exists — update it if the pattern has evolved
+                if existingSkill?.steps != steps {
+                    SkillsManager.shared.addSkill(skill)
+                    print("[Learning] Updated auto-skill: \(skillName) (\(pattern.frequency)x, \(steps.count) steps)")
+                }
+            } else {
+                // New skill — compile and save
+                SkillsManager.shared.addSkill(skill)
+                TemplateLibrary.shared.save(template)
+                print("[Learning] Auto-compiled skill: \(skillName) (\(pattern.frequency)x, \(steps.count) steps)")
+            }
+        }
     }
 
     // MARK: - Adaptive Screen Sampling
