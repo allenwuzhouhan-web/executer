@@ -22,7 +22,11 @@ struct SettingsView: View {
                 .tabItem { Label("Update", systemImage: "arrow.triangle.2.circlepath") }
             AboutSettingsTab()
                 .tabItem { Label("About", systemImage: "info.circle") }
+            if AppModel.isPrerelease {
+                DeveloperSettingsTab()
+                    .tabItem { Label("Developer", systemImage: "hammer") }
+            }
         }
-        .frame(width: 560, height: 520)
+        .frame(width: 600, height: 560)
     }
 }

@@ -13,6 +13,7 @@ class WelcomeWindowController {
                 self?.window?.close()
                 self?.window = nil
                 UserDefaults.standard.set(true, forKey: "has_completed_onboarding")
+                UserDefaults.standard.set(AppModel.version, forKey: "onboarded_version")
                 completion()
             }
         })

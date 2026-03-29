@@ -45,8 +45,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         SystemEventBus.shared.start()
         Task { await WeChatService.shared.initialize() }
 
-        // Show welcome on first launch
-        if !UserDefaults.standard.bool(forKey: "has_completed_onboarding") {
+        // Show welcome on first launch OR after major version update
+        let lastOnboardedVersion = UserDefaults.standard.string(forKey: "onboarded_version") ?? ""
+        let needsOnboarding = !UserDefaults.standard.bool(forKey: "has_completed_onboarding") || lastOnboardedVersion != AppModel.version
+        if needsOnboarding {
             welcomeWindow = WelcomeWindowController()
             welcomeWindow?.show { [weak self] in
                 self?.welcomeWindow = nil
