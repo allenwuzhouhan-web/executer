@@ -127,18 +127,51 @@ struct ResizeWindowTool: ToolDefinition {
 
 struct FullscreenWindowTool: ToolDefinition {
     let name = "fullscreen_window"
-    let description = "Toggle fullscreen for the current window"
-    var parameters: [String: Any] { JSONSchema.object(properties: [:]) }
+    let description = "Toggle fullscreen for a window. If app_name is given, switches to that app first then fullscreens it."
+    var parameters: [String: Any] {
+        JSONSchema.object(properties: [
+            "app_name": JSONSchema.string(description: "App to fullscreen (e.g., 'Terminal', 'Safari'). If omitted, uses current window."),
+        ])
+    }
 
     func execute(arguments: String) async throws -> String {
+        let args = try parseArguments(arguments)
+        let appName = optionalString("app_name", from: args)
+
+        // Switch to target app first if specified
+        if let name = appName, !name.isEmpty {
+            if let app = NSWorkspace.shared.runningApplications.first(where: {
+                $0.localizedName?.lowercased() == name.lowercased()
+            }) {
+                app.activate()
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            } else {
+                return "App '\(name)' is not running."
+            }
+        }
+
         guard let window = getFrontmostWindowElement() else {
             return "No focused window found."
         }
+
+        // Try AXFullScreen attribute
         var fullscreenValue: AnyObject?
         AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &fullscreenValue)
         let isFullscreen = (fullscreenValue as? Bool) ?? false
-        AXUIElementSetAttributeValue(window, "AXFullScreen" as CFString, (!isFullscreen) as CFTypeRef)
-        return isFullscreen ? "Exited fullscreen." : "Entered fullscreen."
+        let result = AXUIElementSetAttributeValue(window, "AXFullScreen" as CFString, (!isFullscreen) as CFTypeRef)
+
+        if result == .success {
+            return isFullscreen ? "Exited fullscreen." : "Entered fullscreen."
+        }
+
+        // Fallback: press the fullscreen button (green traffic light)
+        var buttonValue: AnyObject?
+        if AXUIElementCopyAttributeValue(window, "AXFullScreenButton" as CFString, &buttonValue) == .success {
+            AXUIElementPerformAction(buttonValue as! AXUIElement, kAXPressAction as CFString)
+            return "Toggled fullscreen via zoom button."
+        }
+
+        return "Could not toggle fullscreen — app may not support it via accessibility."
     }
 }
 

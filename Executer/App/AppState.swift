@@ -97,6 +97,15 @@ class AppState: ObservableObject {
     // MARK: - Input Bar Lifecycle
 
     func toggleInputBar() {
+        // Capture frontmost app IMMEDIATELY — before any window activation steals focus.
+        // This is the earliest possible point, before debounce, before showInputBar().
+        if !inputBarVisible {
+            let current = NSWorkspace.shared.frontmostApplication
+            if current?.bundleIdentifier != "com.allenwu.executer" {
+                lastFrontmostAppName = current?.localizedName ?? ""
+            }
+        }
+
         // Debounce: NotchWindow click, CGEvent tap, and global monitor can all fire
         // on the same click — ignore duplicates within 600ms.
         let now = Date()
