@@ -153,7 +153,11 @@ class SmartRouter {
                                       "scroll ", "drag ", "hotkey "]
                 if actionPrefixes.contains(where: { cmd.hasPrefix($0) }) { return false }
                 let actionWords = ["my battery", "my volume", "my brightness", "my wifi",
-                                   "this mac", "current app", "running apps", "dark mode"]
+                                   "this mac", "current app", "running apps", "dark mode",
+                                   "apps open", "apps running", "what apps", "which apps",
+                                   "open apps", "active apps", "frontmost", "what app is",
+                                   "working on", "my goals", "my patterns", "autonomy",
+                                   "learned from", "my sessions", "day plan"]
                 if actionWords.contains(where: { cmd.contains($0) }) { return false }
                 // UI action keywords anywhere in command → must go to AgentLoop
                 let uiActionKeywords = ["click", "fullscreen", "maximize", "minimize", "resize",
