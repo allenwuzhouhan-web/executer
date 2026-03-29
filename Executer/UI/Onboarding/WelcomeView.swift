@@ -7,7 +7,7 @@ struct WelcomeView: View {
     @State private var appeared = false
     let onComplete: () -> Void
 
-    private let pageCount = 4
+    private let pageCount = 5
 
     var body: some View {
         ZStack {
@@ -17,27 +17,34 @@ struct WelcomeView: View {
                 // Page content with slide transition
                 ZStack {
                     if currentPage == 0 {
-                        WelcomePage1(appeared: $appeared)
+                        PreReleaseWarningPage()
                             .transition(.asymmetric(
                                 insertion: .move(edge: .trailing).combined(with: .opacity),
                                 removal: .move(edge: .leading).combined(with: .opacity)
                             ))
                     }
                     if currentPage == 1 {
-                        WelcomePage2()
+                        WelcomePage1(appeared: $appeared)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .trailing).combined(with: .opacity),
                                 removal: .move(edge: .leading).combined(with: .opacity)
                             ))
                     }
                     if currentPage == 2 {
-                        WelcomePage3()
+                        WelcomePage2()
                             .transition(.asymmetric(
                                 insertion: .move(edge: .trailing).combined(with: .opacity),
                                 removal: .move(edge: .leading).combined(with: .opacity)
                             ))
                     }
                     if currentPage == 3 {
+                        WelcomePage3()
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .move(edge: .leading).combined(with: .opacity)
+                            ))
+                    }
+                    if currentPage == 4 {
                         WelcomePage4(onComplete: onComplete)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -508,6 +515,97 @@ struct KeyCap: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(Color.gray.opacity(0.3), lineWidth: 1)
             )
+    }
+}
+
+// MARK: - Page 0: Pre-Release Warning
+
+struct PreReleaseWarningPage: View {
+    @State private var iconAppeared = false
+    @State private var textAppeared = false
+    @State private var serialAppeared = false
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Spacer()
+
+            // App icon
+            if let appIcon = NSApp.applicationIconImage {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .frame(width: 100, height: 100)
+                    .clipShape(RoundedRectangle(cornerRadius: 22))
+                    .shadow(color: .orange.opacity(0.3), radius: 20)
+                    .scaleEffect(iconAppeared ? 1.0 : 0.5)
+                    .opacity(iconAppeared ? 1.0 : 0)
+            }
+
+            // Title
+            Text("EXECUTER")
+                .font(.system(size: 32, weight: .black, design: .rounded))
+                .foregroundStyle(
+                    LinearGradient(colors: [.orange, .yellow], startPoint: .leading, endPoint: .trailing)
+                )
+                .opacity(textAppeared ? 1.0 : 0)
+
+            // Model number
+            Text(AppModel.displayString)
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.5))
+                .opacity(textAppeared ? 1.0 : 0)
+
+            // Warning badge
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.orange)
+
+                Text("PRE-RELEASE VERSION")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.orange)
+
+                Text("This is an experimental build with features under active development. Use at your own risk. Back up your data.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 30)
+            }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 20)
+            .background(Color.orange.opacity(0.1))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+            )
+            .opacity(textAppeared ? 1.0 : 0)
+
+            // Serial number
+            VStack(spacing: 4) {
+                Text("Device Serial")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.3))
+                Text(DeviceSerial.serial)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .textSelection(.enabled)
+            }
+            .opacity(serialAppeared ? 1.0 : 0)
+
+            Spacer()
+        }
+        .padding(.horizontal, 30)
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.1)) {
+                iconAppeared = true
+            }
+            withAnimation(.easeOut(duration: 0.5).delay(0.4)) {
+                textAppeared = true
+            }
+            withAnimation(.easeOut(duration: 0.5).delay(0.8)) {
+                serialAppeared = true
+            }
+        }
     }
 }
 

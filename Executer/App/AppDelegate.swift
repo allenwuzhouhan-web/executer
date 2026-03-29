@@ -7,9 +7,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var startupSound: StartupSound?
     private var permissionSetup: PermissionSetupWindowController?
     private var welcomeWindow: WelcomeWindowController?
+    private var lockdownWindow: LockdownWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("[AppDelegate] applicationDidFinishLaunching")
+
+        // SECURITY: Verify system integrity before ANYTHING else
+        let integrityResult = IntegrityChecker.verify()
+        if case .failed(let reason) = integrityResult {
+            lockdownWindow = LockdownWindow()
+            lockdownWindow?.show(reason: reason)
+            return  // DO NOT proceed with app launch
+        }
+
+        // Generate device serial on first launch (before welcome screen needs it)
+        _ = DeviceSerial.serial
+
         appState.setup()
 
         // AI awakening — rainbow glow + subtle chime

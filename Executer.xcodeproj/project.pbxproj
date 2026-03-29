@@ -247,6 +247,11 @@
 		SB000000000000000000000A /* LocalAuthentication.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = SA000000000000000000000A /* LocalAuthentication.framework */; };
 		SL0000000000000000000002 /* SmartLaunchDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = SL0000000000000000000001 /* SmartLaunchDetector.swift */; };
 		SL0000000000000000000004 /* AdaptiveSampling.swift in Sources */ = {isa = PBXBuildFile; fileRef = SL0000000000000000000003 /* AdaptiveSampling.swift */; };
+		AM0000000000000000000005 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AM0000000000000000000001 /* AppModel.swift */; };
+		AM0000000000000000000006 /* DeviceSerial.swift in Sources */ = {isa = PBXBuildFile; fileRef = AM0000000000000000000002 /* DeviceSerial.swift */; };
+		AM0000000000000000000007 /* IntegrityChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AM0000000000000000000003 /* IntegrityChecker.swift */; };
+		AM0000000000000000000008 /* LockdownWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AM0000000000000000000004 /* LockdownWindow.swift */; };
+		AM000000000000000000000A /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AM0000000000000000000009 /* IOKit.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -493,6 +498,11 @@
 		SA000000000000000000000A /* LocalAuthentication.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = LocalAuthentication.framework; path = System/Library/Frameworks/LocalAuthentication.framework; sourceTree = SDKROOT; };
 		SL0000000000000000000001 /* SmartLaunchDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartLaunchDetector.swift; sourceTree = "<group>"; };
 		SL0000000000000000000003 /* AdaptiveSampling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveSampling.swift; sourceTree = "<group>"; };
+		AM0000000000000000000001 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		AM0000000000000000000002 /* DeviceSerial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSerial.swift; sourceTree = "<group>"; };
+		AM0000000000000000000003 /* IntegrityChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrityChecker.swift; sourceTree = "<group>"; };
+		AM0000000000000000000004 /* LockdownWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockdownWindow.swift; sourceTree = "<group>"; };
+		AM0000000000000000000009 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -508,6 +518,7 @@
 				5EE8AF2DDBC5A79DD042D53F /* AVFoundation.framework in Frameworks */,
 				049CE24D97483D4021270191 /* Vision.framework in Frameworks */,
 				SB000000000000000000000A /* LocalAuthentication.framework in Frameworks */,
+				AM000000000000000000000A /* IOKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -590,6 +601,7 @@
 				E9033BB712D910C8BA6A6BBA /* SystemContext.swift */,
 				3103E10B8CDA43908855336A /* NewsBriefingService.swift */,
 				C7A8B9D0E1F2A3B4C5D6E7F8 /* AppUpdater.swift */,
+				AM0000000000000000000001 /* AppModel.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -760,6 +772,9 @@
 				EA28A59BD4A1F5EEC83A6D6D /* SecurityGateway.swift */,
 				0C60510BF505098E4B4FB558 /* ShellSanitizer.swift */,
 				8939D766E3C0BD0489CE9F67 /* ToolSafetyClassifier.swift */,
+				AM0000000000000000000002 /* DeviceSerial.swift */,
+				AM0000000000000000000003 /* IntegrityChecker.swift */,
+				AM0000000000000000000004 /* LockdownWindow.swift */,
 			);
 			path = Security;
 			sourceTree = "<group>";
@@ -1405,6 +1420,10 @@
 				SL0000000000000000000002 /* SmartLaunchDetector.swift in Sources */,
 				SL0000000000000000000004 /* AdaptiveSampling.swift in Sources */,
 				LO0000000000000000000002 /* LearningOnboarding.swift in Sources */,
+				AM0000000000000000000005 /* AppModel.swift in Sources */,
+				AM0000000000000000000006 /* DeviceSerial.swift in Sources */,
+				AM0000000000000000000007 /* IntegrityChecker.swift in Sources */,
+				AM0000000000000000000008 /* LockdownWindow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
