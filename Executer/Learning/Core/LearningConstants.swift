@@ -7,7 +7,7 @@ enum LearningConstants {
     // MARK: - Observation
 
     /// Buffer flush interval in seconds
-    static let bufferFlushInterval: TimeInterval = 30
+    static let bufferFlushInterval: TimeInterval = 15
 
     /// Auto-flush when buffer reaches this size
     static let bufferFlushThreshold = 50
@@ -39,10 +39,10 @@ enum LearningConstants {
     static let maxPatternsPerApp = 20
 
     /// Maximum recent observations kept per app (for pattern extraction)
-    static let maxRecentObservations = 500
+    static let maxRecentObservations = 1000
 
     /// Pattern extraction interval in seconds
-    static let patternExtractionInterval: TimeInterval = 300
+    static let patternExtractionInterval: TimeInterval = 120
 
     /// Similarity threshold for merging patterns (0.0–1.0)
     static let patternSimilarityThreshold = 0.8

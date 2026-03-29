@@ -4,7 +4,6 @@ struct LearningSettingsTab: View {
     @State private var isLearningEnabled = LearningConfig.shared.isLearningEnabled
     @State private var isObservationEnabled = LearningConfig.shared.isObservationEnabled
     @State private var isScreenSamplingEnabled = LearningConfig.shared.isScreenSamplingEnabled
-    @State private var screenSamplingInterval = LearningConfig.shared.screenSamplingInterval
     @State private var blockedApps = AppAllowlist.blockedApps()
     @State private var showClearConfirmation = false
 
@@ -38,19 +37,15 @@ struct LearningSettingsTab: View {
                     }
                 if isScreenSamplingEnabled {
                     HStack {
-                        Text("Sampling interval")
+                        Text("Sampling rate")
                         Spacer()
-                        Picker("", selection: $screenSamplingInterval) {
-                            Text("30s").tag(30.0)
-                            Text("60s").tag(60.0)
-                            Text("120s").tag(120.0)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 180)
-                        .onChange(of: screenSamplingInterval) { _, newValue in
-                            LearningConfig.shared.screenSamplingInterval = newValue
-                        }
+                        Text(AdaptiveSampling.shared.statusDescription())
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
+                    Text("Sampling is adaptive: aggressive during the first week to learn your workflows, then relaxes over time. Key apps (PowerPoint, Keynote) get boosted sampling automatically.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             } header: {
                 Label("Observation", systemImage: "eye")

@@ -72,11 +72,15 @@ class LearningManager {
         }
         ClipboardObserver.shared.start()
 
-        // Screen sampling timer (60s, reads visible text for attention extractors)
+        // Start smart app launch detection
+        SmartLaunchDetector.shared.start()
+
+        // Set adaptive sampling rate based on learning maturity
+        AdaptiveSampling.shared.recalculateInterval()
+
+        // Adaptive screen sampling — interval changes based on learning age and active app
         if LearningConfig.shared.isScreenSamplingEnabled {
-            screenSampleTimer = Timer.scheduledTimer(withTimeInterval: LearningConfig.shared.screenSamplingInterval, repeats: true) { [weak self] _ in
-                self?.sampleScreen()
-            }
+            startAdaptiveScreenSampling()
         }
 
         print("[Learning] Started — observing user workflows")
@@ -98,6 +102,7 @@ class LearningManager {
         }
 
         NotificationCenter.default.post(name: .learningStateChanged, object: nil, userInfo: ["isLearning": false])
+        SmartLaunchDetector.shared.stop()
         FileMonitor.shared.stop()
         ClipboardObserver.shared.stop()
         flushTimer?.invalidate()
@@ -185,6 +190,26 @@ class LearningManager {
             LearningDatabase.shared.replacePatterns(forApp: appName, patterns: profile.patterns)
         }
         print("[Learning] Extracted patterns for \(appNames.count) apps")
+    }
+
+    // MARK: - Adaptive Screen Sampling
+
+    private func startAdaptiveScreenSampling() {
+        screenSampleTimer?.invalidate()
+
+        let interval = AdaptiveSampling.shared.currentInterval
+        screenSampleTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.sampleScreen()
+
+            // Check if interval should change (app boost, time progression)
+            let newInterval = AdaptiveSampling.shared.currentInterval
+            if abs(newInterval - interval) > 1.0 {
+                // Interval changed — restart timer with new interval
+                self?.startAdaptiveScreenSampling()
+            }
+        }
+
+        print("[Learning] Screen sampling at \(Int(interval))s intervals")
     }
 
     // MARK: - Screen Sampling
