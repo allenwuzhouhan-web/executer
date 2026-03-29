@@ -6,6 +6,7 @@ struct DeveloperSettingsTab: View {
     @State private var showResetOnboarding = false
     @State private var integrityStatus = "Not checked"
     @State private var samplingStatus = AdaptiveSampling.shared.statusDescription()
+    @State private var ollamaStatus = "Not checked"
 
     var body: some View {
         Form {
@@ -80,14 +81,17 @@ struct DeveloperSettingsTab: View {
 
             Section {
                 LabeledContent("Ollama") {
-                    Text("localhost:11434")
+                    Text(ollamaStatus)
                         .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ollamaStatus.contains("Running") ? .green : ollamaStatus.contains("Not") ? .red : .secondary)
                 }
                 Button("Check Ollama Status") {
+                    ollamaStatus = "Checking..."
                     Task {
                         let available = await OllamaRouter.shared.isAvailable()
-                        integrityStatus = available ? "Ollama: Running" : "Ollama: Not running"
+                        await MainActor.run {
+                            ollamaStatus = available ? "Running (localhost:11434)" : "Not running"
+                        }
                     }
                 }
             } header: {
