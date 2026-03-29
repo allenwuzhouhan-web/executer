@@ -84,17 +84,48 @@ struct ListLearnedAppsTool: ToolDefinition {
 /// Tool that returns the current active work session.
 struct GetCurrentSessionTool: ToolDefinition {
     let name = "get_current_session"
-    let description = "Get what the user is currently working on — the active work session with topic, duration, and apps used. Use this to understand the user's current context."
+    let description = "Get what the user is currently working on — reads the screen, detects apps, and reports the active session. Use this to understand the user's current context."
 
     var parameters: [String: Any] {
         JSONSchema.object(properties: [:])
     }
 
     func execute(arguments: String) async throws -> String {
-        guard let session = SessionDetector.shared.currentSession() else {
-            return "No active work session detected. The user may be idle or just started."
+        var parts: [String] = []
+
+        // 1. What app is the user actually in? (captured before input bar opened)
+        let delegate = NSApplication.shared.delegate as? AppDelegate
+        let userApp = delegate?.appState.lastFrontmostAppName ?? "Unknown"
+        parts.append("**Frontmost app:** \(userApp)")
+
+        // 2. Read visible text from that app (actual screen content)
+        if let app = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == userApp }) {
+            let texts = ScreenReader.readVisibleText(pid: app.processIdentifier)
+            if !texts.isEmpty {
+                let preview = texts.prefix(20).joined(separator: " | ")
+                parts.append("**Visible on screen:** \(String(preview.prefix(500)))")
+            }
         }
-        return session.summary()
+
+        // 3. What other apps are running?
+        let running = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.localizedName != nil }
+            .map { $0.localizedName! }
+        parts.append("**Running apps:** \(running.joined(separator: ", "))")
+
+        // 4. Session data (if available)
+        if let session = SessionDetector.shared.currentSession() {
+            parts.append("\n**Active session:** \(session.title) (\(session.durationFormatted))")
+            parts.append("**Session apps:** \(session.apps.joined(separator: " → "))")
+            if !session.topics.isEmpty {
+                parts.append("**Topics:** \(session.topics.sorted().prefix(5).joined(separator: ", "))")
+            }
+        }
+
+        // 5. Explicit instruction to prevent hallucination
+        parts.append("\nIMPORTANT: Only report what is shown above. Do NOT invent app usage times, hours invested, or project details that aren't in this data.")
+
+        return parts.joined(separator: "\n")
     }
 }
 
