@@ -184,8 +184,9 @@ class SmartRouter {
                 if prefixes.contains(where: { cmd.hasPrefix($0) }) { return true }
                 if suffixes.contains(where: { cmd.hasSuffix($0) }) { return true }
                 if keywords.contains(where: { cmd.contains($0) }) { return true }
-                // Short questions
-                if cmd.hasSuffix("?") && cmd.count < 80 { return true }
+                // Short PURE KNOWLEDGE questions only — must start with a knowledge prefix
+                // Do NOT catch-all short questions — that kills tool-needing queries like
+                // "whats on news?", "what apps open?", "what am I working on?"
                 return false
             },
             nil,
