@@ -38,11 +38,28 @@ class SkillsManager {
         return dir.appendingPathComponent("rejected_skills.json")
     }()
 
+    /// Folder-based skill catalog: ~/Library/Application Support/Executer/skills/
+    private let skillsDirectoryURL: URL = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("Executer/skills", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
     private(set) var stagedPendingSkills: [Skill] = []
     private(set) var stagedRejectedSkills: [Skill] = []
 
     private init() {
-        skills = Self.defaultSkills + loadUserSkills()
+        // Export built-in skills to folder on first run
+        exportDefaultSkillsIfNeeded()
+        // Load: defaults → directory overrides → user overrides
+        let directorySkills = loadSkillsFromDirectory()
+        let userSkills = loadUserSkills()
+        var skillMap: [String: Skill] = [:]
+        for skill in Self.defaultSkills { skillMap[skill.name] = skill }
+        for skill in directorySkills { skillMap[skill.name] = skill }
+        for skill in userSkills { skillMap[skill.name] = skill }
+        skills = Array(skillMap.values).sorted { $0.name < $1.name }
         stagedPendingSkills = loadSkills(from: pendingSkillsURL)
         stagedRejectedSkills = loadSkills(from: rejectedSkillsURL)
         print("[Skills] Loaded \(skills.count) active (\(Self.defaultSkills.count) built-in, \(skills.count - Self.defaultSkills.count) user), \(stagedPendingSkills.count) pending, \(stagedRejectedSkills.count) rejected")
@@ -195,6 +212,82 @@ class SkillsManager {
         cachedPromptSection = result
         return result
     }
+
+    // MARK: - Folder-Based Skill Catalog
+
+    /// Load all skill files from the skills/ directory.
+    private func loadSkillsFromDirectory() -> [Skill] {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: skillsDirectoryURL, includingPropertiesForKeys: nil) else { return [] }
+        var allSkills: [Skill] = []
+        for file in files where file.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: file),
+                  let loaded = try? JSONDecoder().decode([Skill].self, from: data) else { continue }
+            allSkills.append(contentsOf: loaded)
+        }
+        return allSkills
+    }
+
+    /// Export built-in skills to categorized JSON files on first run.
+    private func exportDefaultSkillsIfNeeded() {
+        let fm = FileManager.default
+        if let files = try? fm.contentsOfDirectory(at: skillsDirectoryURL, includingPropertiesForKeys: nil),
+           files.contains(where: { $0.pathExtension == "json" }) { return }
+
+        let categories: [String: [String]] = [
+            "research": ["deep_research", "light_research", "compare", "summarize_url", "lookup_formula", "search_and_summarize", "save_webpage"],
+            "system_control": ["organize_desktop", "cleanup_downloads", "close_all_apps", "system_health", "focus_session", "morning_briefing", "screen_break", "empty_trash", "eject_drives", "check_storage", "kill_process", "flush_dns", "show_network_info"],
+            "ui_automation": ["click_on", "fill_form", "fullscreen_app", "app_automation", "multi_step_ui", "navigate_menu", "tile_workspace", "arrange_side_by_side", "move_window_to_display", "zoom_screen"],
+            "media_accessibility": ["play_song", "dictate_here", "set_wallpaper", "record_screen", "read_aloud", "night_mode"],
+            "communication": ["compose_email", "schedule_message"],
+            "documents": ["create_presentation", "create_word_document", "create_spreadsheet", "learn_document_style", "read_office_document"],
+            "coding_dev": ["explain_code", "git_summary", "open_project", "run_script", "search_code", "git_commit", "create_python_env"],
+            "text_utilities": ["text_transform", "translate_clipboard", "summarize_clipboard", "define_word", "generate_password"],
+            "file_operations": ["sort_downloads", "find_large_files", "find_duplicates", "compress_files", "extract_archive", "batch_rename", "download_file"],
+            "productivity": ["quick_capture", "daily_calendar", "countdown", "convert_units", "quick_math", "screenshot_ocr", "clipboard_summary", "create_automation_rule", "set_multiple_timers"],
+            "meta_learning": ["learn_new_skill", "list_all_skills"],
+        ]
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        for (category, names) in categories {
+            let catSkills = Self.defaultSkills.filter { names.contains($0.name) }
+            guard !catSkills.isEmpty else { continue }
+            if let data = try? encoder.encode(catSkills) {
+                try? data.write(to: skillsDirectoryURL.appendingPathComponent("\(category).json"), options: .atomic)
+            }
+        }
+        print("[Skills] Exported \(Self.defaultSkills.count) skills to \(categories.count) category files")
+    }
+
+    /// Save a skill to a category file.
+    func saveToCategory(_ skill: Skill, category: String) {
+        let file = skillsDirectoryURL.appendingPathComponent("\(category).json")
+        var existing: [Skill] = []
+        if let data = try? Data(contentsOf: file),
+           let loaded = try? JSONDecoder().decode([Skill].self, from: data) { existing = loaded }
+        existing.removeAll { $0.name == skill.name }
+        existing.append(skill)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(existing) { try? data.write(to: file, options: .atomic) }
+        reloadSkills()
+    }
+
+    /// Reload all skills from all sources.
+    func reloadSkills() {
+        let directorySkills = loadSkillsFromDirectory()
+        let userSkills = loadUserSkills()
+        var skillMap: [String: Skill] = [:]
+        for skill in Self.defaultSkills { skillMap[skill.name] = skill }
+        for skill in directorySkills { skillMap[skill.name] = skill }
+        for skill in userSkills { skillMap[skill.name] = skill }
+        skills = Array(skillMap.values).sorted { $0.name < $1.name }
+        cachedPromptSection = nil
+        print("[Skills] Reloaded: \(skills.count) total skills")
+    }
+
+    /// Get the skills directory path (for user access).
+    var skillsDirectory: String { skillsDirectoryURL.path }
 
     // MARK: - Persistence
 
@@ -781,6 +874,332 @@ RULES:
                 "Use `click_element` on the target menu item (e.g., 'File' in the menu bar).",
                 "If a submenu is needed, use `click_element` again on the submenu item.",
                 "Report: 'Selected [menu item] from [menu].'"
+            ]
+        ),
+
+        // MARK: - Extended Skill Library (50+ total)
+
+        // === SYSTEM CONTROL ===
+        Skill(
+            name: "empty_trash",
+            description: "Securely empty the macOS Trash.",
+            exampleTriggers: ["empty trash", "clear trash", "delete trash"],
+            steps: [
+                "Use `run_shell_command` with `osascript -e 'tell application \"Finder\" to empty trash'` to empty the trash.",
+                "Report: 'Trash emptied.'"
+            ]
+        ),
+        Skill(
+            name: "eject_drives",
+            description: "Safely eject all mounted external drives.",
+            exampleTriggers: ["eject drives", "eject usb", "unmount drives", "safely remove"],
+            steps: [
+                "Use `run_shell_command` with `diskutil list external` to find external drives.",
+                "For each external volume, use `run_shell_command` with `diskutil eject [disk]`.",
+                "Report which drives were ejected."
+            ]
+        ),
+        Skill(
+            name: "check_storage",
+            description: "Show disk space usage breakdown by folder.",
+            exampleTriggers: ["disk space", "storage usage", "how much space", "what's using space"],
+            steps: [
+                "Use `run_shell_command` with `df -h /` to get total disk usage.",
+                "Use `run_shell_command` with `du -sh ~/Desktop ~/Documents ~/Downloads ~/Library ~/Movies ~/Music ~/Pictures 2>/dev/null | sort -rh` to show per-folder breakdown.",
+                "Present a clean summary: total used/free, top folders by size."
+            ]
+        ),
+        Skill(
+            name: "kill_process",
+            description: "Find and kill a running process by name.",
+            exampleTriggers: ["kill process", "force quit", "stop process", "kill app"],
+            steps: [
+                "Use `run_shell_command` with `pgrep -fl [name]` to find matching processes.",
+                "Show the user which processes match and ask for confirmation.",
+                "Use `run_shell_command` with `kill [pid]` (or `kill -9 [pid]` if force needed).",
+                "Report: 'Process [name] (PID [pid]) terminated.'"
+            ]
+        ),
+        Skill(
+            name: "flush_dns",
+            description: "Flush the DNS cache to fix network issues.",
+            exampleTriggers: ["flush dns", "clear dns", "dns cache", "fix dns"],
+            steps: [
+                "Use `run_shell_command` with `sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder`.",
+                "Report: 'DNS cache flushed.'"
+            ]
+        ),
+        Skill(
+            name: "show_network_info",
+            description: "Show current network configuration: IP, DNS, gateway, WiFi details.",
+            exampleTriggers: ["network info", "my ip address", "wifi details", "network config"],
+            steps: [
+                "Use `run_shell_command` with `ifconfig en0 | grep inet` for local IP.",
+                "Use `run_shell_command` with `networksetup -getdnsservers Wi-Fi` for DNS.",
+                "Use `run_shell_command` with `curl -s ifconfig.me` for public IP.",
+                "Present: local IP, public IP, DNS servers, WiFi network name."
+            ]
+        ),
+
+        // === FILE OPERATIONS ===
+        Skill(
+            name: "find_large_files",
+            description: "Find the largest files on disk to free up space.",
+            exampleTriggers: ["find large files", "big files", "what's taking space", "largest files"],
+            steps: [
+                "Use `run_shell_command` with `find ~ -type f -size +100M -exec ls -lh {} \\; 2>/dev/null | sort -k5 -rh | head -20`.",
+                "Present as a ranked list: filename, size, path.",
+                "Suggest which files might be safe to delete (caches, old downloads, etc.)."
+            ]
+        ),
+        Skill(
+            name: "find_duplicates",
+            description: "Find duplicate files in a directory by comparing checksums.",
+            exampleTriggers: ["find duplicates", "duplicate files", "find copies"],
+            steps: [
+                "Ask which directory to scan (default: ~/Downloads).",
+                "Use `run_shell_command` with `find [dir] -type f -exec md5 {} \\; 2>/dev/null | sort | uniq -d -w 32`.",
+                "Present duplicate groups with file paths and sizes.",
+                "Ask before deleting any duplicates."
+            ]
+        ),
+        Skill(
+            name: "compress_files",
+            description: "Compress files or folders into a zip archive.",
+            exampleTriggers: ["zip files", "compress folder", "create archive", "zip this"],
+            steps: [
+                "Identify the target files/folder from the user's request. Use `find_files` if needed.",
+                "Use `run_shell_command` with `zip -r [output.zip] [input]` to create the archive.",
+                "Report: 'Created [output.zip] ([size]).'"
+            ]
+        ),
+        Skill(
+            name: "extract_archive",
+            description: "Extract a zip, tar, or other archive file.",
+            exampleTriggers: ["unzip file", "extract archive", "decompress", "open zip"],
+            steps: [
+                "Identify the archive file. Use `find_files` if path not given.",
+                "Detect format from extension (.zip, .tar.gz, .rar, .7z).",
+                "Use `run_shell_command` with the appropriate command (unzip, tar -xzf, etc.).",
+                "Report: 'Extracted to [directory].'"
+            ]
+        ),
+        Skill(
+            name: "sort_downloads",
+            description: "Sort files in Downloads into subfolders by type (images, documents, videos, etc.).",
+            exampleTriggers: ["sort downloads", "organize downloads", "clean up downloads folder"],
+            steps: [
+                "Use `run_shell_command` to list files in ~/Downloads.",
+                "Categorize by extension: images (.jpg,.png,.gif), documents (.pdf,.docx,.xlsx), videos (.mp4,.mov), archives (.zip,.dmg), code (.py,.js,.swift).",
+                "Create subfolders if they don't exist: `mkdir -p ~/Downloads/{Images,Documents,Videos,Archives,Code,Other}`.",
+                "Move each file to its category folder using `run_shell_command` with `mv`.",
+                "Report: 'Sorted N files into M categories.'"
+            ]
+        ),
+
+        // === WEB & RESEARCH ===
+        Skill(
+            name: "open_multiple_urls",
+            description: "Open multiple URLs in browser tabs at once.",
+            exampleTriggers: ["open these links", "open multiple urls", "open all links"],
+            steps: [
+                "Parse URLs from the user's request or clipboard.",
+                "For each URL, use `open_url` to open it in the default browser.",
+                "Report: 'Opened N tabs.'"
+            ]
+        ),
+        Skill(
+            name: "search_and_summarize",
+            description: "Search the web for a topic and provide a concise summary from multiple sources.",
+            exampleTriggers: ["research and summarize", "what's the latest on", "find out about"],
+            steps: [
+                "Use `instant_search` with the user's query to find relevant results.",
+                "Use `fetch_url_content` on the top 3-4 results in parallel.",
+                "Synthesize a concise summary from all sources, citing which information came from where.",
+                "Copy the summary to clipboard with `set_clipboard_text`."
+            ]
+        ),
+        Skill(
+            name: "save_webpage",
+            description: "Save a webpage's content as a local text file.",
+            exampleTriggers: ["save this page", "save webpage", "download page text"],
+            steps: [
+                "Get the URL from the user or use `get_safari_url`/`get_chrome_url`.",
+                "Use `fetch_url_content` to get the page text.",
+                "Use `write_file` to save it to ~/Documents/saved_pages/[title].txt.",
+                "Report: 'Saved page content to [path].'"
+            ]
+        ),
+
+        // === CODING & DEVELOPMENT ===
+        Skill(
+            name: "run_script",
+            description: "Run a Python, Shell, or Node script from a file or inline.",
+            exampleTriggers: ["run this script", "execute python", "run shell script", "run node"],
+            steps: [
+                "Detect the language from the file extension or user's specification.",
+                "If inline code, use `write_file` to save to a temp file.",
+                "Use `run_shell_command` with the appropriate interpreter (python3, bash, node).",
+                "Report the output. Clean up temp files if created."
+            ]
+        ),
+        Skill(
+            name: "search_code",
+            description: "Search for text patterns across files in a project directory.",
+            exampleTriggers: ["search code for", "find in code", "grep for", "where is this used"],
+            steps: [
+                "Get the search pattern and directory from the user.",
+                "Use `search_file_contents` with the pattern and directory.",
+                "Present results grouped by file with line numbers and context."
+            ]
+        ),
+        Skill(
+            name: "git_commit",
+            description: "Stage changes and create a git commit with a message.",
+            exampleTriggers: ["commit changes", "git commit", "save my changes"],
+            steps: [
+                "Use `run_shell_command` with `git -C [dir] status` to show changes.",
+                "Use `run_shell_command` with `git -C [dir] diff --stat` to show what changed.",
+                "Ask the user for a commit message or suggest one based on the changes.",
+                "Use `run_shell_command` with `git -C [dir] add -A && git -C [dir] commit -m '[message]'`.",
+                "Report: 'Committed: [message] ([N files changed])'"
+            ]
+        ),
+        Skill(
+            name: "create_python_env",
+            description: "Create a Python virtual environment and install packages.",
+            exampleTriggers: ["create python env", "new venv", "python virtual environment", "pip install"],
+            steps: [
+                "Use `run_shell_command` with `python3 -m venv [dir]/venv` to create the environment.",
+                "If packages specified, use `run_shell_command` with `[dir]/venv/bin/pip install [packages]`.",
+                "Report: 'Virtual environment created at [dir]/venv. Activate with: source [dir]/venv/bin/activate'"
+            ]
+        ),
+
+        // === MEDIA & ENTERTAINMENT ===
+        Skill(
+            name: "set_wallpaper",
+            description: "Change the desktop wallpaper to an image file or URL.",
+            exampleTriggers: ["change wallpaper", "set desktop background", "new wallpaper"],
+            steps: [
+                "If a URL was given, use `run_shell_command` with `curl -sL -o /tmp/wallpaper.jpg '[url]'` to download.",
+                "If a file path was given, verify it exists with `run_shell_command`.",
+                "Use `run_shell_command` with `osascript -e 'tell application \"System Events\" to set picture of every desktop to POSIX file \"[path]\"'`.",
+                "Report: 'Wallpaper changed.'"
+            ]
+        ),
+        Skill(
+            name: "record_screen",
+            description: "Start or stop a screen recording.",
+            exampleTriggers: ["record screen", "screen recording", "start recording", "capture video"],
+            steps: [
+                "Use `hotkey` with Command+Shift+5 to open the screen recording toolbar.",
+                "Tell the user: 'Screen recording toolbar opened. Click Record to start, or use the menu to choose area recording.'",
+                "To stop: use `hotkey` with Command+Shift+5 again or click Stop in the menu bar."
+            ]
+        ),
+
+        // === ACCESSIBILITY & DISPLAY ===
+        Skill(
+            name: "zoom_screen",
+            description: "Zoom in or out on the screen for accessibility.",
+            exampleTriggers: ["zoom in", "zoom out", "make screen bigger", "magnify"],
+            steps: [
+                "For zoom in: use `hotkey` with Option+Command+= (equals).",
+                "For zoom out: use `hotkey` with Option+Command+- (minus).",
+                "For reset: use `hotkey` with Option+Command+8 to toggle zoom.",
+                "Report what was done."
+            ]
+        ),
+        Skill(
+            name: "read_aloud",
+            description: "Read text aloud using macOS text-to-speech.",
+            exampleTriggers: ["read this aloud", "speak this text", "text to speech", "say this"],
+            steps: [
+                "Get text from user's request or clipboard with `get_clipboard_text`.",
+                "Use `speak_text` to read the text aloud using the system voice.",
+                "Report: 'Reading aloud...'"
+            ]
+        ),
+        Skill(
+            name: "night_mode",
+            description: "Enable a comfortable night setup: dark mode, Night Shift, reduced brightness.",
+            exampleTriggers: ["night mode", "bedtime mode", "reduce eye strain", "night shift"],
+            steps: [
+                "Use `set_dark_mode` to enable dark mode.",
+                "Use `run_shell_command` to enable Night Shift if available.",
+                "Use `set_brightness` to reduce brightness to 30%.",
+                "Use `set_volume` to reduce volume to 20%.",
+                "Report: 'Night mode activated: dark mode on, Night Shift on, brightness 30%, volume 20%.'"
+            ]
+        ),
+
+        // === WINDOW MANAGEMENT ===
+        Skill(
+            name: "arrange_side_by_side",
+            description: "Arrange two apps side by side, each taking half the screen.",
+            exampleTriggers: ["side by side", "split screen", "tile two apps", "half and half"],
+            steps: [
+                "Identify the two apps from the user's request.",
+                "Use `launch_app` for any that aren't running.",
+                "Use `tile_windows_side_by_side` with both app names.",
+                "Report: '[App1] and [App2] tiled side by side.'"
+            ]
+        ),
+        Skill(
+            name: "move_window_to_display",
+            description: "Move the current window to another display/monitor.",
+            exampleTriggers: ["move to other screen", "switch display", "move window to monitor"],
+            steps: [
+                "Use `list_windows` to find the current window.",
+                "Use `move_window` to reposition it on the target display.",
+                "Report: 'Window moved to [display].'"
+            ]
+        ),
+
+        // === AUTOMATION & SCHEDULING ===
+        Skill(
+            name: "create_automation_rule",
+            description: "Create an automation rule that triggers on events (app launch, time, WiFi, etc.).",
+            exampleTriggers: ["automate when", "create rule", "when I open", "every day at"],
+            steps: [
+                "Parse the trigger (app launch, time of day, WiFi connect, etc.) and action from the user's request.",
+                "Use `create_automation_rule` with the appropriate trigger type and action.",
+                "Report: 'Rule created: When [trigger], [action].'"
+            ]
+        ),
+        Skill(
+            name: "set_multiple_timers",
+            description: "Set multiple timers or reminders at once.",
+            exampleTriggers: ["set timers for", "multiple reminders", "remind me at"],
+            steps: [
+                "Parse all timer durations and labels from the user's request.",
+                "For each timer, use `set_timer` with the duration and label.",
+                "Report: 'Set N timers: [list with times].'"
+            ]
+        ),
+
+        // === LEARNING & SELF-IMPROVEMENT ===
+        Skill(
+            name: "learn_new_skill",
+            description: "Teach the agent a new skill by describing the steps.",
+            exampleTriggers: ["teach you", "learn this", "remember how to", "save this workflow"],
+            steps: [
+                "Ask the user to describe the skill: name, what it does, and the steps.",
+                "Format the steps as tool-based instructions.",
+                "Use `save_skill` to save the new skill with name, description, triggers, and steps.",
+                "Report: 'Learned new skill: [name]. You can trigger it with: [triggers].'"
+            ]
+        ),
+        Skill(
+            name: "list_all_skills",
+            description: "Show all available skills organized by category.",
+            exampleTriggers: ["show all skills", "what can you do", "list capabilities", "skill catalog"],
+            steps: [
+                "Use `list_skills` to get all available skills.",
+                "Group skills by category (research, system, UI, coding, etc.).",
+                "Present as a categorized list with skill name and one-line description.",
+                "Mention that the user can say any trigger phrase to use a skill."
             ]
         ),
     ]
