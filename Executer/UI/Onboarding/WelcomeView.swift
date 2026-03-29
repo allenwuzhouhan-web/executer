@@ -551,7 +551,7 @@ struct PreReleaseWarningPage: View {
             // Model number
             Text(AppModel.displayString)
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
                 .opacity(textAppeared ? 1.0 : 0)
 
             // Warning badge
@@ -566,7 +566,7 @@ struct PreReleaseWarningPage: View {
 
                 Text("This is an experimental build with features under active development. Use at your own risk. Back up your data.")
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.primary.opacity(0.6))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
             }
@@ -584,10 +584,10 @@ struct PreReleaseWarningPage: View {
             VStack(spacing: 4) {
                 Text("Device Serial")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(.primary.opacity(0.3))
                 Text(DeviceSerial.serial)
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.primary.opacity(0.5))
                     .textSelection(.enabled)
             }
             .opacity(serialAppeared ? 1.0 : 0)
