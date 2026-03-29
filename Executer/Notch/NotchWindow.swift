@@ -125,11 +125,13 @@ class NotchWindow: NSPanel {
                 animator().setFrame(expanded, display: true)
             }
         } else {
+            // Shrink first, THEN fade black — never show transparent expanded notch
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.25
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 animator().setFrame(originalFrame, display: true)
-                blackView.animator().alphaValue = 0
+            } completionHandler: { [weak self] in
+                self?.blackView.alphaValue = 0
             }
         }
     }
