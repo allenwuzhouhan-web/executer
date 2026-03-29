@@ -6,6 +6,7 @@ struct LearningSettingsTab: View {
     @State private var isScreenSamplingEnabled = LearningConfig.shared.isScreenSamplingEnabled
     @State private var blockedApps = AppAllowlist.blockedApps()
     @State private var showClearConfirmation = false
+    @State private var isContextInjectionEnabled = LearningConfig.shared.isContextInjectionEnabled
 
     var body: some View {
         Form {
@@ -49,6 +50,64 @@ struct LearningSettingsTab: View {
                 }
             } header: {
                 Label("Observation", systemImage: "eye")
+            }
+
+            Section {
+                Toggle("Inject learned context into prompts", isOn: $isContextInjectionEnabled)
+                    .onChange(of: isContextInjectionEnabled) { _, newValue in
+                        LearningConfig.shared.isContextInjectionEnabled = newValue
+                    }
+                Text("When ON, your learned patterns are included in AI prompts for better answers. When OFF, learning still observes but doesn't affect responses (saves tokens).")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("Observation (screen, apps, files, clipboard)")
+                        Spacer()
+                        Text("FREE")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.green)
+                    }
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("Pattern extraction & session detection")
+                        Spacer()
+                        Text("FREE")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundColor(.green)
+                    }
+                    HStack {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundColor(.blue)
+                            .font(.caption)
+                        Text("Context injection per AI prompt")
+                        Spacer()
+                        Text("~$0.002")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    HStack {
+                        Image(systemName: "dollarsign.circle")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                        Text("Learning overhead today")
+                        Spacer()
+                        Text("\(CostTracker.shared.learningTokensToday) tokens")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .font(.caption)
+            } header: {
+                Label("Cost Impact", systemImage: "dollarsign.circle")
             }
 
             Section {

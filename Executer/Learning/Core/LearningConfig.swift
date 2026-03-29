@@ -19,6 +19,7 @@ final class LearningConfig {
             Keys.patternExtractionEnabled: true,
             Keys.screenSamplingEnabled: true,
             Keys.screenSamplingInterval: 60.0,
+            Keys.contextInjectionEnabled: true,
         ])
     }
 
@@ -30,6 +31,7 @@ final class LearningConfig {
         static let patternExtractionEnabled = "learning_pattern_extraction_enabled"
         static let screenSamplingEnabled = "learning_screen_sampling_enabled"
         static let screenSamplingInterval = "learning_screen_sampling_interval"
+        static let contextInjectionEnabled = "learning_context_injection_enabled"
     }
 
     // MARK: - Properties
@@ -62,5 +64,11 @@ final class LearningConfig {
     var screenSamplingInterval: TimeInterval {
         get { defaults.double(forKey: Keys.screenSamplingInterval) }
         set { defaults.set(newValue, forKey: Keys.screenSamplingInterval) }
+    }
+
+    /// Toggle for injecting learned context into LLM prompts (saves tokens when off)
+    var isContextInjectionEnabled: Bool {
+        get { defaults.bool(forKey: Keys.contextInjectionEnabled) }
+        set { defaults.set(newValue, forKey: Keys.contextInjectionEnabled) }
     }
 }

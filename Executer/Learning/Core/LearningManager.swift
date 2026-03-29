@@ -85,6 +85,9 @@ class LearningManager {
 
         print("[Learning] Started — observing user workflows")
 
+        // Show one-time onboarding message
+        LearningOnboarding.showIfNeeded()
+
         // Show subtle learning indicator
         DispatchQueue.main.async {
             LearningGlowWindow.shared.show()

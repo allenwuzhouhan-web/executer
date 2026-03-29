@@ -19,6 +19,7 @@ final class CostTracker {
 
     private var dailyInputTokens: Int = 0
     private var dailyOutputTokens: Int = 0
+    private(set) var learningTokensToday: Int = 0
     private var dailyCostUSD: Double = 0.0
     private var monthlyCostUSD: Double = 0.0
     private var lastResetDate: Date
@@ -99,6 +100,13 @@ final class CostTracker {
         }
     }
 
+    /// Record tokens specifically from learning context injection.
+    func recordLearningOverhead(tokens: Int) {
+        lock.lock()
+        learningTokensToday += tokens
+        lock.unlock()
+    }
+
     // MARK: - Queries
 
     /// Check if daily spending exceeds budget threshold.
@@ -130,6 +138,7 @@ final class CostTracker {
             dailyInputTokens = 0
             dailyOutputTokens = 0
             hasNotifiedToday = false
+            learningTokensToday = 0
             lastResetDate = now
             defaults.set(0.0, forKey: "cost_daily_total")
             defaults.set(0, forKey: "cost_daily_input_tokens")

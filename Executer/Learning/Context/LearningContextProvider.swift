@@ -13,6 +13,14 @@ enum LearningContextProvider {
     /// Returns the complete learning context for prompt injection.
     /// Combines patterns + session awareness + attention data.
     static func fullContextSection(forApp appName: String, query: String = "") -> String {
+        // Check if context injection is enabled
+        guard LearningConfig.shared.isContextInjectionEnabled else { return "" }
+
+        // Smart injection: skip if query is unrelated to learned context
+        if !query.isEmpty && !isQueryRelevant(query, forApp: appName) {
+            return ""
+        }
+
         var sections: [String] = []
 
         // Layer 1: Pattern context (from Phase 1)
@@ -108,5 +116,36 @@ enum LearningContextProvider {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: - Smart Injection (Cost Optimization)
+
+    /// Check if a query is relevant to learned context.
+    /// Returns true if we should inject learning context, false to save tokens.
+    private static func isQueryRelevant(_ query: String, forApp appName: String) -> Bool {
+        let lower = query.lowercased()
+
+        // Always inject if asking about learning itself
+        let learningKeywords = ["working on", "my goals", "my patterns", "learned", "session", "workflow", "routine", "today", "yesterday"]
+        if learningKeywords.contains(where: { lower.contains($0) }) { return true }
+
+        // Always inject if the frontmost app has learned patterns
+        let patterns = LearningDatabase.shared.topPatterns(forApp: appName, limit: 1)
+        if !patterns.isEmpty { return true }
+
+        // Inject if query overlaps with current session topics
+        if let session = SessionDetector.shared.currentSession() {
+            let sessionTopics = session.topics.map { $0.lowercased() }
+            if sessionTopics.contains(where: { lower.contains($0) }) { return true }
+        }
+
+        // Inject if query overlaps with active goals
+        let goals = GoalTracker.shared.topGoals(limit: 3)
+        for goal in goals {
+            if goal.relatedTopics.contains(where: { lower.contains($0.lowercased()) }) { return true }
+        }
+
+        // Skip injection for generic/unrelated queries (saves ~560 tokens)
+        return false
     }
 }
