@@ -83,8 +83,16 @@ class FormulaDatabase {
 
         // Return top match if score is good enough
         let (bestIdx, bestScore) = scores[0]
-        let minScore = max(2, queryWords.count) // Require reasonable relevance
-        guard bestScore >= minScore else { return nil }
+        // Require strong relevance — avoid matching generic queries to random formulas.
+        // At least 5 points needed (an exact tag match + name match, or multiple strong hits).
+        // Also require that at least 40% of query words matched something.
+        let matchedWords = queryWords.filter { word in
+            formulas[scores[0].0].tags.contains(where: { $0.lowercased().contains(word) }) ||
+            formulas[scores[0].0].name.lowercased().contains(word)
+        }
+        let matchRatio = Double(matchedWords.count) / Double(queryWords.count)
+        let minScore = max(5, queryWords.count * 2)
+        guard bestScore >= minScore, matchRatio >= 0.4 else { return nil }
 
         let formula = formulas[bestIdx]
 
