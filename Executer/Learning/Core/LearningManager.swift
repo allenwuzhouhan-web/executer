@@ -80,10 +80,24 @@ class LearningManager {
         }
 
         print("[Learning] Started — observing user workflows")
+
+        // Show subtle learning indicator
+        DispatchQueue.main.async {
+            LearningGlowWindow.shared.show()
+        }
+
+        NotificationCenter.default.post(name: .learningStateChanged, object: nil, userInfo: ["isLearning": true])
     }
 
     func stop() {
         AppObserver.shared.stop()
+
+        // Hide learning indicator
+        DispatchQueue.main.async {
+            LearningGlowWindow.shared.hide()
+        }
+
+        NotificationCenter.default.post(name: .learningStateChanged, object: nil, userInfo: ["isLearning": false])
         FileMonitor.shared.stop()
         ClipboardObserver.shared.stop()
         flushTimer?.invalidate()
@@ -252,4 +266,8 @@ class LearningManager {
     var learnedApps: [(name: String, patternCount: Int, actionCount: Int)] {
         LearningDatabase.shared.allAppNames().map { ($0.name, $0.patternCount, $0.observationCount) }
     }
+}
+
+extension Notification.Name {
+    static let learningStateChanged = Notification.Name("com.executer.learningStateChanged")
 }

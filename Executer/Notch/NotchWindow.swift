@@ -7,6 +7,7 @@ class NotchWindow: NSPanel {
     private var blackView: NotchShapeView!
     private var glowView: NotchGlowView!
     private var isHovered = false
+    private var learningDot: LearningDotView!
     private var isDragHovered = false
     private var originalFrame: CGRect = .zero
     private let filletRadius: CGFloat = 6
@@ -56,6 +57,20 @@ class NotchWindow: NSPanel {
         container.addSubview(clickView)
 
         contentView = container
+
+        // Learning indicator: small teal pulsing dot at bottom-center of notch
+        learningDot = LearningDotView(frame: CGRect(x: 0, y: 0, width: 6, height: 6))
+        learningDot.alphaValue = 0
+        container.addSubview(learningDot)
+
+        // Observe learning state
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(learningStateChanged(_:)),
+            name: .learningStateChanged,
+            object: nil
+        )
+
         updateFrame()
 
         NotificationCenter.default.addObserver(
@@ -72,6 +87,16 @@ class NotchWindow: NSPanel {
             return
         }
         setFrame(notchRect, display: true)
+
+        // Center learning dot at bottom of notch
+        let dotSize: CGFloat = 6
+        learningDot.frame = CGRect(
+            x: (notchRect.width - dotSize) / 2,
+            y: 4,
+            width: dotSize,
+            height: dotSize
+        )
+
         if !isHovered {
             originalFrame = notchRect
         }
@@ -148,6 +173,14 @@ class NotchWindow: NSPanel {
 
     @objc private func screenDidChange(_ notification: Notification) {
         updateFrame()
+    }
+
+    @objc private func learningStateChanged(_ notification: Notification) {
+        let isLearning = notification.userInfo?["isLearning"] as? Bool ?? false
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.5
+            learningDot.animator().alphaValue = isLearning ? 1.0 : 0.0
+        }
     }
 
     override var canBecomeKey: Bool { false }
@@ -378,5 +411,40 @@ class NotchGlowView: NSView {
 
     func stopPulsing() {
         glowLayer.removeAllAnimations()
+    }
+}
+
+// MARK: - Learning indicator dot
+
+class LearningDotView: NSView {
+    private let dotLayer = CALayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+
+        dotLayer.backgroundColor = NSColor(hue: 0.52, saturation: 0.4, brightness: 1.0, alpha: 0.8).cgColor
+        dotLayer.cornerRadius = 3
+        dotLayer.shadowColor = NSColor(hue: 0.52, saturation: 0.5, brightness: 1.0, alpha: 1.0).cgColor
+        dotLayer.shadowRadius = 4
+        dotLayer.shadowOpacity = 0.6
+        dotLayer.shadowOffset = .zero
+        layer?.addSublayer(dotLayer)
+
+        // Gentle pulse
+        let pulse = CAKeyframeAnimation(keyPath: "opacity")
+        pulse.values = [0.5, 1.0, 0.5]
+        pulse.keyTimes = [0, 0.5, 1.0]
+        pulse.duration = 3.0
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        pulse.repeatCount = .infinity
+        dotLayer.add(pulse, forKey: "pulse")
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        dotLayer.frame = bounds
     }
 }

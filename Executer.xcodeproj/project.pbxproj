@@ -91,6 +91,7 @@
 		47AA1863393F0B638C553FDE /* LaunchGlowWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44E276FCD407830EBA037DC0 /* LaunchGlowWindow.swift */; };
 		7A410F349064AC42670F83DB /* ResponseGlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A557373AF4A244EA2FC5EA56 /* ResponseGlowView.swift */; };
 		14E8A570A0DBEC9205AF5236 /* ShimmerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 707042C1CCF9A424CC793E6A /* ShimmerView.swift */; };
+		LG0000000000000000000002 /* LearningGlowWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = LG0000000000000000000001 /* LearningGlowWindow.swift */; };
 		7C4401F8E6D90AD651290ED3 /* StartupSound.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3936393AA6CB03F2A78B42 /* StartupSound.swift */; };
 		A236D45C953407EB9126ED9D /* InputBarHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A4468DD66DD6EFF5DA1B441 /* InputBarHelpers.swift */; };
 		AFDAD302BAF52EC3D21CA830 /* InputBarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDAF03F8C3C99065A453CD26 /* InputBarPanel.swift */; };
@@ -329,6 +330,7 @@
 		44E276FCD407830EBA037DC0 /* LaunchGlowWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchGlowWindow.swift; sourceTree = "<group>"; };
 		A557373AF4A244EA2FC5EA56 /* ResponseGlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseGlowView.swift; sourceTree = "<group>"; };
 		707042C1CCF9A424CC793E6A /* ShimmerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShimmerView.swift; sourceTree = "<group>"; };
+		LG0000000000000000000001 /* LearningGlowWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningGlowWindow.swift; sourceTree = "<group>"; };
 		CE3936393AA6CB03F2A78B42 /* StartupSound.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartupSound.swift; sourceTree = "<group>"; };
 		2A4468DD66DD6EFF5DA1B441 /* InputBarHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBarHelpers.swift; sourceTree = "<group>"; };
 		CDAF03F8C3C99065A453CD26 /* InputBarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBarPanel.swift; sourceTree = "<group>"; };
@@ -797,6 +799,7 @@
 			children = (
 				D1923235C1FDCE5D3119CCC9 /* LaunchGlowView.swift */,
 				44E276FCD407830EBA037DC0 /* LaunchGlowWindow.swift */,
+				LG0000000000000000000001 /* LearningGlowWindow.swift */,
 				A557373AF4A244EA2FC5EA56 /* ResponseGlowView.swift */,
 				707042C1CCF9A424CC793E6A /* ShimmerView.swift */,
 				CE3936393AA6CB03F2A78B42 /* StartupSound.swift */,
@@ -1243,6 +1246,7 @@
 				47AA1863393F0B638C553FDE /* LaunchGlowWindow.swift in Sources */,
 				7A410F349064AC42670F83DB /* ResponseGlowView.swift in Sources */,
 				14E8A570A0DBEC9205AF5236 /* ShimmerView.swift in Sources */,
+				LG0000000000000000000002 /* LearningGlowWindow.swift in Sources */,
 				7C4401F8E6D90AD651290ED3 /* StartupSound.swift in Sources */,
 				A236D45C953407EB9126ED9D /* InputBarHelpers.swift in Sources */,
 				AFDAD302BAF52EC3D21CA830 /* InputBarPanel.swift in Sources */,
