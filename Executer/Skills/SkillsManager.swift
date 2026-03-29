@@ -213,6 +213,74 @@ class SkillsManager {
         return result
     }
 
+    /// Filtered prompt section — only injects skills relevant to the query.
+    /// Saves ~14,000 tokens per call vs injecting all 80 skills.
+    func filteredPromptSection(for query: String) -> String {
+        let lower = query.lowercased()
+        let queryWords = Set(lower.split(separator: " ").map(String.init).filter { $0.count > 2 })
+
+        guard !queryWords.isEmpty else {
+            // No query words — return top 8 general-purpose skills
+            return formatSkills(Array(skills.filter { $0.verificationStatus == nil || $0.verificationStatus == "verified" }.prefix(8)))
+        }
+
+        // Score each skill by keyword overlap
+        var scored: [(Skill, Int)] = []
+        for skill in skills {
+            guard skill.verificationStatus == nil || skill.verificationStatus == "verified" else { continue }
+            var score = 0
+            let nameWords = skill.name.replacingOccurrences(of: "_", with: " ").lowercased()
+            let descLower = skill.description.lowercased()
+
+            for word in queryWords {
+                if descLower.contains(word) { score += 2 }
+                if nameWords.contains(word) { score += 3 }
+                if skill.exampleTriggers.contains(where: { $0.lowercased().contains(word) }) { score += 4 }
+                for step in skill.steps {
+                    if step.lowercased().contains(word) { score += 1; break }
+                }
+            }
+
+            if score > 0 { scored.append((skill, score)) }
+        }
+
+        let selected = scored.sorted { $0.1 > $1.1 }.prefix(12).map(\.0)
+        let finalSkills = selected.isEmpty
+            ? Array(skills.filter { $0.verificationStatus == nil || $0.verificationStatus == "verified" }.prefix(8))
+            : Array(selected)
+
+        return formatSkills(finalSkills)
+    }
+
+    /// Format a subset of skills for prompt injection.
+    private func formatSkills(_ skillList: [Skill]) -> String {
+        guard !skillList.isEmpty else { return "" }
+
+        var lines = [
+            "",
+            "## Compound Skills",
+            "",
+            "When a user's request matches one of these skills, follow the steps using your available tools.",
+            "When a step says to call multiple tools, do so in a single response (parallel tool calls).",
+            ""
+        ]
+
+        for skill in skillList {
+            lines.append("### \(skill.name)")
+            lines.append(skill.description)
+            if !skill.exampleTriggers.isEmpty {
+                lines.append("Triggers: \(skill.exampleTriggers.map { "\"\($0)\"" }.joined(separator: ", "))")
+            }
+            lines.append("Steps:")
+            for (i, step) in skill.steps.enumerated() {
+                lines.append("\(i + 1). \(step)")
+            }
+            lines.append("")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Folder-Based Skill Catalog
 
     /// Load all skill files from the skills/ directory.

@@ -319,7 +319,7 @@ class LLMServiceManager: ObservableObject {
 
     func fullSystemPrompt(context: SystemContext, query: String = "") -> String {
         let personality = PersonalityEngine.shared.systemPromptSection()
-        let skills = SkillsManager.shared.promptSection()
+        let skills = SkillsManager.shared.filteredPromptSection(for: query)
         let memory = MemoryManager.shared.promptSection(query: query)
         let history = recentHistorySection()
         let humor = HumorMode.shared.isEnabled ? humorPromptSection : ""
@@ -327,7 +327,15 @@ class LLMServiceManager: ObservableObject {
         let frontmostApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
         let learned = LearningContextProvider.fullContextSection(forApp: frontmostApp, query: query)
         let learnedSection = learned.isEmpty ? "" : "\n\n\(learned)"
-        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\n\n\(context.systemPromptAddendum)\(skills)\(memory)\(history)"
+
+        // Tool catalog — teaches the LLM how to compose tools for complex tasks
+        let categories = ToolRegistry.shared.classifyQueryIntent(query)
+        let catalog = ToolCatalogManager.shared.promptSection(categories: categories, provider: currentProvider)
+
+        // Document style profiles — available styles for document creation
+        let docStyles = DocumentStyleManager.shared.promptSection()
+
+        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\n\n\(context.systemPromptAddendum)\(catalog)\(docStyles)\(skills)\(memory)\(history)"
     }
 
     /// Provider-specific agentic execution guidance. DeepSeek needs explicit

@@ -257,7 +257,7 @@ class AgentLoop {
                 let manager = LLMServiceManager.shared
                 let registry = ToolRegistry.shared
                 let context = SystemContext.current()
-                let tools = registry.filteredToolDefinitions(for: fullCommand)
+                var tools = registry.filteredToolDefinitions(for: fullCommand)
 
                 let complexity = Self.classifyComplexity(fullCommand)
                 let maxIterations = complexity.maxIterations
@@ -378,6 +378,33 @@ class AgentLoop {
                             content: r.result,
                             tool_call_id: r.callId
                         ))
+                    }
+
+                    // Dynamic tool expansion: if request_tools was called, add requested tools to the tool set
+                    for call in toolCalls where call.function.name == "request_tools" {
+                        if let result = results.first(where: { $0.callId == call.id }),
+                           result.result.contains("Available tools matching") {
+                            // Parse tool names from the result and add their schemas
+                            let lines = result.result.split(separator: "\n")
+                            for line in lines where line.hasPrefix("- **") {
+                                // Extract tool name from "- **tool_name**: description"
+                                if let nameEnd = line.firstIndex(of: "*"),
+                                   let nameStart = line.index(nameEnd, offsetBy: 2, limitedBy: line.endIndex) {
+                                    let afterStars = line[nameStart...]
+                                    if let closeStars = afterStars.firstIndex(of: "*") {
+                                        let toolName = String(afterStars[..<closeStars])
+                                        if let schemaArray = ToolRegistry.shared.singleToolSchema(toolName),
+                                           let schema = schemaArray.first {
+                                            // Add to current tool set if not already present
+                                            if !tools.contains(where: { ($0["function"]?.value as? [String: AnyCodable])?["name"]?.value as? String == toolName }) {
+                                                tools.append(schema)
+                                                print("[AgentLoop] Dynamically added tool: \(toolName)")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 

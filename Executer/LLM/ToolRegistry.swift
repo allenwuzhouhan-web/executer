@@ -7,7 +7,7 @@ enum ToolCategory: String, CaseIterable {
     case skills, webContent, fileContent, fileSearch, memory
     case aliases, clipboardHistory, systemInfo, automation
     case cursor, keyboard, language, scheduler, weather
-    case messaging, academicResearch
+    case messaging, academicResearch, documents
 }
 
 /// Central registry of all tools the LLM can invoke.
@@ -263,6 +263,29 @@ class ToolRegistry {
             GetAutonomyStatusTool(),
             GetDayPlanTool(),
             CompilePatternTool(),
+
+            // Skill Verification
+            VerifySkillNowTool(),
+            ListPendingSkillsTool(),
+            ApproveSkillTool(),
+
+            // Document Operations
+            ReadDocumentTool(),
+            CreateDocumentTool(),
+            SetupPythonDocsTool(),
+            ExtractDocumentStyleTool(),
+            ListDocumentStylesTool(),
+
+            // Tool Catalog (on-demand guide lookup)
+            GetToolGuideTool(),
+
+            // Meta-tool: request additional tools mid-conversation
+            RequestToolsTool(),
+
+            // Skill Import (GitHub discovery + import)
+            SearchGitHubSkillsTool(),
+            ImportSkillTool(),
+            ListSkillSourcesTool(),
         ]
 
         var dict: [String: ToolDefinition] = [:]
@@ -380,6 +403,16 @@ class ToolRegistry {
             "get_day_plan": .memory,
             "compile_pattern_to_template": .memory,
             "set_semantic_scholar_key": .academicResearch,
+            // Skill Verification
+            "verify_skill_now": .skills, "list_pending_skills": .skills, "approve_skill": .skills,
+            // Documents
+            "read_document": .documents, "create_document": .documents, "setup_python_docs": .documents,
+            "extract_document_style": .documents, "list_document_styles": .documents,
+            // Tool Catalog
+            "get_tool_guide": .skills,
+            "request_tools": .skills,
+            // Skill Import
+            "search_github_skills": .skills, "import_skill": .skills, "list_skill_sources": .skills,
         ]
         self.toolCategories = categoryMap
 
@@ -440,12 +473,13 @@ class ToolRegistry {
         (["tell", "text", "message", "msg", "send message", "wechat"], [.messaging]),
         (["news", "headlines", "article"], [.academicResearch]),
         (["paper", "research paper", "scholar", "academic", "semantic scholar"], [.academicResearch]),
+        (["document", "presentation", "slide", "pptx", "docx", "xlsx", "powerpoint", "word", "excel", "spreadsheet", "deck"], [.documents, .files, .fileContent, .terminal]),
     ]
 
     // Always include these categories — universally useful
     private static let alwaysIncluded: Set<ToolCategory> = [.memory, .skills, .clipboard]
 
-    private func classifyQueryIntent(_ query: String) -> Set<ToolCategory> {
+    func classifyQueryIntent(_ query: String) -> Set<ToolCategory> {
         let lower = query.lowercased()
         var cats = Self.alwaysIncluded
 
@@ -493,6 +527,56 @@ class ToolRegistry {
         return [tool.toAPISchema()]
     }
 
+    /// Returns all registered tool names.
+    func allToolNames() -> [String] {
+        return Array(tools.keys).sorted()
+    }
+
     /// Total number of registered tools.
     var count: Int { tools.count }
+}
+
+/// Meta-tool: request additional tools mid-conversation.
+/// When the LLM needs a tool that wasn't in the filtered set, it calls this.
+/// Returns matching tool names + descriptions so the LLM can ask for them.
+struct RequestToolsTool: ToolDefinition {
+    let name = "request_tools"
+    let description = "Request additional tools that aren't currently available. Use this when you need a tool that wasn't provided. Describe what you need and I'll find matching tools."
+
+    var parameters: [String: Any] {
+        JSONSchema.object(properties: [
+            "need": JSONSchema.string(description: "What capability you need (e.g., 'click on UI element', 'create a file', 'send a message')"),
+        ], required: ["need"])
+    }
+
+    func execute(arguments: String) async throws -> String {
+        let args = try parseArguments(arguments)
+        let need = try requiredString("need", from: args).lowercased()
+
+        // Search all tools by name and description
+        let allTools = ToolRegistry.shared.allToolNames()
+        var matches: [(name: String, description: String)] = []
+
+        for toolName in allTools {
+            if let tool = ToolRegistry.shared.tool(named: toolName) {
+                let nameLower = toolName.lowercased()
+                let descLower = tool.description.lowercased()
+                if nameLower.contains(need) || descLower.contains(need) ||
+                   need.split(separator: " ").contains(where: { nameLower.contains($0) || descLower.contains($0) }) {
+                    matches.append((toolName, String(tool.description.prefix(100))))
+                }
+            }
+        }
+
+        guard !matches.isEmpty else {
+            return "No matching tools found for '\(need)'. Try a different description."
+        }
+
+        var result = "Available tools matching '\(need)':\n"
+        for match in matches.prefix(10) {
+            result += "- **\(match.name)**: \(match.description)\n"
+        }
+        result += "\nYou can now call any of these tools directly."
+        return result
+    }
 }

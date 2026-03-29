@@ -60,9 +60,7 @@ final class WorkflowExecutor {
     }
 
     private func executeStep(toolName: String, arguments: String) async throws -> String {
-        // Delegate to ToolRegistry for actual execution
-        // This is a bridge — the actual tool execution goes through the existing pipeline
-        return "Executed \(toolName)"
+        return try await ToolRegistry.shared.execute(toolName: toolName, arguments: arguments)
     }
 }
 
