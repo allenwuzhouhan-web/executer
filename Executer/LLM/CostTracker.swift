@@ -25,6 +25,8 @@ final class CostTracker {
     private var lastResetDate: Date
     private var lastMonthlyResetDate: Date
     private var hasNotifiedToday = false
+    private var agentCosts: [String: Double] = [:]      // agent_id → daily cost
+    private var agentTokens: [String: Int] = [:]         // agent_id → daily total tokens
 
     private let lock = NSLock()
     private let defaults = UserDefaults.standard
@@ -64,7 +66,7 @@ final class CostTracker {
     // MARK: - Recording
 
     /// Record token usage from an API call. Call after each LLM response.
-    func record(provider: String, inputTokens: Int, outputTokens: Int) {
+    func record(provider: String, inputTokens: Int, outputTokens: Int, agentId: String = "general") {
         lock.lock()
         defer { lock.unlock() }
 
@@ -81,6 +83,10 @@ final class CostTracker {
         dailyOutputTokens += outputTokens
         dailyCostUSD += callCost
         monthlyCostUSD += callCost
+
+        // Per-agent tracking
+        agentCosts[agentId, default: 0] += callCost
+        agentTokens[agentId, default: 0] += inputTokens + outputTokens
 
         // Persist
         defaults.set(dailyCostUSD, forKey: "cost_daily_total")
@@ -126,6 +132,14 @@ final class CostTracker {
                       monthlyCostUSD, monthlyBudgetUSD)
     }
 
+    /// Per-agent cost breakdown for the current day.
+    func agentBreakdown() -> [(agentId: String, cost: Double, tokens: Int)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return agentCosts.map { (agentId: $0.key, cost: $0.value, tokens: agentTokens[$0.key] ?? 0) }
+            .sorted { $0.cost > $1.cost }
+    }
+
     // MARK: - Reset
 
     private func checkAndResetIfNeeded() {
@@ -139,6 +153,8 @@ final class CostTracker {
             dailyOutputTokens = 0
             hasNotifiedToday = false
             learningTokensToday = 0
+            agentCosts.removeAll()
+            agentTokens.removeAll()
             lastResetDate = now
             defaults.set(0.0, forKey: "cost_daily_total")
             defaults.set(0, forKey: "cost_daily_input_tokens")

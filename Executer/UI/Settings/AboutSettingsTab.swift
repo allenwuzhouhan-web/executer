@@ -12,7 +12,6 @@ struct AboutSettingsTab: View {
             Text("Executer")
                 .font(.title.bold())
 
-            // Pre-release badge
             if AppModel.isPrerelease {
                 Text(AppModel.buildType.rawValue.uppercased())
                     .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -43,11 +42,26 @@ struct AboutSettingsTab: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
 
+            Divider().padding(.horizontal, 40)
+
+            // Inline update section
+            UpdateSettingsTab()
+                .frame(maxHeight: 120)
+
             Spacer()
 
-            Text("\(ToolRegistry.shared.count) tools available")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 16) {
+                Text("\(ToolRegistry.shared.count) tools")
+                Text("\(AgentRegistry.shared.allProfiles().count) agents")
+                Text("\(DocumentStudyStore.shared.profiles.count) trained docs")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if AppModel.isPrerelease {
+                DeveloperSettingsTab()
+                    .frame(maxHeight: 100)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()

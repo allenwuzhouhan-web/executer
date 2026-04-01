@@ -189,6 +189,12 @@ struct LearningSettingsTab: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
             }
+
+            Section {
+                DocumentDropbox()
+            } header: {
+                Label("Document Trainer", systemImage: "brain.head.profile")
+            }
         }
         .formStyle(.grouped)
     }

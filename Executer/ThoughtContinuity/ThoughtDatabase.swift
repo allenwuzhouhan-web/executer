@@ -10,6 +10,7 @@ struct ThoughtRow {
     let timestamp: Date
     let isComplete: Bool
     let metadataJSON: String?
+    let agentNamespace: String
 }
 
 final class ThoughtDatabase {
@@ -34,6 +35,7 @@ final class ThoughtDatabase {
         }
 
         createSchema()
+        migrateSchema()
         pruneOlderThan(days: 7)
     }
 
@@ -174,6 +176,61 @@ final class ThoughtDatabase {
         }
     }
 
+    // MARK: - Search & Recent
+
+    struct ThoughtRecord {
+        let appName: String
+        let windowTitle: String?
+        let textContent: String
+        let timestamp: Date
+    }
+
+    func recentThoughts(limit: Int = 10) -> [ThoughtRecord] {
+        queue.sync {
+            let sql = "SELECT app_name, window_title, text_content, timestamp FROM thoughts ORDER BY timestamp DESC LIMIT ?"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            sqlite3_bind_int(stmt, 1, Int32(limit))
+
+            var results: [ThoughtRecord] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let appName = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+                let windowTitle = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+                let text = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+                let ts = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
+                results.append(ThoughtRecord(appName: appName, windowTitle: windowTitle, textContent: text, timestamp: ts))
+            }
+            return results
+        }
+    }
+
+    func searchThoughts(query: String, limit: Int = 10) -> [ThoughtRecord] {
+        queue.sync {
+            // Use LIKE for simple text search (FTS5 would be better but requires schema migration)
+            let sql = "SELECT app_name, window_title, text_content, timestamp FROM thoughts WHERE text_content LIKE ? OR window_title LIKE ? ORDER BY timestamp DESC LIMIT ?"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            let pattern = "%\(query)%"
+            sqlite3_bind_text(stmt, 1, (pattern as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, (pattern as NSString).utf8String, -1, nil)
+            sqlite3_bind_int(stmt, 3, Int32(limit))
+
+            var results: [ThoughtRecord] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let appName = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
+                let windowTitle = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+                let text = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+                let ts = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
+                results.append(ThoughtRecord(appName: appName, windowTitle: windowTitle, textContent: text, timestamp: ts))
+            }
+            return results
+        }
+    }
+
     // MARK: - Prune
 
     func pruneOlderThan(days: Int) {
@@ -209,6 +266,13 @@ final class ThoughtDatabase {
         let isComplete = sqlite3_column_int(stmt, 6) != 0
         let metadataJSON: String? = sqlite3_column_text(stmt, 7).map { String(cString: $0) }
 
+        let agentNamespace: String
+        if sqlite3_column_count(stmt) > 8, let ns = sqlite3_column_text(stmt, 8) {
+            agentNamespace = String(cString: ns)
+        } else {
+            agentNamespace = "general"
+        }
+
         return ThoughtRow(
             id: id,
             appBundleId: bundleId,
@@ -217,8 +281,47 @@ final class ThoughtDatabase {
             textContent: textContent,
             timestamp: timestamp,
             isComplete: isComplete,
-            metadataJSON: metadataJSON
+            metadataJSON: metadataJSON,
+            agentNamespace: agentNamespace
         )
+    }
+
+    /// Add agent_namespace column if it doesn't exist yet.
+    private func migrateSchema() {
+        queue.sync {
+            // Check if column exists by querying pragma
+            let sql = "PRAGMA table_info(thoughts)"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+
+            var hasNamespace = false
+            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    if let name = sqlite3_column_text(stmt, 1) {
+                        if String(cString: name) == "agent_namespace" {
+                            hasNamespace = true
+                            break
+                        }
+                    }
+                }
+            }
+
+            if !hasNamespace {
+                var errmsg: UnsafeMutablePointer<CChar>?
+                let alter = "ALTER TABLE thoughts ADD COLUMN agent_namespace TEXT DEFAULT 'general'"
+                if sqlite3_exec(db, alter, nil, nil, &errmsg) != SQLITE_OK {
+                    let msg = errmsg.map { String(cString: $0) } ?? "unknown"
+                    print("[ThoughtDB] Migration error: \(msg)")
+                    sqlite3_free(errmsg)
+                } else {
+                    print("[ThoughtDB] Added agent_namespace column")
+                }
+            }
+            // Create namespace index (after column is guaranteed to exist)
+            var idxErr: UnsafeMutablePointer<CChar>?
+            sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_thoughts_namespace ON thoughts(agent_namespace)", nil, nil, &idxErr)
+            sqlite3_free(idxErr)
+        }
     }
 
     deinit {

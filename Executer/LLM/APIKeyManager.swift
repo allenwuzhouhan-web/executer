@@ -16,7 +16,8 @@ class APIKeyManager {
     func setKey(_ key: String, for provider: LLMProvider) {
         let keychainKey = "\(provider.rawValue)_api_key"
         guard let data = key.data(using: .utf8) else { return }
-        _ = KeychainHelper.save(key: keychainKey, data: data)
+        // Use biometric-protected save for API keys (release builds get Touch ID protection)
+        _ = KeychainHelper.saveBiometric(key: keychainKey, data: data)
     }
 
     func deleteKey(for provider: LLMProvider) {

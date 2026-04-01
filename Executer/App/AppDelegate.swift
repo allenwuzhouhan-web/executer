@@ -1,12 +1,12 @@
 import Cocoa
 import SwiftUI
+import UserNotifications
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     let appState = AppState()
     private var launchGlow: LaunchGlowWindow?
     private var startupSound: StartupSound?
-    private var permissionSetup: PermissionSetupWindowController?
-    private var welcomeWindow: WelcomeWindowController?
+    private var onboardingWindow: OnboardingWindowController?
     private var lockdownWindow: LockdownWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -20,10 +20,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return  // DO NOT proceed with app launch
         }
 
+        // Async manifest verification (release builds only) — runs in background, doesn't block launch
+        Task.detached(priority: .utility) { [weak self] in
+            let asyncResult = await IntegrityChecker.verifyAsync()
+            if case .failed(let reason) = asyncResult {
+                await MainActor.run {
+                    self?.lockdownWindow = LockdownWindow()
+                    self?.lockdownWindow?.show(reason: reason)
+                }
+            }
+        }
+
         // Generate device serial on first launch (before welcome screen needs it)
         _ = DeviceSerial.serial
 
+        // Set notification delegate so alarms/timers fire even when app is in foreground
+        UNUserNotificationCenter.current().delegate = self
+
         appState.setup()
+
+        // Connect to MCP servers in the background, then register discovered tools
+        Task.detached(priority: .utility) {
+            await MCPServerManager.shared.connectAll()
+            let mcpTools = await MCPServerManager.shared.getDiscoveredTools()
+            if !mcpTools.isEmpty {
+                await MainActor.run {
+                    ToolRegistry.shared.registerMCPTools(mcpTools)
+                }
+            }
+        }
 
         // AI awakening — rainbow glow + subtle chime
         launchGlow = LaunchGlowWindow()
@@ -45,43 +70,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         SystemEventBus.shared.start()
         Task { await WeChatService.shared.initialize() }
 
-        // Always show welcome first on first launch or version change.
-        // Permission setup comes AFTER welcome completes (or immediately if no welcome needed).
+        // Unified onboarding: single window for welcome + permissions
         let lastOnboardedVersion = UserDefaults.standard.string(forKey: "onboarded_version") ?? ""
         let needsOnboarding = !UserDefaults.standard.bool(forKey: "has_completed_onboarding") || lastOnboardedVersion != AppModel.version
+        let pm = PermissionManager.shared
+        pm.refreshAccessibility()
+        pm.refreshEventTap()
+        let permissionsMissing = !pm.accessibilityGranted || !pm.eventTapAvailable
 
-        // Start permission-dependent services regardless of welcome state
-        // (permissions may already be granted from previous install)
-        showPermissionSetupIfNeeded()
-
-        // Show welcome on top if needed (doesn't block permissions)
-        if needsOnboarding {
-            // Delay to ensure welcome appears ABOVE permission window
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.welcomeWindow = WelcomeWindowController()
-                self?.welcomeWindow?.show {
-                    self?.welcomeWindow = nil
-                }
-                // Welcome window is already .floating level from WelcomeWindowController
+        if needsOnboarding || permissionsMissing {
+            onboardingWindow = OnboardingWindowController()
+            onboardingWindow?.show { [weak self] in
+                self?.startPermissionDependentServices()
+                self?.onboardingWindow = nil
             }
+        } else {
+            // Permissions already granted, no onboarding needed
+            startPermissionDependentServices()
         }
 
-        print("[AppDelegate] needsOnboarding=\(needsOnboarding), lastVersion=\(lastOnboardedVersion), current=\(AppModel.version)")
+        print("[AppDelegate] needsOnboarding=\(needsOnboarding), permissionsMissing=\(permissionsMissing), lastVersion=\(lastOnboardedVersion), current=\(AppModel.version)")
+
+        // Start runtime protection (periodic tamper checks for release builds)
+        RuntimeShield.startPeriodicChecks()
+        EnvironmentIntegrity.startFileMonitoring()
 
         // Check for updates silently on launch
         AppUpdater.shared.checkForUpdates()
 
         print("[AppDelegate] setup complete")
-    }
-
-    /// One-time permission setup — shows a guided window if Accessibility or
-    /// Input Monitoring are missing. Auto-closes when granted.
-    private func showPermissionSetupIfNeeded() {
-        permissionSetup = PermissionSetupWindowController()
-        permissionSetup?.showIfNeeded { [weak self] in
-            self?.startPermissionDependentServices()
-            self?.permissionSetup = nil
-        }
     }
 
     /// Start services that require Accessibility / Input Monitoring.
@@ -94,10 +111,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        RuntimeShield.stopPeriodicChecks()
+        EnvironmentIntegrity.stopFileMonitoring()
+        Task { await AuditLog.shared.persistToDisk() }
         LearningManager.shared.stop()
+        Task { await BrowserService.shared.shutdown() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Show notification banner + play sound even when app is in the foreground
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
     }
 }

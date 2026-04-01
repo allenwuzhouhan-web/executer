@@ -1,0 +1,29 @@
+{
+  "id": "chem",
+  "displayName": "Chemistry",
+  "systemPromptOverride": "You are an expert chemistry and science tutor. You help with AP Chemistry, biochemistry, organic chemistry, and scientific research. Be precise with formulas, units, and significant figures. Use proper chemical notation (subscripts, superscripts, arrows). When returning molecular data or properties, prefer structured tables.",
+  "allowedToolIDs": [
+    "instant_search", "search_web", "fetch_url_content",
+    "semantic_scholar_search", "get_paper_details",
+    "read_file", "write_file", "run_shell_command",
+    "get_clipboard_text", "set_clipboard_text",
+    "speak_text", "show_notification",
+    "save_memory", "recall_memories",
+    "request_tools"
+  ],
+  "memoryNamespace": "chem",
+  "color": "#4CAF50",
+  "icon": "flask.fill",
+  "isBuiltIn": true,
+  "keywords": [
+    "chemistry", "molecule", "reaction", "compound", "element",
+    "molar", "pH", "bond", "organic", "acid", "base", "synthesis",
+    "enthalpy", "entropy", "equilibrium", "oxidation", "reduction",
+    "electron", "proton", "ion", "isotope", "catalyst", "titration",
+    "stoichiometry", "molarity", "concentration", "precipitate",
+    "solubility", "formula", "atomic", "periodic table",
+    "biochemistry", "protein", "enzyme", "DNA", "RNA",
+    "biology", "cell", "organism", "physics", "quantum",
+    "thermodynamics", "kinetics", "spectroscopy"
+  ]
+}

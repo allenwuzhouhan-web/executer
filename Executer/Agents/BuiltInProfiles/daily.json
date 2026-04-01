@@ -1,0 +1,35 @@
+{
+  "id": "daily",
+  "displayName": "Daily Life",
+  "systemPromptOverride": "You are a personal productivity assistant. Help with scheduling, messaging, reminders, weather, news, and daily planning. Be warm but efficient. Understand both English and Chinese commands. When returning dates or events, include the ISO 8601 date for calendar integration. When returning news, format as headline blocks.",
+  "allowedToolIDs": [
+    "send_message", "send_wechat_message", "send_imessage",
+    "send_whatsapp_message", "fetch_wechat_messages", "read_messages",
+    "wechat_sent_history",
+    "create_calendar_event", "query_calendar_events",
+    "create_reminder", "query_reminders",
+    "set_timer", "schedule_task", "list_scheduled_tasks",
+    "get_weather",
+    "fetch_news",
+    "show_notification", "speak_text",
+    "get_clipboard_text", "set_clipboard_text",
+    "search_web", "instant_search",
+    "save_memory", "recall_memories",
+    "request_tools"
+  ],
+  "memoryNamespace": "daily",
+  "color": "#FF9800",
+  "icon": "sun.max.fill",
+  "isBuiltIn": true,
+  "keywords": [
+    "reminder", "calendar", "meeting", "weather", "timer", "alarm",
+    "schedule", "grocery", "workout", "email", "errands", "todo",
+    "appointment", "birthday", "event", "deadline", "morning",
+    "afternoon", "evening", "tonight", "tomorrow", "weekend",
+    "message", "text", "call", "tell", "ask", "reply",
+    "news", "headlines", "briefing", "daily", "plan",
+    "lunch", "dinner", "breakfast", "commute", "travel",
+    "mom", "dad", "妈", "爸", "给", "发消息", "提醒", "天气",
+    "日程", "日历", "闹钟", "新闻"
+  ]
+}

@@ -88,12 +88,12 @@ extension LLMProvider {
         case .kimiCN:
             return LLMProviderConfig(
                 displayName: "Kimi (China)",
-                baseURL: "https://api.moonshot.cn/v1/chat/completions",
+                baseURL: "https://api.kimi.com/coding/v1/chat/completions",
                 defaultModel: "kimi-k2.5",
                 availableModels: ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-thinking-turbo"],
                 authStyle: .bearer,
                 signupURL: "platform.moonshot.cn",
-                keyPlaceholder: "sk-..."
+                keyPlaceholder: "sk-kimi-..."
             )
         case .minimax:
             return LLMProviderConfig(
@@ -168,15 +168,52 @@ class LLMServiceManager: ObservableObject {
 
     var currentService: LLMServiceProtocol {
         if let service = _currentService { return service }
-        let service: LLMServiceProtocol
-        switch currentProvider {
-        case .claude:
-            service = AnthropicService(model: currentModel)
-        default:
-            service = OpenAICompatibleService(provider: currentProvider, model: currentModel)
-        }
+        let service = Self.makeService(provider: currentProvider, model: currentModel)
         _currentService = service
         return service
+    }
+
+    // MARK: - Document Creation Override (PPT/Word/Excel)
+
+    @Published var documentProvider: LLMProvider? {
+        didSet {
+            UserDefaults.standard.set(documentProvider?.rawValue, forKey: "doc_llm_provider")
+            _documentService = nil
+        }
+    }
+
+    @Published var documentModel: String? {
+        didSet {
+            UserDefaults.standard.set(documentModel, forKey: "doc_llm_model")
+            _documentService = nil
+        }
+    }
+
+    private var _documentService: LLMServiceProtocol?
+
+    /// Service for document creation tasks. Falls back to currentService if no override set.
+    var documentService: LLMServiceProtocol {
+        guard let provider = documentProvider, let model = documentModel else {
+            return currentService
+        }
+        if let service = _documentService { return service }
+        let service = Self.makeService(provider: provider, model: model)
+        _documentService = service
+        return service
+    }
+
+    /// Whether a separate document provider is configured.
+    var hasDocumentOverride: Bool {
+        documentProvider != nil && documentModel != nil
+    }
+
+    private static func makeService(provider: LLMProvider, model: String) -> LLMServiceProtocol {
+        switch provider {
+        case .claude:
+            return AnthropicService(model: model)
+        default:
+            return OpenAICompatibleService(provider: provider, model: model)
+        }
     }
 
     private init() {
@@ -185,9 +222,19 @@ class LLMServiceManager: ObservableObject {
         self.currentProvider = provider
         self.currentModel = UserDefaults.standard.string(forKey: "llm_model") ?? provider.config.defaultModel
 
-        // Migrate stale model selections: if the saved model no longer exists in the provider's list, reset to default
+        // Load document provider override
+        if let docProvRaw = UserDefaults.standard.string(forKey: "doc_llm_provider"),
+           let docProv = LLMProvider(rawValue: docProvRaw) {
+            self.documentProvider = docProv
+            self.documentModel = UserDefaults.standard.string(forKey: "doc_llm_model") ?? docProv.config.defaultModel
+        }
+
+        // Migrate stale model selections
         if !currentProvider.config.availableModels.contains(currentModel) {
             self.currentModel = currentProvider.config.defaultModel
+        }
+        if let dp = documentProvider, let dm = documentModel, !dp.config.availableModels.contains(dm) {
+            self.documentModel = dp.config.defaultModel
         }
     }
 
@@ -222,6 +269,7 @@ class LLMServiceManager: ObservableObject {
     - **"Open X and Y side by side"** → `launch_app` both apps → `tile_windows_side_by_side` to arrange them.
     - **"Find large files"** → `find_files_by_age` or `run_shell_command` with `du` → report results.
     - **"Review this code / what does this file do"** → `find_files` if needed → `read_file` → analyze and explain.
+    - **"Create/make a presentation/PPT/slides about X"** → `search_images` for 2-4 relevant images → `create_presentation` with the FULL JSON spec immediately. Do NOT describe the slides in text or outline a plan — generate the spec and call the tool in this response. Every presentation needs varied layouts and images.
     - When the user references a file by partial name, project name, or description — ALWAYS use `find_files` to search for it. Start searching in `~/Documents/works` (the user's main work folder, usually under the G8 subfolder). You have access to their entire filesystem. Use it.
 
     **Research & Knowledge (your primary capability):**
@@ -317,10 +365,29 @@ class LLMServiceManager: ObservableObject {
         return systemPrompt + agenticPromptSection()
     }()
 
+    /// Frozen memory snapshot — loaded once per session with no query filter.
+    /// Preserves LLM prefix cache efficiency. Refreshed when memories change.
+    private var frozenMemorySection: String?
+    private let memoryLock = NSLock()
+
+    /// Call this to refresh the memory snapshot (e.g., when memories are added/removed).
+    func refreshMemoryCache() {
+        memoryLock.lock()
+        frozenMemorySection = nil
+        memoryLock.unlock()
+    }
+
     func fullSystemPrompt(context: SystemContext, query: String = "") -> String {
         let personality = PersonalityEngine.shared.systemPromptSection()
         let skills = SkillsManager.shared.filteredPromptSection(for: query)
-        let memory = MemoryManager.shared.promptSection(query: query)
+        // Frozen memory — no query filter so it stays valid for all topics
+        memoryLock.lock()
+        let memory = frozenMemorySection ?? {
+            let section = MemoryManager.shared.promptSection(query: "")
+            frozenMemorySection = section
+            return section
+        }()
+        memoryLock.unlock()
         let history = recentHistorySection()
         let humor = HumorMode.shared.isEnabled ? humorPromptSection : ""
         let language = LanguageManager.shared.systemPromptLanguageInstruction()
@@ -338,7 +405,25 @@ class LLMServiceManager: ObservableObject {
         // Document style profiles — available styles for document creation
         let docStyles = DocumentStyleManager.shared.promptSection()
 
-        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\n\n\(context.systemPromptAddendum)\(catalog)\(docStyles)\(skills)\(memory)\(history)"
+        // Trained document knowledge — design rules and content patterns from studied files
+        let trainedKnowledge = DocumentStudyStore.shared.promptSection(for: query)
+
+        // Design refinements — accumulated learnings from post-PPT-creation reflection
+        let designRefinements = DesignRefinementStore.shared.promptSection()
+
+        let formatGuide = """
+
+            ## Response Formatting
+            When your response includes dates, events, or news, use structured markers so the UI can render rich cards:
+            - For events with a specific date: [EVENT: title | ISO-8601-date | optional-location]
+            - For news summaries: [HEADLINE: title | source | one-sentence-summary | optional-url]
+            - For dates/deadlines: include the full date so the user can add it to their calendar.
+            - For ordered information: use numbered markdown lists.
+            - For code: use fenced code blocks with language tags.
+            Keep markers inline with your response text.
+            """
+
+        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\n\n\(context.systemPromptAddendum)\(catalog)\(docStyles)\(trainedKnowledge)\(designRefinements)\(skills)\(memory)\(history)\(formatGuide)"
     }
 
     /// Provider-specific agentic execution guidance. DeepSeek needs explicit

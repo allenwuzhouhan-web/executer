@@ -1,0 +1,32 @@
+{
+  "id": "dev",
+  "displayName": "Developer",
+  "systemPromptOverride": "You are a macOS/Swift development assistant. Help with Xcode projects, Swift code, git workflows, terminal commands, and debugging. Be concise and code-focused. Prefer showing code over explaining concepts. Use fenced code blocks with language tags.",
+  "allowedToolIDs": [
+    "run_shell_command", "open_terminal", "open_terminal_with_command",
+    "read_file", "write_file", "edit_file", "append_to_file",
+    "list_directory", "find_files", "search_file_contents",
+    "directory_tree", "file_preview", "read_pdf_text",
+    "open_file", "open_file_with_app", "reveal_in_finder",
+    "get_clipboard_text", "set_clipboard_text",
+    "search_web", "fetch_url_content", "instant_search",
+    "browser_task", "browser_extract",
+    "show_notification", "speak_text",
+    "save_memory", "recall_memories",
+    "request_tools"
+  ],
+  "memoryNamespace": "dev",
+  "color": "#2196F3",
+  "icon": "chevron.left.forwardslash.chevron.right",
+  "isBuiltIn": true,
+  "keywords": [
+    "code", "git", "npm", "pip", "brew", "compile", "debug",
+    "deploy", "refactor", "function", "class", "API", "docker",
+    "database", "SQL", "Swift", "Python", "JavaScript", "TypeScript",
+    "Xcode", "build", "test", "commit", "push", "pull", "merge",
+    "branch", "lint", "format", "error", "bug", "fix", "crash",
+    "stack trace", "exception", "dependency", "package", "module",
+    "import", "export", "variable", "method", "struct", "enum",
+    "protocol", "interface", "server", "endpoint", "REST", "GraphQL"
+  ]
+}

@@ -51,6 +51,8 @@ class AgentLoop {
         "open_url": "Opening URL", "open_url_in_safari": "Opening Safari",
         "search_web": "Searching", "dictionary_lookup": "Looking up",
         "music_play_song": "Playing", "music_pause": "Pausing",
+        "browser_task": "Browsing web", "browser_extract": "Extracting web data",
+        "browser_session": "Managing browser", "browser_screenshot": "Browser screenshot",
     ]
 
     // UI tools MUST execute sequentially — they depend on screen state
@@ -71,12 +73,87 @@ class AgentLoop {
     You are planning the execution of a complex task. Output a brief numbered plan (3-7 steps) of what tools you will call and in what order. Be specific about tool names. Do not execute anything yet — just plan. Keep it under 100 words.
     """
 
+    // MARK: - Auto Skill Recording
+
+    private static let skillFileLock = NSLock()
+
+    private static func recordAutoSkill(command: String, messages: [ChatMessage], toolCallCount: Int) {
+        // Extract tool call sequence from assistant messages
+        var steps: [[String: String]] = []
+        for msg in messages where msg.role == "assistant" {
+            if let calls = msg.tool_calls {
+                for call in calls {
+                    steps.append(["tool": call.function.name])
+                }
+            }
+        }
+
+        guard steps.count >= 5 else { return }
+
+        // Build auto-skill
+        let keywords = command.lowercased()
+            .components(separatedBy: .alphanumerics.inverted)
+            .filter { $0.count > 3 }
+            .prefix(5)
+
+        // Deterministic name from command content (not hashValue which is per-process random)
+        let cmdData = Data(command.utf8)
+        let nameSlug = cmdData.prefix(16).map { String(format: "%02x", $0) }.joined().prefix(12)
+        let skill: [String: Any] = [
+            "name": "auto_\(nameSlug)",
+            "description": "Auto-learned: \(String(command.prefix(100)))",
+            "steps": steps.prefix(10).map { $0 },
+            "trigger_keywords": Array(keywords),
+            "created": ISO8601DateFormatter().string(from: Date()),
+            "tool_count": toolCallCount,
+        ]
+
+        // Save to auto_skills.json (locked to prevent concurrent file corruption)
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let skillFile = appSupport.appendingPathComponent("Executer/auto_skills.json")
+
+        skillFileLock.lock()
+        defer { skillFileLock.unlock() }
+
+        var existing: [[String: Any]] = []
+        if let data = try? Data(contentsOf: skillFile),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            existing = arr
+        }
+
+        // Don't duplicate (check by description similarity)
+        let desc = skill["description"] as? String ?? ""
+        if existing.contains(where: { ($0["description"] as? String ?? "") == desc }) { return }
+
+        existing.append(skill)
+        // Keep max 50 auto-skills
+        if existing.count > 50 { existing = Array(existing.suffix(50)) }
+
+        if let data = try? JSONSerialization.data(withJSONObject: existing, options: [.prettyPrinted]) {
+            try? data.write(to: skillFile)
+            print("[Agent] Auto-skill recorded: \(skill["name"] ?? "?")")
+        }
+    }
+
+    // MARK: - Document Task Detection
+
+    private static func isDocumentCreationCommand(_ command: String) -> Bool {
+        let lower = command.lowercased()
+        let documentKeywords = [
+            "ppt", "powerpoint", "presentation", "slide", "deck",
+            "word", "docx", "document", "report", "essay", "memo", "letter",
+            "excel", "xlsx", "spreadsheet", "table", "data sheet",
+        ]
+        return documentKeywords.contains { lower.contains($0) }
+    }
+
     // MARK: - Complexity Classification
 
     static func classifyComplexity(_ command: String) -> TaskComplexity {
         let lower = command.lowercased()
 
         if lower.hasPrefix("[deep research]") { return .deep }
+        if lower.hasPrefix("[browser visible]") || lower.hasPrefix("[browser background]") { return .complex }
 
         let complexIndicators = ["and then", "after that", "organize", "clean up",
                                  "research", "investigate", "compare", "analyze",
@@ -248,6 +325,7 @@ class AgentLoop {
         fullCommand: String,
         resolvedCommand: String,
         previousMessages: [ChatMessage],
+        agent: AgentProfile? = nil,
         onStateChange: @MainActor @escaping (InputBarState) -> Void,
         onComplete: @MainActor @escaping (_ displayMessage: String, _ filteredText: String, _ messages: [ChatMessage]) -> Void,
         onError: @MainActor @escaping (String) -> Void
@@ -257,11 +335,33 @@ class AgentLoop {
                 let manager = LLMServiceManager.shared
                 let registry = ToolRegistry.shared
                 let context = SystemContext.current()
-                var tools = registry.filteredToolDefinitions(for: fullCommand)
+
+                // Route document creation commands to the document-specific provider if configured
+                let isDocumentTask = Self.isDocumentCreationCommand(fullCommand)
+                let service: LLMServiceProtocol = (isDocumentTask && manager.hasDocumentOverride)
+                    ? manager.documentService
+                    : manager.currentService
+
+                // Transform browser choice prefix into LLM-friendly instruction
+                var effectiveCommand = fullCommand
+                if fullCommand.hasPrefix("[browser visible] ") {
+                    let task = String(fullCommand.dropFirst("[browser visible] ".count))
+                    effectiveCommand = "Use the browser_task tool with visible: true to do this: \(task)"
+                } else if fullCommand.hasPrefix("[browser background] ") {
+                    let task = String(fullCommand.dropFirst("[browser background] ".count))
+                    effectiveCommand = "Use the browser_task tool with visible: false to do this: \(task)"
+                }
+
+                var tools: [[String: AnyCodable]]
+                if let agent = agent {
+                    tools = registry.filteredToolDefinitions(for: effectiveCommand, agent: agent)
+                } else {
+                    tools = registry.filteredToolDefinitions(for: effectiveCommand)
+                }
 
                 let complexity = Self.classifyComplexity(fullCommand)
                 let maxIterations = complexity.maxIterations
-                let maxTokens = complexity.maxTokens
+                let maxTokens = agent?.maxTokenBudget ?? complexity.maxTokens
 
                 print("[Agent] Complexity: \(complexity), maxIter: \(maxIterations), maxTokens: \(maxTokens)")
 
@@ -269,11 +369,15 @@ class AgentLoop {
                 var messages: [ChatMessage]
                 if !previousMessages.isEmpty {
                     messages = previousMessages
-                    messages.append(ChatMessage(role: "user", content: fullCommand))
+                    messages.append(ChatMessage(role: "user", content: effectiveCommand))
                 } else {
+                    var systemPrompt = manager.fullSystemPrompt(context: context, query: effectiveCommand)
+                    if let override = agent?.systemPromptOverride {
+                        systemPrompt += "\n\n" + override
+                    }
                     messages = [
-                        ChatMessage(role: "system", content: manager.fullSystemPrompt(context: context, query: fullCommand)),
-                        ChatMessage(role: "user", content: fullCommand)
+                        ChatMessage(role: "system", content: systemPrompt),
+                        ChatMessage(role: "user", content: effectiveCommand)
                     ]
                 }
 
@@ -290,7 +394,7 @@ class AgentLoop {
                         ChatMessage(role: "user", content: fullCommand)
                     ]
 
-                    if let planResponse = try? await manager.currentService.sendChatRequest(
+                    if let planResponse = try? await service.sendChatRequest(
                         messages: planningMessages,
                         tools: nil,
                         maxTokens: 512
@@ -347,7 +451,7 @@ class AgentLoop {
 
                     print("[Agent] Iteration \(iteration + 1)/\(maxIterations) — \(messages.count) messages")
 
-                    let response = try await manager.currentService.sendChatRequest(
+                    let response = try await service.sendChatRequest(
                         messages: messages,
                         tools: tools,
                         maxTokens: maxTokens
@@ -418,6 +522,16 @@ class AgentLoop {
                     response: finalText,
                     appContext: context.frontmostApp
                 )
+
+                // Auto-skill creation: if 5+ tool calls succeeded, record as a reusable workflow
+                let toolCallCount = messages.filter { $0.role == "tool" }.count
+                if toolCallCount >= 5 {
+                    Self.recordAutoSkill(
+                        command: resolvedCommand,
+                        messages: messages,
+                        toolCallCount: toolCallCount
+                    )
+                }
 
                 await MainActor.run {
                     onComplete(displayMessage, filteredText, messages)

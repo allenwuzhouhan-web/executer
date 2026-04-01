@@ -47,6 +47,52 @@ struct AIModelSettingsTab: View {
                 }
             }
 
+            Section("Document AI (PPT / Word / Excel)") {
+                Toggle("Use different model for documents", isOn: Binding(
+                    get: { llmManager.hasDocumentOverride },
+                    set: { enabled in
+                        if enabled {
+                            llmManager.documentProvider = llmManager.currentProvider
+                            llmManager.documentModel = llmManager.currentModel
+                        } else {
+                            llmManager.documentProvider = nil
+                            llmManager.documentModel = nil
+                        }
+                    }
+                ))
+
+                if llmManager.hasDocumentOverride {
+                    Picker("Provider", selection: Binding(
+                        get: { llmManager.documentProvider ?? llmManager.currentProvider },
+                        set: { newProvider in
+                            llmManager.documentProvider = newProvider
+                            llmManager.documentModel = newProvider.config.defaultModel
+                        }
+                    )) {
+                        ForEach(LLMProvider.allCases, id: \.self) { provider in
+                            Text(provider.config.displayName).tag(provider)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Picker("Model", selection: Binding(
+                        get: { llmManager.documentModel ?? llmManager.currentModel },
+                        set: { llmManager.documentModel = $0 }
+                    )) {
+                        ForEach((llmManager.documentProvider ?? llmManager.currentProvider).config.availableModels, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+
+                    let docProv = llmManager.documentProvider ?? llmManager.currentProvider
+                    if !APIKeyManager.shared.hasKey(for: docProv) && docProv != llmManager.currentProvider {
+                        Label("API key needed for \(docProv.config.displayName)", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.caption)
+                    }
+                }
+            }
+
             Section("\(llmManager.currentProvider.config.displayName) API Key") {
                 HStack {
                     if showKey {

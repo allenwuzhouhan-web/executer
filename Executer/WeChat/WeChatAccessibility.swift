@@ -93,24 +93,21 @@ enum WeChatAccessibility {
     // MARK: - Script Runner
 
     private static func runOsascript(_ script: String) throws {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        proc.arguments = ["-e", script]
-        let errPipe = Pipe()
-        proc.standardError = errPipe
-        proc.standardOutput = FileHandle.nullDevice
+        // Use NSAppleScript (in-process) instead of /usr/bin/osascript (subprocess).
+        // NSAppleScript inherits Executer's own Accessibility permission.
+        // The osascript binary requires its OWN separate Accessibility entry in macOS Sequoia+,
+        // which users can't easily grant — so we avoid it entirely.
+        var errorDict: NSDictionary?
+        let appleScript = NSAppleScript(source: script)
+        appleScript?.executeAndReturnError(&errorDict)
 
-        try proc.run()
-        DispatchQueue.global().asyncAfter(deadline: .now() + 15) {
-            if proc.isRunning { proc.terminate() }
-        }
-        proc.waitUntilExit()
-
-        if proc.terminationStatus != 0 {
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            let errStr = String(data: errData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown osascript error"
-            throw WeChatError.scriptFailed(errStr)
+        if let err = errorDict {
+            let msg = err[NSAppleScript.errorMessage] as? String ?? "Unknown AppleScript error"
+            let code = err[NSAppleScript.errorNumber] as? Int ?? -1
+            // -128 = user cancelled, not a real error
+            if code != -128 {
+                throw WeChatError.scriptFailed(msg)
+            }
         }
     }
 

@@ -36,11 +36,12 @@ enum ToolSafetyClassifier {
         "get_clipboard_history": .safe, "search_clipboard_history": .safe,
         "recall_memories": .safe,
         "semantic_scholar_search": .safe, "get_paper_details": .safe,
+        "browser_screenshot": .safe,
 
         // TIER 1: NORMAL — benign side effects, routine usage
         "launch_app": .normal, "switch_to_app": .normal, "hide_app": .normal,
         "open_file": .normal, "reveal_in_finder": .normal,
-        "open_url": .normal, "search_web": .normal, "open_url_in_safari": .normal, "new_safari_tab": .normal,
+        "open_url": .normal, "search_web": .normal, "search_images": .normal, "open_url_in_safari": .normal, "new_safari_tab": .normal,
         "music_play": .normal, "music_pause": .normal, "music_next": .normal, "music_previous": .normal,
         "music_play_song": .normal, "music_search": .normal, "music_set_volume": .normal,
         "music_toggle_shuffle": .normal,
@@ -56,7 +57,7 @@ enum ToolSafetyClassifier {
         "set_clipboard_text": .normal,
         "type_text": .normal, "press_key": .normal, "hotkey": .normal, "select_all_text": .normal,
         "move_cursor": .normal, "click": .normal, "click_element": .normal, "scroll": .normal, "drag": .normal,
-        "create_reminder": .normal, "create_calendar_event": .normal, "create_note": .normal, "set_timer": .normal,
+        "create_reminder": .normal, "create_calendar_event": .normal, "create_note": .normal, "set_timer": .normal, "set_alarm": .normal,
         "open_system_preferences_pane": .normal,
         "save_memory": .normal, "forget_memory": .normal,
         "create_alias": .normal, "remove_alias": .normal,
@@ -64,6 +65,7 @@ enum ToolSafetyClassifier {
         "fetch_url_content": .normal,
         "set_weather_key": .normal, "set_semantic_scholar_key": .normal,
         "schedule_task": .normal, "open_terminal": .normal,
+        "browser_extract": .normal, "browser_session": .normal,
 
         // TIER 2: ELEVATED — modifies user files/data
         "write_file": .elevated, "edit_file": .elevated, "append_to_file": .elevated,
@@ -75,6 +77,7 @@ enum ToolSafetyClassifier {
         "clear_clipboard_history": .elevated,
         "open_terminal_with_command": .elevated,
         "sleep_system": .elevated,
+        "browser_task": .elevated,
 
         // TIER 2 (MESSAGING): Sends messages on user's behalf
         "send_wechat_message": .elevated, "send_message": .elevated,
@@ -84,6 +87,20 @@ enum ToolSafetyClassifier {
         // TIER 3: CRITICAL — system-altering, arbitrary code execution
         "run_shell_command": .critical,
         "shutdown": .critical, "restart": .critical, "log_out": .critical,
+
+        // Skill Verification (read-only status checks + manual override)
+        "verify_skill_now": .normal, "list_pending_skills": .safe, "approve_skill": .elevated,
+
+        // Document Operations (read = safe, create = elevated since it runs Python)
+        "read_document": .safe, "create_document": .elevated, "setup_python_docs": .elevated,
+        "extract_document_style": .safe, "list_document_styles": .safe,
+        "get_tool_guide": .safe,
+        // Document Training (train = elevated since it runs Python + 3 LLM calls; list/recall = safe)
+        "train_document": .elevated, "list_trained_documents": .safe, "recall_trained_knowledge": .safe,
+        "create_presentation": .elevated, "extract_ppt_design": .safe,
+        "create_word_document": .elevated, "create_spreadsheet": .elevated,
+        // Skill Import (search = safe, import = elevated since it fetches external content)
+        "search_github_skills": .normal, "import_skill": .elevated, "list_skill_sources": .safe,
     ]
 
     /// Returns the risk tier for a tool. Unknown tools default to `.elevated`.

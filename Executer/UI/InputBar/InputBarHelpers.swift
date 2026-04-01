@@ -51,6 +51,8 @@ extension InputBarView {
             return humor.isEnabled ? "Oh hey, you're back!" : "Welcome back"
         case .result(let msg):
             return humor.isEnabled ? humor.funnyResult(msg) : msg
+        case .richResult(_, let raw):
+            return humor.isEnabled ? humor.funnyResult(raw) : raw
         case .error(let msg): return msg
         case .healthCard(let msg): return msg
         default: return ""
@@ -66,8 +68,10 @@ extension InputBarView {
         case .streaming: return "text.bubble"
         case .voiceListening: return "mic.fill"
         case .researchChoice: return "magnifyingglass"
+        case .browserChoice: return "globe"
         case .thoughtRecall: return "brain.fill"
         case .result: return "checkmark.circle.fill"
+        case .richResult: return "checkmark.circle.fill"
         case .error: return "xmark.circle.fill"
         case .healthCard: return "heart.circle.fill"
         case .newsBriefing: return "newspaper.fill"
@@ -79,6 +83,7 @@ extension InputBarView {
         let personality = PersonalityEngine.shared.currentPersonality
         switch appState.inputBarState {
         case .result: return .green
+        case .richResult: return .green
         case .error: return .red
         case .voiceListening: return .purple
         case .thoughtRecall: return .purple

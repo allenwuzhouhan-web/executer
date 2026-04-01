@@ -10,6 +10,7 @@ class AppState: ObservableObject {
     @Published var contextualNudge: String? = nil
     @Published var attachedFiles: [AttachedFile] = []
     @Published var voiceActive = false
+    @Published var currentAgent: AgentProfile = .general
 
     private var currentTask: Task<Void, Never>?
     private var conversationMessages: [ChatMessage] = []
@@ -232,6 +233,32 @@ class AppState: ObservableObject {
         executeCommand(prefixed)
     }
 
+    // MARK: - Browser Detection
+
+    private static let browserKeywords: [String] = [
+        "fill form", "fill out", "log in to", "login to", "sign up on", "sign in to",
+        "book a", "book on", "order from", "order on", "purchase", "checkout",
+        "add to cart", "submit form", "automate web", "go to", "navigate to",
+        "browse to", "on the website", "on the site", "using the browser",
+    ]
+
+    private func looksLikeBrowserTask(_ command: String) -> Bool {
+        let lower = command.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        // Must contain a browser-like keyword + a URL or site reference
+        let hasBrowserKeyword = Self.browserKeywords.contains { lower.contains($0) }
+        let hasSiteReference = lower.contains(".com") || lower.contains(".org") || lower.contains(".net")
+            || lower.contains("http") || lower.contains("website") || lower.contains("site")
+            || lower.contains("page") || lower.contains("browser")
+        return hasBrowserKeyword && hasSiteReference
+    }
+
+    /// Called when user picks Watch or Background from the browser choice buttons.
+    func submitBrowserTask(query: String, visible: Bool) {
+        let prefixed = visible ? "[browser visible] \(query)" : "[browser background] \(query)"
+        inputBarState = .processing
+        executeCommand(prefixed)
+    }
+
     // MARK: - Command Submission
 
     func submitCommand(_ command: String) {
@@ -243,8 +270,15 @@ class AppState: ObservableObject {
             return
         }
 
+        // Agent routing — classify which agent should handle this command
+        let routing = AgentRouter.route(command)
+        if let agent = AgentRegistry.shared.profile(for: routing.agentId) {
+            currentAgent = agent
+        }
+        let agentRouted = routing.strippedCommand
+
         // Resolve aliases before processing
-        let resolvedCommand = AliasManager.shared.resolve(command)
+        let resolvedCommand = AliasManager.shared.resolve(agentRouted)
         lastSubmittedPrompt = command
 
         // If within 60s of last result, treat as follow-up (skip research detection)
@@ -253,6 +287,12 @@ class AppState: ObservableObject {
         // If it looks like research and not a follow-up, show the choice buttons
         if !isFollowUp && looksLikeResearch(resolvedCommand) {
             inputBarState = .researchChoice(query: resolvedCommand)
+            return
+        }
+
+        // If it looks like a browser task, ask user if they want to watch
+        if !isFollowUp && looksLikeBrowserTask(resolvedCommand) {
+            inputBarState = .browserChoice(query: resolvedCommand)
             return
         }
 
@@ -412,11 +452,19 @@ class AppState: ObservableObject {
             fullCommand: fullCommand,
             resolvedCommand: resolvedCommand,
             previousMessages: previousMessages,
+            agent: currentAgent.id == "general" ? nil : currentAgent,
             onStateChange: { [weak self] state in
                 self?.inputBarState = state
             },
             onComplete: { [weak self] displayMessage, filteredText, messages in
-                self?.inputBarState = .result(message: displayMessage)
+                // Parse for structured display (dates, events, news, lists)
+                let parsed = ResponseParser.parse(displayMessage)
+                switch parsed {
+                case .text:
+                    self?.inputBarState = .result(message: displayMessage)
+                default:
+                    self?.inputBarState = .richResult(result: parsed, rawMessage: displayMessage)
+                }
                 self?.resultText = filteredText
                 self?.conversationMessages = messages
                 self?.lastCommandTime = Date()

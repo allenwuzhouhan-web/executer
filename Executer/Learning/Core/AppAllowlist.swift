@@ -5,7 +5,16 @@ import Foundation
 enum AppAllowlist {
 
     private static let defaultBlockedBundleIds: Set<String> = [
-        "com.allenwu.executer",  // Never observe ourselves
+        "com.allenwu.executer",           // Never observe ourselves
+        "com.apple.Terminal",             // Contains commands, credentials, API keys, SSH sessions
+        "com.googlecode.iterm2",          // Same as Terminal
+        "dev.warp.Warp-Stable",           // Same as Terminal
+        "com.mitchellh.ghostty",          // Same as Terminal
+        "net.kovidgoyal.kitty",           // Same as Terminal
+        "co.zeit.hyper",                  // Same as Terminal
+        "com.apple.Keychain-Access",      // Passwords and secrets
+        "com.1password.1password",        // Password manager
+        "com.agilebits.onepassword7",     // Password manager
     ]
 
     /// Check if an app is allowed for observation.

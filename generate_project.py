@@ -8,8 +8,61 @@ def gen_id(name):
     """Generate a 24-char hex ID from a name."""
     return hashlib.md5(name.encode()).hexdigest()[:24].upper()
 
-# All source files relative to project root
-swift_files = [
+# Auto-discover all Swift files under Executer/
+def discover_swift_files():
+    """Walk Executer/ and return (relative_path, group_name) for every .swift file."""
+    result = []
+    base = "Executer"
+    for dirpath, dirnames, filenames in os.walk(base):
+        # Skip hidden dirs and build artifacts
+        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+        for f in sorted(filenames):
+            if f.endswith(".swift"):
+                full = os.path.join(dirpath, f)
+                rel = os.path.relpath(full, base)  # e.g. "App/AppDelegate.swift"
+                # Group = first directory component, or "App" for top-level files
+                parts = rel.split(os.sep)
+                group = parts[0] if len(parts) > 1 else "App"
+                result.append((rel, group))
+    return result
+
+swift_files = discover_swift_files()
+
+# Auto-discover JSON resource files (e.g., BuiltInProfiles/*.json)
+def discover_resource_files():
+    """Walk Executer/ and return (relative_path, group_name) for .json files in resource dirs."""
+    result = []
+    base = "Executer"
+    # Include JSON from BuiltInProfiles + .py scripts from Resources
+    resource_dirs = {"BuiltInProfiles"}
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if not d.startswith('.') and not d.endswith('.xcassets')]
+        for f in sorted(filenames):
+            # JSON files in BuiltInProfiles
+            if f.endswith(".json"):
+                full = os.path.join(dirpath, f)
+                rel = os.path.relpath(full, base)
+                parts = rel.split(os.sep)
+                if any(rd in parts for rd in resource_dirs):
+                    group = parts[0] if len(parts) > 1 else "App"
+                    result.append((rel, group))
+            # Python scripts in Resources (ppt_engine.py, ppt_design_extractor.py)
+            if f.endswith(".py") and "Resources" in dirpath:
+                full = os.path.join(dirpath, f)
+                rel = os.path.relpath(full, base)
+                group = "Resources"
+                result.append((rel, group))
+    return result
+
+resource_files = discover_resource_files()
+json_refs = {}
+json_builds = {}
+for path, group in resource_files:
+    json_refs[path] = gen_id(f"jsonref_{path}")
+    json_builds[path] = gen_id(f"jsonbuild_{path}")
+
+# Legacy hardcoded list kept as comment for reference
+_legacy_swift_files = [
     # App
     ("App/ExecuterApp.swift", "App"),
     ("App/AppDelegate.swift", "App"),
@@ -150,6 +203,14 @@ swift_files = [
     ("WeChat/WeChatMCPClient.swift", "WeChat"),
     ("WeChat/WeChatSentLog.swift", "WeChat"),
     ("WeChat/WeChatService.swift", "WeChat"),
+    # Browser (browser-use integration)
+    ("Browser/BrowserBridgeClient.swift", "Browser"),
+    ("Browser/BrowserService.swift", "Browser"),
+    ("Browser/BrowserExecutor.swift", "Browser"),
+    # Messaging
+    ("Messaging/MessagingPlatform.swift", "Messaging"),
+    ("Messaging/IMessageService.swift", "Messaging"),
+    ("Messaging/WhatsAppService.swift", "Messaging"),
 ]
 
 # Generate IDs
@@ -166,37 +227,22 @@ ASSETS_REF = gen_id("fileref_Assets.xcassets")
 ASSETS_BUILD = gen_id("buildfile_Assets.xcassets")
 PRODUCT_REF = gen_id("fileref_Executer.app")
 
-# Groups
+# Groups — auto-generated from discovered files + fixed groups
 groups = {
     "main": gen_id("group_Executer"),
-    "App": gen_id("group_App"),
-    "Automation": gen_id("group_Automation"),
-    "Notch": gen_id("group_Notch"),
-    "UI": gen_id("group_UI"),
-    "UI/InputBar": gen_id("group_UI_InputBar"),
-    "UI/Animations": gen_id("group_UI_Animations"),
-    "UI/Theming": gen_id("group_UI_Theming"),
-    "UI/Onboarding": gen_id("group_UI_Onboarding"),
-    "UI/Settings": gen_id("group_UI_Settings"),
-    "LLM": gen_id("group_LLM"),
-    "LLM/CommandMatchers": gen_id("group_LLM_CommandMatchers"),
-    "Executors": gen_id("group_Executors"),
-    "Skills": gen_id("group_Skills"),
-    "Memory": gen_id("group_Memory"),
-    "Permissions": gen_id("group_Permissions"),
-    "Storage": gen_id("group_Storage"),
-    "Utilities": gen_id("group_Utilities"),
-    "Resources": gen_id("group_Resources"),
-    "ThoughtContinuity": gen_id("group_ThoughtContinuity"),
-    "FocusPersonality": gen_id("group_FocusPersonality"),
-    "Handoff": gen_id("group_Handoff"),
-    "Voice": gen_id("group_Voice"),
-    "Security": gen_id("group_Security"),
-    "WeChat": gen_id("group_WeChat"),
     "Products": gen_id("group_Products"),
     "Frameworks": gen_id("group_Frameworks"),
+    "Resources": gen_id("group_Resources"),
     "root": gen_id("group_root"),
 }
+# Auto-add groups for every directory that contains Swift files
+for path, group in swift_files:
+    parts = path.split(os.sep)
+    # Add each directory level as a group
+    for i in range(1, len(parts)):
+        group_path = os.sep.join(parts[:i])
+        if group_path not in groups:
+            groups[group_path] = gen_id(f"group_{group_path.replace(os.sep, '_')}")
 
 # Other IDs
 PROJECT_ID = gen_id("project_Executer")
@@ -244,6 +290,9 @@ for path, group in swift_files:
     name = os.path.basename(path)
     lines.append(f'\t\t{build_files[path]} /* {name} in Sources */ = {{isa = PBXBuildFile; fileRef = {file_refs[path]} /* {name} */; }};')
 lines.append(f'\t\t{ASSETS_BUILD} /* Assets.xcassets in Resources */ = {{isa = PBXBuildFile; fileRef = {ASSETS_REF} /* Assets.xcassets */; }};')
+for path, group in resource_files:
+    name = os.path.basename(path)
+    lines.append(f'\t\t{json_builds[path]} /* {name} in Resources */ = {{isa = PBXBuildFile; fileRef = {json_refs[path]} /* {name} */; }};')
 for fw_name, _ in frameworks:
     lines.append(f'\t\t{fw_builds[fw_name]} /* {fw_name} in Frameworks */ = {{isa = PBXBuildFile; fileRef = {fw_refs[fw_name]} /* {fw_name} */; }};')
 lines.append('/* End PBXBuildFile section */')
@@ -254,6 +303,10 @@ lines.append('/* Begin PBXFileReference section */')
 for path, group in swift_files:
     name = os.path.basename(path)
     lines.append(f'\t\t{file_refs[path]} /* {name} */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {name}; sourceTree = "<group>"; }};')
+for path, group in resource_files:
+    name = os.path.basename(path)
+    file_type = "text.script.python" if name.endswith(".py") else "text.json"
+    lines.append(f'\t\t{json_refs[path]} /* {name} */ = {{isa = PBXFileReference; lastKnownFileType = {file_type}; path = {name}; sourceTree = "<group>"; }};')
 lines.append(f'\t\t{INFO_PLIST_REF} /* Info.plist */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; }};')
 lines.append(f'\t\t{ENTITLEMENTS_REF} /* Executer.entitlements */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Executer.entitlements; sourceTree = "<group>"; }};')
 lines.append(f'\t\t{ASSETS_REF} /* Assets.xcassets */ = {{isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; }};')
@@ -312,29 +365,21 @@ lines.append('\t\t\tname = Frameworks;')
 lines.append('\t\t\tsourceTree = "<group>";')
 lines.append('\t\t};')
 
-# Main Executer group
-main_children = [
-    (groups["App"], "App"),
-    (groups["Automation"], "Automation"),
-    (groups["Notch"], "Notch"),
-    (groups["UI"], "UI"),
-    (groups["LLM"], "LLM"),
-    (groups["Executors"], "Executors"),
-    (groups["Skills"], "Skills"),
-    (groups["Memory"], "Memory"),
-    (groups["Permissions"], "Permissions"),
-    (groups["Storage"], "Storage"),
-    (groups["Utilities"], "Utilities"),
-    (groups["ThoughtContinuity"], "ThoughtContinuity"),
-    (groups["FocusPersonality"], "FocusPersonality"),
-    (groups["Handoff"], "Handoff"),
-    (groups["Voice"], "Voice"),
-    (groups["Security"], "Security"),
-    (groups["WeChat"], "WeChat"),
-    (groups["Resources"], "Resources"),
-    (INFO_PLIST_REF, "Info.plist"),
-    (ENTITLEMENTS_REF, "Executer.entitlements"),
-]
+# Main Executer group — auto-generated from discovered top-level groups
+top_level_groups = sorted(set(
+    path.split(os.sep)[0] for path, _ in swift_files if os.sep in path or "/" in path
+))
+# Also handle paths like "App/Foo.swift" where group="App"
+for path, group in swift_files:
+    parts = path.split(os.sep) if os.sep in path else path.split("/")
+    if len(parts) > 1 and parts[0] not in top_level_groups:
+        top_level_groups.append(parts[0])
+top_level_groups = sorted(set(top_level_groups))
+
+main_children = [(groups[g], g) for g in top_level_groups if g in groups]
+main_children.append((groups["Resources"], "Resources"))
+main_children.append((INFO_PLIST_REF, "Info.plist"))
+main_children.append((ENTITLEMENTS_REF, "Executer.entitlements"))
 lines.append(f'\t\t{groups["main"]} /* Executer */ = {{')
 lines.append('\t\t\tisa = PBXGroup;')
 lines.append('\t\t\tchildren = (')
@@ -345,79 +390,75 @@ lines.append('\t\t\tpath = Executer;')
 lines.append('\t\t\tsourceTree = "<group>";')
 lines.append('\t\t};')
 
-# File groups
-group_files = {}
-for path, group in swift_files:
-    if group not in group_files:
-        group_files[group] = []
-    group_files[group].append((file_refs[path], os.path.basename(path)))
+# Build group -> files mapping and group -> subgroups mapping
+group_files = {}  # group_path -> [(file_ref_id, filename)]
+group_children = {}  # parent_group -> [child_group_path]
 
-simple_groups = ["App", "Automation", "Notch", "Executors", "Skills", "Memory", "Permissions", "Storage", "Utilities", "ThoughtContinuity", "FocusPersonality", "Handoff", "Voice", "Security", "WeChat"]
-for g in simple_groups:
-    lines.append(f'\t\t{groups[g]} /* {g} */ = {{')
+for path, _ in swift_files:
+    parts = path.split(os.sep) if os.sep in path else path.split("/")
+    # The group this file belongs to is all dirs except the filename
+    group_path = os.sep.join(parts[:-1]) if len(parts) > 1 else "App"
+    group_files.setdefault(group_path, []).append((file_refs[path], parts[-1]))
+    # Register parent->child relationships for nested groups
+    for i in range(1, len(parts) - 1):
+        parent = os.sep.join(parts[:i])
+        child = os.sep.join(parts[:i+1])
+        group_children.setdefault(parent, set()).add(child)
+
+# Also register JSON resource files in their groups (skip Resources — handled separately)
+for path, grp in resource_files:
+    if grp == "Resources":
+        continue  # Python scripts in Resources/ are added to the hardcoded Resources group
+    parts = path.split(os.sep) if os.sep in path else path.split("/")
+    group_path = os.sep.join(parts[:-1]) if len(parts) > 1 else "App"
+    if group_path not in groups:
+        groups[group_path] = gen_id(f"group_{group_path}")
+    group_files.setdefault(group_path, []).append((json_refs[path], parts[-1]))
+    for i in range(1, len(parts) - 1):
+        parent = os.sep.join(parts[:i])
+        child = os.sep.join(parts[:i+1])
+        if child not in groups:
+            groups[child] = gen_id(f"group_{child}")
+        group_children.setdefault(parent, set()).add(child)
+
+# Emit all groups (auto-handles any nesting depth)
+emitted_groups = set()
+def emit_group(group_path):
+    if group_path in emitted_groups:
+        return
+    emitted_groups.add(group_path)
+    short_name = group_path.split(os.sep)[-1] if os.sep in group_path else group_path
+    lines.append(f'\t\t{groups[group_path]} /* {short_name} */ = {{')
     lines.append('\t\t\tisa = PBXGroup;')
     lines.append('\t\t\tchildren = (')
-    for fid, fname in group_files.get(g, []):
-        lines.append(f'\t\t\t\t{fid} /* {fname} */,')
-    lines.append('\t\t\t);')
-    lines.append(f'\t\t\tpath = {g};')
-    lines.append('\t\t\tsourceTree = "<group>";')
-    lines.append('\t\t};')
-
-# UI group (has subgroups)
-lines.append(f'\t\t{groups["UI"]} /* UI */ = {{')
-lines.append('\t\t\tisa = PBXGroup;')
-lines.append('\t\t\tchildren = (')
-lines.append(f'\t\t\t\t{groups["UI/InputBar"]} /* InputBar */,')
-lines.append(f'\t\t\t\t{groups["UI/Animations"]} /* Animations */,')
-lines.append(f'\t\t\t\t{groups["UI/Theming"]} /* Theming */,')
-lines.append(f'\t\t\t\t{groups["UI/Onboarding"]} /* Onboarding */,')
-lines.append(f'\t\t\t\t{groups["UI/Settings"]} /* Settings */,')
-lines.append('\t\t\t);')
-lines.append('\t\t\tpath = UI;')
-lines.append('\t\t\tsourceTree = "<group>";')
-lines.append('\t\t};')
-
-for subg in ["UI/InputBar", "UI/Animations", "UI/Theming", "UI/Onboarding", "UI/Settings"]:
-    short_name = subg.split("/")[-1]
-    lines.append(f'\t\t{groups[subg]} /* {short_name} */ = {{')
-    lines.append('\t\t\tisa = PBXGroup;')
-    lines.append('\t\t\tchildren = (')
-    for fid, fname in group_files.get(subg, []):
+    # Add subgroup references first
+    for child in sorted(group_children.get(group_path, [])):
+        child_short = child.split(os.sep)[-1]
+        lines.append(f'\t\t\t\t{groups[child]} /* {child_short} */,')
+    # Add file references
+    for fid, fname in group_files.get(group_path, []):
         lines.append(f'\t\t\t\t{fid} /* {fname} */,')
     lines.append('\t\t\t);')
     lines.append(f'\t\t\tpath = {short_name};')
     lines.append('\t\t\tsourceTree = "<group>";')
     lines.append('\t\t};')
 
-# LLM group (has CommandMatchers subgroup)
-lines.append(f'\t\t{groups["LLM"]} /* LLM */ = {{')
-lines.append('\t\t\tisa = PBXGroup;')
-lines.append('\t\t\tchildren = (')
-for fid, fname in group_files.get("LLM", []):
-    lines.append(f'\t\t\t\t{fid} /* {fname} */,')
-lines.append(f'\t\t\t\t{groups["LLM/CommandMatchers"]} /* CommandMatchers */,')
-lines.append('\t\t\t);')
-lines.append('\t\t\tpath = LLM;')
-lines.append('\t\t\tsourceTree = "<group>";')
-lines.append('\t\t};')
+# Emit all discovered groups
+for group_path in sorted(groups.keys()):
+    if group_path in ("main", "Products", "Frameworks", "Resources", "root"):
+        continue  # These are handled separately
+    emit_group(group_path)
 
-# LLM/CommandMatchers subgroup
-lines.append(f'\t\t{groups["LLM/CommandMatchers"]} /* CommandMatchers */ = {{')
-lines.append('\t\t\tisa = PBXGroup;')
-lines.append('\t\t\tchildren = (')
-for fid, fname in group_files.get("LLM/CommandMatchers", []):
-    lines.append(f'\t\t\t\t{fid} /* {fname} */,')
-lines.append('\t\t\t);')
-lines.append('\t\t\tpath = CommandMatchers;')
-lines.append('\t\t\tsourceTree = "<group>";')
-lines.append('\t\t};')
-
-# Resources group
+# Resources group (Assets + bundled Python scripts)
 lines.append(f'\t\t{groups["Resources"]} /* Resources */ = {{')
 lines.append('\t\t\tisa = PBXGroup;')
 lines.append('\t\t\tchildren = (')
 lines.append(f'\t\t\t\t{ASSETS_REF} /* Assets.xcassets */,')
+# Add Python scripts and other Resources-group resource files
+for path, group in resource_files:
+    if group == "Resources":
+        name = os.path.basename(path)
+        lines.append(f'\t\t\t\t{json_refs[path]} /* {name} */,')
 lines.append('\t\t\t);')
 lines.append('\t\t\tpath = Resources;')
 lines.append('\t\t\tsourceTree = "<group>";')
@@ -478,6 +519,9 @@ lines.append('\t\t\tisa = PBXResourcesBuildPhase;')
 lines.append('\t\t\tbuildActionMask = 2147483647;')
 lines.append('\t\t\tfiles = (')
 lines.append(f'\t\t\t\t{ASSETS_BUILD} /* Assets.xcassets in Resources */,')
+for path, group in resource_files:
+    name = os.path.basename(path)
+    lines.append(f'\t\t\t\t{json_builds[path]} /* {name} in Resources */,')
 lines.append('\t\t\t);')
 lines.append('\t\t\trunOnlyForDeploymentPostprocessing = 0;')
 lines.append('\t\t};')

@@ -95,7 +95,7 @@ struct MusicCatalogSearchTool: ToolDefinition {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         let searchURL = URL(string: "https://itunes.apple.com/search?term=\(encoded)&media=music&entity=song&limit=\(limit)")!
 
-        let (data, _) = try await URLSession.shared.data(from: searchURL)
+        let (data, _) = try await PinnedURLSession.shared.session.data(from: searchURL)
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let results = json["results"] as? [[String: Any]],
               !results.isEmpty else {
@@ -151,7 +151,7 @@ struct MusicPlaySongTool: ToolDefinition {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         let searchURL = URL(string: "https://itunes.apple.com/search?term=\(encoded)&media=music&entity=song&limit=1")!
 
-        let (data, _) = try await URLSession.shared.data(from: searchURL)
+        let (data, _) = try await PinnedURLSession.shared.session.data(from: searchURL)
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let results = json["results"] as? [[String: Any]],
               let first = results.first,

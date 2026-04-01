@@ -12,6 +12,14 @@ struct InputBarView: View {
         VStack(spacing: 0) {
             // Main input pill with file attachment badge
             HStack(spacing: 8) {
+                // Agent indicator dot — visible when a non-general agent is active
+                if appState.currentAgent.id != "general" {
+                    Circle()
+                        .fill(Color(hex: appState.currentAgent.color) ?? .white)
+                        .frame(width: 6, height: 6)
+                        .transition(.scale.combined(with: .opacity))
+                }
+
                 Image(systemName: iconName)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(iconColor)
@@ -99,10 +107,23 @@ struct InputBarView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            // Browser visibility choice buttons
+            if case .browserChoice(let query) = appState.inputBarState {
+                browserChoiceButtons(query: query)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             // Prompt label + result bubble
             if case .result(let message) = appState.inputBarState {
                 promptLabel
                 ResultBubbleView(message: message, isError: false, onDismiss: { appState.hideInputBar() })
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            // Rich result cards (date, event, news, list)
+            if case .richResult(let result, let raw) = appState.inputBarState {
+                promptLabel
+                RichResultView(result: result, rawMessage: raw, onDismiss: { appState.hideInputBar() })
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             if case .error(let message) = appState.inputBarState {
@@ -218,6 +239,47 @@ struct InputBarView: View {
                     Image(systemName: "bolt.circle.fill")
                         .font(.system(size: 11, weight: .semibold))
                     Text("Quick Lookup")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(Color.secondary.opacity(0.1))
+                .foregroundStyle(.primary)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 6)
+    }
+
+    @ViewBuilder
+    private func browserChoiceButtons(query: String) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                appState.submitBrowserTask(query: query, visible: true)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "eye.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Watch")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(Color.blue.opacity(0.15))
+                .foregroundStyle(Color.blue)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                appState.submitBrowserTask(query: query, visible: false)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "eye.slash.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Background")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
                 .frame(maxWidth: .infinity)

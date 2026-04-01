@@ -36,7 +36,7 @@ struct GetWeatherTool: ToolDefinition {
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PinnedURLSession.shared.session.data(for: request)
 
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0

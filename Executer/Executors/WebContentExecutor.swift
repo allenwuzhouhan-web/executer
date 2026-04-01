@@ -109,7 +109,7 @@ struct FetchURLContentTool: ToolDefinition {
         request.timeoutInterval = 15
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Executer/1.0", forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PinnedURLSession.shared.session.data(for: request)
 
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0

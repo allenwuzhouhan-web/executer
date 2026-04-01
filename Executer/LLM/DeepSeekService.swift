@@ -20,6 +20,29 @@ struct ChatMessage: Codable {
         self.tool_call_id = tool_call_id
         self.reasoning_content = reasoning_content
     }
+
+    // Custom decoder: tolerate unknown fields, missing optional fields, and type mismatches.
+    // Different APIs (DeepSeek, Kimi, Gemini, MiniMax) return slightly different JSON.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        role = try container.decode(String.self, forKey: .role)
+
+        // content can be String or null or missing entirely
+        content = try? container.decodeIfPresent(String.self, forKey: .content)
+
+        // tool_calls: try to decode, silently ignore if format doesn't match
+        tool_calls = try? container.decodeIfPresent([ToolCall].self, forKey: .tool_calls)
+
+        // tool_call_id: only present in tool-result messages
+        tool_call_id = try? container.decodeIfPresent(String.self, forKey: .tool_call_id)
+
+        // reasoning_content: DeepSeek-specific, other APIs won't have it
+        reasoning_content = try? container.decodeIfPresent(String.self, forKey: .reasoning_content)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case role, content, tool_calls, tool_call_id, reasoning_content
+    }
 }
 
 struct ToolCall: Codable {
@@ -30,6 +53,24 @@ struct ToolCall: Codable {
     struct FunctionCall: Codable {
         let name: String
         let arguments: String
+    }
+
+    // Tolerate missing/extra fields from different APIs
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? container.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        type = (try? container.decode(String.self, forKey: .type)) ?? "function"
+        function = try container.decode(FunctionCall.self, forKey: .function)
+    }
+
+    init(id: String, type: String, function: FunctionCall) {
+        self.id = id
+        self.type = type
+        self.function = function
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, type, function
     }
 }
 
@@ -51,12 +92,30 @@ struct ChatCompletionResponse: Codable {
         let index: Int
         let message: ChatMessage
         let finish_reason: String?
+
+        // Tolerate missing index (some APIs omit it)
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            index = (try? container.decodeIfPresent(Int.self, forKey: .index)) ?? 0
+            message = try container.decode(ChatMessage.self, forKey: .message)
+            finish_reason = try? container.decodeIfPresent(String.self, forKey: .finish_reason)
+        }
+        private enum CodingKeys: String, CodingKey { case index, message, finish_reason }
     }
 
     struct Usage: Codable {
         let prompt_tokens: Int
         let completion_tokens: Int
         let total_tokens: Int
+
+        // Tolerate missing fields (some APIs use different names)
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            prompt_tokens = (try? container.decode(Int.self, forKey: .prompt_tokens)) ?? 0
+            completion_tokens = (try? container.decode(Int.self, forKey: .completion_tokens)) ?? 0
+            total_tokens = (try? container.decode(Int.self, forKey: .total_tokens)) ?? 0
+        }
+        private enum CodingKeys: String, CodingKey { case prompt_tokens, completion_tokens, total_tokens }
     }
 }
 
@@ -130,6 +189,11 @@ class OpenAICompatibleService: LLMServiceProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 120
 
+        // Kimi Coding endpoint requires a coding-agent User-Agent to allow access
+        if provider == .kimiCN || provider == .kimi {
+            request.setValue("claude-code/1.0", forHTTPHeaderField: "User-Agent")
+        }
+
         let body = ChatCompletionRequest(
             model: model,
             messages: messages,
@@ -141,7 +205,7 @@ class OpenAICompatibleService: LLMServiceProtocol {
 
         request.httpBody = try sharedJSONEncoder.encode(body)
 
-        let (data, httpResponse) = try await URLSession.shared.data(for: request)
+        let (data, httpResponse) = try await PinnedURLSession.shared.session.data(for: request)
 
         guard let http = httpResponse as? HTTPURLResponse else {
             throw ExecuterError.apiError("Invalid response")
@@ -170,10 +234,13 @@ class OpenAICompatibleService: LLMServiceProtocol {
         do {
             decoded = try sharedJSONDecoder.decode(ChatCompletionResponse.self, from: data)
         } catch {
-            let preview = String(data: data, encoding: .utf8)?.prefix(200) ?? "unreadable"
+            let preview = String(data: data, encoding: .utf8)?.prefix(500) ?? "unreadable"
             if preview.contains("<html") || preview.contains("<!DOCTYPE") {
                 throw ExecuterError.apiError("\(provider.config.displayName) returned HTML instead of JSON. The API endpoint may be misconfigured or down.")
             }
+            // Log the actual response for debugging
+            print("[API] \(provider.config.displayName) parse failure. Raw response: \(preview)")
+            print("[API] Decode error: \(error)")
             throw ExecuterError.apiError("\(provider.config.displayName) response parse error: \(error.localizedDescription)")
         }
 
@@ -181,8 +248,12 @@ class OpenAICompatibleService: LLMServiceProtocol {
             throw ExecuterError.apiError("No response choices")
         }
 
+        // Use content if available; fall back to reasoning_content for thinking models (DeepSeek-R1, Kimi)
+        let text = (choice.message.content?.isEmpty == false ? choice.message.content : nil)
+            ?? choice.message.reasoning_content
+
         return LLMResponse(
-            text: choice.message.content,
+            text: text,
             toolCalls: choice.message.tool_calls,
             rawMessage: choice.message
         )
@@ -197,6 +268,9 @@ class OpenAICompatibleService: LLMServiceProtocol {
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     request.setValue("Bearer \(APIKeyManager.shared.getKey(for: provider) ?? "")", forHTTPHeaderField: "Authorization")
                     request.timeoutInterval = 120
+                    if provider == .kimiCN || provider == .kimi {
+                        request.setValue("claude-code/1.0", forHTTPHeaderField: "User-Agent")
+                    }
 
                     let body = ChatCompletionRequest(
                         model: model,
@@ -208,7 +282,7 @@ class OpenAICompatibleService: LLMServiceProtocol {
                     )
                     request.httpBody = try sharedJSONEncoder.encode(body)
 
-                    let (bytes, httpResponse) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, httpResponse) = try await PinnedURLSession.shared.session.bytes(for: request)
 
                     guard let http = httpResponse as? HTTPURLResponse, http.statusCode == 200 else {
                         throw ExecuterError.apiError("Stream request failed with HTTP \((httpResponse as? HTTPURLResponse)?.statusCode ?? 0)")

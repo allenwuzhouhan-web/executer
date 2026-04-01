@@ -90,25 +90,18 @@ class IMessageService: MessagingService {
     }
 
     private func runOsascript(_ script: String) async throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        let errorPipe = Pipe()
-        process.standardError = errorPipe
-        process.standardOutput = Pipe()
+        // Use NSAppleScript (in-process) to inherit Executer's Accessibility permission.
+        // /usr/bin/osascript subprocess requires its own Accessibility entry on macOS Sequoia+.
+        var errorDict: NSDictionary?
+        let appleScript = NSAppleScript(source: script)
+        appleScript?.executeAndReturnError(&errorDict)
 
-        try process.run()
-
-        let deadline = Date().addingTimeInterval(15)
-        while process.isRunning && Date() < deadline {
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-        if process.isRunning { process.terminate() }
-
-        if process.terminationStatus != 0 {
-            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let msg = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw MessagingError.sendFailed(msg)
+        if let err = errorDict {
+            let msg = err[NSAppleScript.errorMessage] as? String ?? "Unknown AppleScript error"
+            let code = err[NSAppleScript.errorNumber] as? Int ?? -1
+            if code != -128 {
+                throw MessagingError.sendFailed(msg)
+            }
         }
     }
 }

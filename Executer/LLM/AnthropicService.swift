@@ -43,7 +43,7 @@ class AnthropicService: LLMServiceProtocol {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, httpResponse) = try await URLSession.shared.data(for: request)
+        let (data, httpResponse) = try await PinnedURLSession.shared.session.data(for: request)
 
         guard let http = httpResponse as? HTTPURLResponse else {
             throw ExecuterError.apiError("Invalid response")

@@ -41,7 +41,7 @@ struct SemanticScholarSearchTool: ToolDefinition {
         request.timeoutInterval = 15
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PinnedURLSession.shared.session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if status == 429 { return "Rate limited. Try again in a moment." }
@@ -109,7 +109,7 @@ struct GetPaperDetailsTool: ToolDefinition {
         request.timeoutInterval = 15
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PinnedURLSession.shared.session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if status == 404 { return "Paper not found." }

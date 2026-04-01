@@ -117,48 +117,4 @@ struct PermissionSetupView: View {
     }
 }
 
-// MARK: - Window Controller
-
-class PermissionSetupWindowController {
-    private var window: NSWindow?
-
-    /// Shows the setup window if Accessibility or Input Monitoring are missing.
-    /// Calls `completion` when all permissions are granted (or if they're already granted).
-    func showIfNeeded(completion: @escaping () -> Void) {
-        let pm = PermissionManager.shared
-        pm.refreshAccessibility()
-        pm.refreshEventTap()
-
-        // Already granted — nothing to do
-        guard !pm.accessibilityGranted || !pm.eventTapAvailable else {
-            completion()
-            return
-        }
-
-        let view = PermissionSetupView {
-            self.window?.close()
-            self.window = nil
-            completion()
-        }
-
-        let hostingView = NSHostingView(rootView: view)
-        // Let the hosting view drive its own size from SwiftUI content,
-        // preventing infinite constraint update cycles when permission
-        // state changes cause the view to resize.
-        hostingView.sizingOptions = [.intrinsicContentSize]
-        let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        win.contentView = hostingView
-        win.title = "Executer Setup"
-        win.center()
-        win.level = .floating
-        win.isReleasedWhenClosed = false
-        win.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        self.window = win
-    }
-}
+// PermissionSetupWindowController removed — unified into OnboardingWindowController

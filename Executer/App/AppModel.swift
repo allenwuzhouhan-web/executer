@@ -25,6 +25,23 @@ enum AppModel {
         case release = "Release"
     }
 
+    /// Build environment — determined at compile time. Cannot be spoofed at runtime.
+    enum BuildEnvironment: String {
+        case debug = "Debug"
+        case development = "Development"
+        case release = "Release"
+    }
+
+    /// Compile-time build environment classification.
+    /// Uses #if DEBUG (compiler flag) — stripped from release binaries entirely.
+    static var buildEnvironment: BuildEnvironment {
+        #if DEBUG
+        return .debug
+        #else
+        return buildType == .release ? .release : .development
+        #endif
+    }
+
     /// Full display string for UI.
     static var displayString: String {
         "Executer \(modelNumber) (\(buildType.rawValue))"

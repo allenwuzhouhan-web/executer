@@ -144,4 +144,44 @@ class ThoughtRecallService {
         }
         return "You were typing in \(appName)"
     }
+
+    // MARK: - Thought Summarization (Past Session Recall)
+
+    /// Summarize recent thoughts matching a query. Returns a coherent summary instead of raw dumps.
+    func summarizeRecentThoughts(query: String?) async -> String? {
+        let thoughts: [ThoughtDatabase.ThoughtRecord]
+        if let q = query, !q.isEmpty {
+            thoughts = db.searchThoughts(query: q, limit: 10)
+        } else {
+            thoughts = db.recentThoughts(limit: 10)
+        }
+
+        guard !thoughts.isEmpty else { return nil }
+
+        // Build context from thought records
+        let entries = thoughts.map { t in
+            let time = RelativeDateTimeFormatter().localizedString(for: t.timestamp, relativeTo: Date())
+            return "[\(time)] \(t.appName): \(String(t.textContent.prefix(200)))"
+        }
+        let context = entries.joined(separator: "\n")
+
+        let prompt = """
+        Summarize these past interactions concisely in 2-3 sentences. \
+        Focus on what was accomplished, decisions made, and key outcomes. \
+        Be specific, not generic. Do not list — synthesize.
+
+        \(context)
+        """
+
+        do {
+            let messages = [ChatMessage(role: "user", content: prompt)]
+            let response = try await LLMServiceManager.shared.currentService.sendChatRequest(
+                messages: messages, tools: nil, maxTokens: 150
+            )
+            return response.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            print("[ThoughtRecall] Summarization failed: \(error)")
+            return nil
+        }
+    }
 }

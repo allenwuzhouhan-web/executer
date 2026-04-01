@@ -65,7 +65,7 @@ class NewsBriefingService {
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await PinnedURLSession.shared.session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return [] }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],

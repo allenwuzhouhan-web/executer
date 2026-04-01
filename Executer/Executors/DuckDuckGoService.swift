@@ -14,7 +14,7 @@ enum DuckDuckGoService {
         var request = URLRequest(url: url)
         request.timeoutInterval = 1.5
 
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
+        guard let (data, _) = try? await PinnedURLSession.shared.session.data(for: request),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
 

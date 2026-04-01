@@ -108,15 +108,24 @@ struct SetTimerTool: ToolDefinition {
     let description = "Set a timer that sends a notification when it expires"
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
-            "minutes": JSONSchema.integer(description: "Number of minutes for the timer", minimum: 1, maximum: 1440),
+            "duration_seconds": JSONSchema.integer(description: "Duration in seconds"),
+            "minutes": JSONSchema.integer(description: "Duration in minutes (ignored if duration_seconds is set)", minimum: 1, maximum: 1440),
             "label": JSONSchema.string(description: "Optional label for the timer")
-        ], required: ["minutes"])
+        ])
     }
 
     func execute(arguments: String) async throws -> String {
         let args = try parseArguments(arguments)
-        let minutes = optionalInt("minutes", from: args) ?? 5
         let label = optionalString("label", from: args) ?? "Timer"
+
+        // Accept either duration_seconds or minutes
+        let totalSeconds: Int
+        if let secs = optionalInt("duration_seconds", from: args), secs > 0 {
+            totalSeconds = secs
+        } else {
+            totalSeconds = (optionalInt("minutes", from: args) ?? 5) * 60
+        }
+        let minutes = max(1, totalSeconds / 60)
 
         // Schedule a notification
         let content = UNMutableNotificationContent()
@@ -125,7 +134,7 @@ struct SetTimerTool: ToolDefinition {
         content.sound = .default
 
         let trigger = UNTimeIntervalNotificationTrigger(
-            timeInterval: TimeInterval(minutes * 60),
+            timeInterval: TimeInterval(totalSeconds),
             repeats: false
         )
         let request = UNNotificationRequest(
@@ -135,7 +144,110 @@ struct SetTimerTool: ToolDefinition {
         )
 
         try await UNUserNotificationCenter.current().add(request)
+
+        // Also schedule a direct sound playback as backup (survives Focus/DND)
+        let timerInterval = TimeInterval(totalSeconds)
+        DispatchQueue.main.asyncAfter(deadline: .now() + timerInterval) {
+            AlarmPlayer.play(label: label, time: "\(minutes)m timer")
+        }
+
         return "Timer set for \(minutes) minutes (\(label))."
+    }
+}
+
+struct SetAlarmTool: ToolDefinition {
+    let name = "set_alarm"
+    let description = "Set an alarm at a specific time. Plays a sound and shows a notification when the time arrives. Works like a clock alarm."
+    var parameters: [String: Any] {
+        JSONSchema.object(properties: [
+            "time": JSONSchema.string(description: "Time in HH:MM format (24-hour) e.g. '18:50' for 6:50 PM, or '07:00' for 7 AM"),
+            "label": JSONSchema.string(description: "Optional label for the alarm"),
+        ], required: ["time"])
+    }
+
+    func execute(arguments: String) async throws -> String {
+        let args = try parseArguments(arguments)
+        let timeStr = try requiredString("time", from: args)
+        let label = optionalString("label", from: args) ?? "Alarm"
+
+        // Parse HH:MM
+        let parts = timeStr.split(separator: ":")
+        guard parts.count == 2,
+              let hour = Int(parts[0]), let minute = Int(parts[1]),
+              hour >= 0, hour < 24, minute >= 0, minute < 60 else {
+            return "Invalid time format. Use HH:MM (24-hour), e.g. '18:50' or '07:00'."
+        }
+
+        // Calculate time interval until the target time
+        let calendar = Calendar.current
+        var targetComponents = calendar.dateComponents([.year, .month, .day], from: Date())
+        targetComponents.hour = hour
+        targetComponents.minute = minute
+        targetComponents.second = 0
+
+        guard var targetDate = calendar.date(from: targetComponents) else {
+            return "Failed to calculate alarm time."
+        }
+
+        // If the target time is in the past today, set for tomorrow
+        if targetDate <= Date() {
+            targetDate = calendar.date(byAdding: .day, value: 1, to: targetDate)!
+        }
+
+        let interval = targetDate.timeIntervalSince(Date())
+
+        // Schedule notification with alarm sound
+        let content = UNMutableNotificationContent()
+        content.title = "⏰ \(label)"
+        content.body = "Alarm: \(timeStr)"
+        content.sound = AlarmSoundPreference.notificationSound
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: "alarm-\(UUID().uuidString)",
+            content: content,
+            trigger: trigger
+        )
+
+        try await UNUserNotificationCenter.current().add(request)
+
+        // Also schedule a direct sound playback as backup (survives Focus/DND)
+        let alarmInterval = interval
+        DispatchQueue.main.asyncAfter(deadline: .now() + alarmInterval) {
+            AlarmPlayer.play(label: label, time: timeStr)
+        }
+
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        let displayTime = formatter.string(from: targetDate)
+        let minutesUntil = Int(interval / 60)
+        return "Alarm set for \(displayTime) (\(label)). That's in \(minutesUntil) minutes."
+    }
+}
+
+/// Plays alarm sound directly via NSSound — not dependent on notification delivery
+enum AlarmPlayer {
+    private static var playCount = 0
+    private static var timer: Timer?
+
+    static func play(label: String, time: String) {
+        let soundName = UserDefaults.standard.string(forKey: "alarm_sound") ?? "Glass"
+        playCount = 0
+
+        // Play the sound 5 times with 2-second gaps so the user actually notices
+        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { t in
+            if let sound = NSSound(named: NSSound.Name(soundName)) {
+                sound.play()
+            } else {
+                NSSound.beep()
+            }
+            playCount += 1
+            if playCount >= 5 {
+                t.invalidate()
+                timer = nil
+            }
+        }
+        timer?.fire() // play immediately too
     }
 }
 

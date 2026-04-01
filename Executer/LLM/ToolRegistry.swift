@@ -7,23 +7,23 @@ enum ToolCategory: String, CaseIterable {
     case skills, webContent, fileContent, fileSearch, memory
     case aliases, clipboardHistory, systemInfo, automation
     case cursor, keyboard, language, scheduler, weather
-    case messaging, academicResearch, documents
+    case messaging, academicResearch, documents, browser, mcp
 }
 
 /// Central registry of all tools the LLM can invoke.
 class ToolRegistry {
     static let shared = ToolRegistry()
 
-    private let tools: [String: ToolDefinition]
+    private var tools: [String: ToolDefinition]
     // Cached schema array — avoids 220+ AnyCodable allocations per API call (~500KB saved)
-    private let cachedSchemas: [[String: AnyCodable]]
+    private var cachedSchemas: [[String: AnyCodable]]
     // Tool name → category mapping for filtered queries
-    private let toolCategories: [String: ToolCategory]
+    private var toolCategories: [String: ToolCategory]
     // Pre-built per-category schema cache
-    private let schemasByCategory: [ToolCategory: [[String: AnyCodable]]]
+    private var schemasByCategory: [ToolCategory: [[String: AnyCodable]]]
 
     private init() {
-        let allTools: [ToolDefinition] = [
+        var allTools: [any ToolDefinition] = [
             // App Control
             LaunchAppTool(),
             QuitAppTool(),
@@ -104,6 +104,7 @@ class ToolRegistry {
             CreateCalendarEventTool(),
             CreateNoteTool(),
             SetTimerTool(),
+            SetAlarmTool(),
             OpenSystemPreferencesTool(),
 
             // Terminal
@@ -244,6 +245,9 @@ class ToolRegistry {
             // Instant Search (DuckDuckGo)
             InstantSearchTool(),
 
+            // Image Search
+            SearchImagesTool(),
+
             // Screen Reading & Learning (Accessibility-based, no screen recording)
             ReadScreenTool(),
             ReadAppTextTool(),
@@ -286,7 +290,27 @@ class ToolRegistry {
             SearchGitHubSkillsTool(),
             ImportSkillTool(),
             ListSkillSourcesTool(),
+
+            // Browser Automation (browser-use)
+            BrowserTaskTool(),
+            BrowserExtractTool(),
+            BrowserSessionTool(),
+            BrowserScreenshotTool(),
+
+            // Document Training (8-stage study pipeline)
+            TrainDocumentTool(),
+            ListTrainedDocumentsTool(),
+            RecallTrainedKnowledgeTool(),
+
+            // Document Creation (bundled engines)
+            CreatePresentationTool(),
+            ExtractPPTDesignTool(),
+            CreateWordDocumentTool(),
+            CreateSpreadsheetTool(),
         ]
+
+        // MCP tools are registered asynchronously after server connection.
+        // See registerMCPTools() called from AppDelegate after connectAll().
 
         var dict: [String: ToolDefinition] = [:]
         dict.reserveCapacity(allTools.count)
@@ -388,7 +412,7 @@ class ToolRegistry {
             "fetch_news": .academicResearch, "set_news_key": .academicResearch,
             // Academic Research
             "semantic_scholar_search": .academicResearch, "get_paper_details": .academicResearch,
-            "instant_search": .webContent,
+            "instant_search": .webContent, "search_images": .documents,
             // Screen Reading & Learning
             "read_screen": .screenshot, "read_app_text": .screenshot,
             "get_learned_patterns": .memory, "list_learned_apps": .memory,
@@ -408,11 +432,17 @@ class ToolRegistry {
             // Documents
             "read_document": .documents, "create_document": .documents, "setup_python_docs": .documents,
             "extract_document_style": .documents, "list_document_styles": .documents,
+            "train_document": .documents, "list_trained_documents": .documents, "recall_trained_knowledge": .documents,
+            "create_presentation": .documents, "extract_ppt_design": .documents,
+            "create_word_document": .documents, "create_spreadsheet": .documents,
             // Tool Catalog
             "get_tool_guide": .skills,
             "request_tools": .skills,
             // Skill Import
             "search_github_skills": .skills, "import_skill": .skills, "list_skill_sources": .skills,
+            // Browser Automation
+            "browser_task": .browser, "browser_extract": .browser,
+            "browser_session": .browser, "browser_screenshot": .browser,
         ]
         self.toolCategories = categoryMap
 
@@ -446,6 +476,38 @@ class ToolRegistry {
         return count >= 5 ? schemas : cachedSchemas
     }
 
+    /// Returns tool schemas filtered by both agent whitelist AND query intent.
+    /// Agent filtering narrows first, then intent filtering narrows further.
+    func filteredToolDefinitions(for query: String, agent: AgentProfile) -> [[String: AnyCodable]] {
+        // Step 1: If agent has an allowedToolIDs whitelist, restrict to those tools
+        let agentSchemas: [[String: AnyCodable]]
+        if let allowed = agent.allowedToolIDs {
+            agentSchemas = allowed.compactMap { name in
+                guard let tool = tools[name] else { return nil }
+                return tool.toAPISchema()
+            }
+            print("[ToolRegistry] Agent '\(agent.id)' whitelist: \(agentSchemas.count) tools")
+        } else {
+            agentSchemas = cachedSchemas
+        }
+
+        // Step 2: Apply intent-based category filtering on the agent-scoped set
+        let categories = classifyQueryIntent(query)
+        let filtered = agentSchemas.filter { schema in
+            guard let fn = schema["function"]?.value as? [String: AnyCodable],
+                  let name = fn["name"]?.value as? String,
+                  let cat = toolCategories[name] else {
+                return true  // Keep tools without a category mapping
+            }
+            return categories.contains(cat)
+        }
+
+        let count = filtered.count
+        print("[ToolRegistry] Agent '\(agent.id)' + intent filtered to \(count) tools")
+        // Fallback: return agent-scoped set if intent filter was too aggressive
+        return count >= 3 ? filtered : agentSchemas
+    }
+
     // MARK: - Intent Classification
 
     private static let intentKeywords: [(keywords: [String], categories: [ToolCategory])] = [
@@ -455,7 +517,7 @@ class ToolRegistry {
         (["lock", "sleep", "shutdown", "restart", "log out"], [.power]),
         (["file", "folder", "document", "move", "copy", "trash", "rename", "downloads"], [.files, .fileContent, .fileSearch]),
         (["read", "write", "edit", "create file", "save to"], [.fileContent, .files]),
-        (["research", "search", "url", "web", "http", "fetch", "browse", "website"], [.web, .webContent]),
+        (["research", "search", "url", "web", "http", "fetch", "browse", "website"], [.web, .webContent, .browser]),
         (["screen", "screenshot", "capture", "ocr", "look at"], [.screenshot]),
         (["click", "cursor", "scroll", "drag", "tap", "press the"], [.cursor]),
         (["type", "press key", "hotkey", "keyboard", "shortcut", "cmd+"], [.keyboard]),
@@ -473,7 +535,8 @@ class ToolRegistry {
         (["tell", "text", "message", "msg", "send message", "wechat"], [.messaging]),
         (["news", "headlines", "article"], [.academicResearch]),
         (["paper", "research paper", "scholar", "academic", "semantic scholar"], [.academicResearch]),
-        (["document", "presentation", "slide", "pptx", "docx", "xlsx", "powerpoint", "word", "excel", "spreadsheet", "deck"], [.documents, .files, .fileContent, .terminal]),
+        (["document", "presentation", "slide", "pptx", "docx", "xlsx", "powerpoint", "word", "excel", "spreadsheet", "deck", "train", "study", "learn from", "keynote", "pages", "report", "essay", "memo", "letter", "table", "data sheet", "image", "photo", "picture"], [.documents, .files, .fileContent, .terminal]),
+        (["fill form", "login", "sign up", "sign in", "book", "order", "purchase", "checkout", "add to cart", "scrape", "automate web", "web form", "submit form", "browser"], [.browser, .web]),
     ]
 
     // Always include these categories — universally useful
@@ -493,6 +556,7 @@ class ToolRegistry {
         if cats.contains(.web) || cats.contains(.webContent) {
             cats.insert(.cursor)
             cats.insert(.keyboard)
+            cats.insert(.browser)
         }
 
         // If nothing matched beyond always-included, include everything
@@ -501,6 +565,23 @@ class ToolRegistry {
         }
 
         return cats
+    }
+
+    /// Register MCP-discovered tools into the registry (called after server connection).
+    func registerMCPTools(_ mcpTools: [any ToolDefinition]) {
+        for tool in mcpTools {
+            tools[tool.name] = tool
+            toolCategories[tool.name] = .mcp
+        }
+        // Rebuild schema caches
+        cachedSchemas = tools.values.map { $0.toAPISchema() }
+        var byCategory: [ToolCategory: [[String: AnyCodable]]] = [:]
+        for (name, tool) in tools {
+            let cat = toolCategories[name] ?? .terminal
+            byCategory[cat, default: []].append(tool.toAPISchema())
+        }
+        schemasByCategory = byCategory
+        print("[ToolRegistry] Registered \(mcpTools.count) MCP tools, total: \(tools.count)")
     }
 
     /// Execute a tool by name with the given JSON arguments string.

@@ -12,6 +12,7 @@ struct AttachedFile: Identifiable {
     static let supportedExtensions: Set<String> = [
         "pdf", "txt", "md", "rtf", "rtfd",
         "docx", "doc", "pages",
+        "pptx", "ppt", "xlsx", "xls",
         "swift", "js", "ts", "py", "cpp", "c", "h", "hpp",
         "java", "go", "rs", "rb", "php", "css", "html", "xml", "json",
         "yaml", "yml", "toml", "sh", "zsh", "bash",
@@ -36,6 +37,10 @@ struct AttachedFile: Identifiable {
             content = extractRTF(url: url)
         } else if ext == "docx" {
             content = extractDocx(url: url)
+        } else if ext == "pptx" || ext == "ppt" {
+            content = extractPptx(url: url)
+        } else if ext == "xlsx" || ext == "xls" {
+            content = extractXlsx(url: url)
         } else {
             // Plain text / code files — stream-read only what we need instead of loading entire file
             let maxChars = 30_000
@@ -130,6 +135,36 @@ struct AttachedFile: Identifiable {
             return textutil.output
         }
         return ""
+    }
+
+    private static func extractPptx(url: URL) -> String {
+        // Try python-pptx first
+        if let result = try? ShellRunner.run(
+            "python3 -c \"from pptx import Presentation; p=Presentation('\(url.path)'); [print(f'Slide {i+1}:', '|'.join(sh.text for sh in sl.shapes if sh.has_text_frame)) for i,sl in enumerate(p.slides)]\" 2>/dev/null",
+            timeout: 15
+        ), !result.output.isEmpty, result.exitCode == 0 {
+            return result.output
+        }
+        // Fallback: Spotlight metadata
+        if let result = try? ShellRunner.run("mdimport -d2 \"\(url.path)\" 2>&1 | head -200", timeout: 10) {
+            return result.output
+        }
+        return "[Could not extract PPTX text. Install python-pptx: pip3 install python-pptx]"
+    }
+
+    private static func extractXlsx(url: URL) -> String {
+        // Try openpyxl first
+        if let result = try? ShellRunner.run(
+            "python3 -c \"import openpyxl; wb=openpyxl.load_workbook('\(url.path)',read_only=True,data_only=True); [print(f'Sheet: {ws.title}', *['\\t'.join(str(c) if c else '' for c in row) for row in ws.iter_rows(max_row=30,values_only=True)], sep='\\n') for ws in wb]; wb.close()\" 2>/dev/null",
+            timeout: 15
+        ), !result.output.isEmpty, result.exitCode == 0 {
+            return result.output
+        }
+        // Fallback: Spotlight metadata
+        if let result = try? ShellRunner.run("mdimport -d2 \"\(url.path)\" 2>&1 | head -200", timeout: 10) {
+            return result.output
+        }
+        return "[Could not extract XLSX data. Install openpyxl: pip3 install openpyxl]"
     }
 
     /// Format for injection into the user message

@@ -1,0 +1,9 @@
+{
+  "id": "general",
+  "displayName": "General",
+  "memoryNamespace": "general",
+  "color": "#FFFFFF",
+  "icon": "sparkle",
+  "isBuiltIn": true,
+  "keywords": []
+}

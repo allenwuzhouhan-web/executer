@@ -39,7 +39,7 @@ class AppUpdater: ObservableObject {
             request.timeoutInterval = 10
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-            guard let (data, response) = try? await URLSession.shared.data(for: request),
+            guard let (data, response) = try? await PinnedURLSession.shared.session.data(for: request),
                   let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -149,7 +149,7 @@ class AppUpdater: ObservableObject {
     // MARK: - Helpers
 
     private func downloadWithProgress(_ url: URL) async throws -> (URL, URLResponse) {
-        let (tempURL, response) = try await URLSession.shared.download(from: url)
+        let (tempURL, response) = try await PinnedURLSession.shared.session.download(from: url)
         // Move to a known location (download() returns a temp that gets cleaned up)
         let dest = FileManager.default.temporaryDirectory.appendingPathComponent("Executer-update.dmg")
         try? FileManager.default.removeItem(at: dest)
