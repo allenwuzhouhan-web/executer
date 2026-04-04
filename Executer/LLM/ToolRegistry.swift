@@ -131,7 +131,14 @@ class ToolRegistry {
             RemoveSkillTool(),
 
             // Web Content Reading
+            ReadWebPageTool(),
             ReadSafariPageTool(),
+
+            // Safari DOM Interaction (for React/dynamic web apps)
+            SafariReadElementsTool(),
+            SafariClickTool(),
+            SafariTypeTool(),
+            SafariSelectTool(),
             ReadSafariHTMLTool(),
             FetchURLContentTool(),
             ReadChromePageTool(),
@@ -154,6 +161,12 @@ class ToolRegistry {
             RecallMemoriesTool(),
             ForgetMemoryTool(),
             ListMemoriesTool(),
+
+            // Goals (persistent goal stack)
+            AddGoalTool(),
+            ListGoalsTool(),
+            CompleteGoalStepTool(),
+            GetNextGoalActionTool(),
 
             // Aliases
             CreateAliasTool(),
@@ -204,6 +217,20 @@ class ToolRegistry {
             ListAutomationRulesTool(),
             RemoveAutomationRuleTool(),
             ToggleAutomationRuleTool(),
+
+            // Background Agents
+            StartBackgroundAgentTool(),
+            ListBackgroundAgentsTool(),
+            StopBackgroundAgentTool(),
+            SpawnSubAgentTool(),
+            CheckAgentStatusTool(),
+            WaitForAgentTool(),
+
+            // Email Briefing
+            SendEmailBriefingTool(),
+            ScheduleEmailBriefingTool(),
+            ListEmailBriefingsTool(),
+            CancelEmailBriefingTool(),
 
             // Cursor / Mouse Control
             MoveCursorTool(),
@@ -297,6 +324,30 @@ class ToolRegistry {
             BrowserSessionTool(),
             BrowserScreenshotTool(),
 
+            // Browser Intelligence (DOM, JS, network)
+            BrowserExecuteJSTool(),
+            BrowserReadDOMTool(),
+            BrowserGetConsoleTool(),
+            BrowserInspectElementTool(),
+            BrowserClickElementCSSTool(),
+            BrowserTypeInElementTool(),
+            BrowserInterceptNetworkTool(),
+            BrowserNavigateTool(),
+
+            // Chrome CDP Connection (real browser control)
+            BrowserConnectChromeTool(),
+            BrowserReadElementsTool(),
+            BrowserClickElementTool(),
+            BrowserTypeElementTool(),
+
+            // Vision & Screen Perception
+            PerceiveScreenTool(),
+            PerceiveScreenVisualTool(),
+            FindElementTool(),
+
+            // Fast Text Input
+            PasteTextTool(),
+
             // Document Training (8-stage study pipeline)
             TrainDocumentTool(),
             ListTrainedDocumentsTool(),
@@ -307,6 +358,12 @@ class ToolRegistry {
             ExtractPPTDesignTool(),
             CreateWordDocumentTool(),
             CreateSpreadsheetTool(),
+
+            // Mail (macOS Mail.app)
+            SearchMailTool(),
+            OpenEmailTool(),
+            ReadEmailTool(),
+            ListMailboxesTool(),
         ]
 
         // MCP tools are registered asynchronously after server connection.
@@ -349,7 +406,10 @@ class ToolRegistry {
             "open_url": .web, "search_web": .web, "open_url_in_safari": .web,
             "get_safari_url": .web, "get_safari_title": .web, "get_chrome_url": .web, "new_safari_tab": .web,
             // Web Content
+            "read_web_page": .webContent,
             "read_safari_page": .webContent, "read_safari_html": .webContent,
+            "safari_read_elements": .webContent, "safari_click": .webContent,
+            "safari_type": .webContent, "safari_select": .webContent,
             "fetch_url_content": .webContent, "read_chrome_page": .webContent,
             // Windows
             "list_windows": .windows, "move_window": .windows, "resize_window": .windows,
@@ -359,7 +419,7 @@ class ToolRegistry {
             "tile_windows_side_by_side": .windows, "move_window_to_space": .windows, "arrange_windows": .windows,
             // Productivity
             "create_reminder": .productivity, "create_calendar_event": .productivity,
-            "create_note": .productivity, "set_timer": .productivity,
+            "create_note": .productivity, "set_timer": .productivity, "set_alarm": .productivity,
             "open_system_preferences_pane": .productivity,
             "query_calendar_events": .productivity, "query_reminders": .productivity,
             // Terminal
@@ -385,6 +445,9 @@ class ToolRegistry {
             // Memory
             "save_memory": .memory, "recall_memories": .memory,
             "forget_memory": .memory, "list_memories": .memory,
+            // Goals
+            "add_goal": .memory, "list_goals": .memory,
+            "complete_goal_step": .memory, "get_next_goal_action": .memory,
             // Aliases
             "create_alias": .aliases, "list_aliases": .aliases, "remove_alias": .aliases,
             // System Info
@@ -396,6 +459,13 @@ class ToolRegistry {
             // Automation
             "create_automation_rule": .automation, "list_automation_rules": .automation,
             "remove_automation_rule": .automation, "toggle_automation_rule": .automation,
+            // Background Agents
+            "start_background_agent": .automation, "list_background_agents": .automation,
+            "stop_background_agent": .automation,
+            "spawn_subagent": .automation, "check_agent_status": .automation, "wait_for_agent": .automation,
+            // Email Briefing
+            "send_email_briefing": .productivity, "schedule_email_briefing": .productivity,
+            "list_email_briefings": .productivity, "cancel_email_briefing": .productivity,
             // Cursor
             "move_cursor": .cursor, "click": .cursor, "click_element": .cursor,
             "scroll": .cursor, "drag": .cursor, "get_cursor_position": .cursor,
@@ -443,6 +513,20 @@ class ToolRegistry {
             // Browser Automation
             "browser_task": .browser, "browser_extract": .browser,
             "browser_session": .browser, "browser_screenshot": .browser,
+            // Browser Intelligence
+            "browser_execute_js": .browser, "browser_read_dom": .browser,
+            "browser_get_console": .browser, "browser_inspect_element": .browser,
+            "browser_click_element_css": .browser, "browser_type_in_element": .browser,
+            "browser_intercept_network": .browser, "browser_navigate": .browser,
+            "browser_connect_chrome": .browser, "browser_read_elements": .browser,
+            "browser_click_element": .browser, "browser_type_element": .browser,
+            // Vision & Perception
+            "perceive_screen": .screenshot, "perceive_screen_visual": .screenshot, "find_element": .screenshot,
+            // Fast Input
+            "paste_text": .keyboard,
+            // Mail
+            "search_mail": .productivity, "open_email": .productivity,
+            "read_email": .productivity, "list_mailboxes": .productivity,
         ]
         self.toolCategories = categoryMap
 
@@ -460,6 +544,17 @@ class ToolRegistry {
         cachedSchemas
     }
 
+    /// Returns tool schemas filtered by an explicit allowlist of tool names.
+    /// Used by ComputerUseAgent task profiles to restrict available tools.
+    func filteredToolDefinitions(allowlist: Set<String>) -> [[String: AnyCodable]] {
+        let schemas = allowlist.compactMap { name -> [String: AnyCodable]? in
+            guard let tool = tools[name] else { return nil }
+            return tool.toAPISchema()
+        }
+        print("[ToolRegistry] Filtered to \(schemas.count) tools by allowlist")
+        return schemas
+    }
+
     /// Returns only the tool schemas relevant to the given query.
     /// Reduces from 220+ tools to ~30-40, saving ~15K tokens per API call.
     func filteredToolDefinitions(for query: String) -> [[String: AnyCodable]] {
@@ -472,8 +567,17 @@ class ToolRegistry {
         }
         let count = schemas.count
         print("[ToolRegistry] Filtered to \(count) tools (from \(cachedSchemas.count)) for query")
-        // If filtering produced very few tools, include all as fallback
-        return count >= 5 ? schemas : cachedSchemas
+        // If filtering produced very few tools, expand with common utility categories instead of ALL tools
+        if count < 3 {
+            let utilityCategories: [ToolCategory] = [.web, .webContent, .files, .fileContent, .terminal, .appControl]
+            for cat in utilityCategories {
+                if let catSchemas = schemasByCategory[cat], !categories.contains(cat) {
+                    schemas.append(contentsOf: catSchemas)
+                }
+            }
+            print("[ToolRegistry] Expanded to \(schemas.count) tools with utility categories")
+        }
+        return schemas
     }
 
     /// Returns tool schemas filtered by both agent whitelist AND query intent.
@@ -523,6 +627,7 @@ class ToolRegistry {
         (["type", "press key", "hotkey", "keyboard", "shortcut", "cmd+"], [.keyboard]),
         (["window", "tile", "arrange", "side by side", "fullscreen", "minimize"], [.windows]),
         (["remind", "calendar", "note", "timer", "event", "meeting", "schedule"], [.productivity, .scheduler]),
+        (["mail", "email", "inbox", "mailbox", "unread", "sent me", "from lisa", "from ", "that email"], [.productivity]),
         (["terminal", "shell", "command", "run", "brew", "git", "npm", "pip"], [.terminal]),
         (["define", "definition", "synonym", "spell", "meaning"], [.language]),
         (["weather", "temperature", "forecast"], [.weather]),
@@ -577,7 +682,7 @@ class ToolRegistry {
         cachedSchemas = tools.values.map { $0.toAPISchema() }
         var byCategory: [ToolCategory: [[String: AnyCodable]]] = [:]
         for (name, tool) in tools {
-            let cat = toolCategories[name] ?? .terminal
+            let cat = toolCategories[name] ?? .files
             byCategory[cat, default: []].append(tool.toAPISchema())
         }
         schemasByCategory = byCategory

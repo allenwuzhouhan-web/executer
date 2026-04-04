@@ -63,6 +63,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         FocusStateService.shared.start()
         ClipboardHistoryManager.shared.startMonitoring()
         TaskScheduler.shared.resumePendingTasks()
+        BackgroundAgentManager.shared.resumePendingAgents()
         FileIndex.shared.startIndexing()
         ContextualAwareness.shared.markSessionStart()
         HealthCheckService.shared.checkIfDue(appState: appState)

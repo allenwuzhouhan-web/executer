@@ -13,8 +13,13 @@ struct CreatePresentationTool: ToolDefinition {
 
         ## MANDATORY WORKFLOW for 4+ slide decks:
         1. FIRST call search_images to find 2-4 relevant, high-quality image URLs for your topic.
-        2. THEN create the spec, embedding those image URLs in full_image, image_right, or content slides.
-        Presentations WITHOUT images look amateurish. Every 4+ slide deck MUST have at least 1-2 image slides.
+        2. THEN create the spec, embedding ONLY those returned URLs in full_image, image_right, or content slides.
+
+        ## CRITICAL IMAGE RULE:
+        NEVER invent, guess, or fabricate image URLs or filenames. Only use URLs returned by search_images. \
+        Filenames like "ai-trends-2025.jpg" or "team-photo.png" DO NOT EXIST and will be stripped. \
+        If you haven't called search_images yet, either call it first or make a deck WITHOUT images — \
+        a clean text-only deck is far better than one with broken image placeholders.
 
         ## DESIGN PRINCIPLES:
 

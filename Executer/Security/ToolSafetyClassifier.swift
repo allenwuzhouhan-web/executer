@@ -26,10 +26,12 @@ enum ToolSafetyClassifier {
         "list_scheduled_tasks": .safe, "list_memories": .safe,
         "music_get_current": .safe,
         "query_calendar_events": .safe, "query_reminders": .safe,
+        "search_mail": .safe, "read_email": .safe, "list_mailboxes": .safe,
         "dictionary_lookup": .safe, "thesaurus_lookup": .safe, "spell_check": .safe,
         "file_preview": .safe, "directory_tree": .safe, "get_file_info": .safe,
         "read_file": .safe, "read_pdf_text": .safe,
         "read_safari_page": .safe, "read_safari_html": .safe, "read_chrome_page": .safe,
+        "safari_read_elements": .safe, "safari_click": .normal, "safari_type": .normal, "safari_select": .normal,
         "search_file_contents": .safe, "find_files": .safe, "find_files_by_age": .safe,
         "capture_screen": .safe, "capture_window": .safe,
         "capture_screen_to_clipboard": .safe, "capture_area": .safe, "ocr_image": .safe,
@@ -58,6 +60,7 @@ enum ToolSafetyClassifier {
         "type_text": .normal, "press_key": .normal, "hotkey": .normal, "select_all_text": .normal,
         "move_cursor": .normal, "click": .normal, "click_element": .normal, "scroll": .normal, "drag": .normal,
         "create_reminder": .normal, "create_calendar_event": .normal, "create_note": .normal, "set_timer": .normal, "set_alarm": .normal,
+        "open_email": .normal,
         "open_system_preferences_pane": .normal,
         "save_memory": .normal, "forget_memory": .normal,
         "create_alias": .normal, "remove_alias": .normal,
@@ -65,7 +68,25 @@ enum ToolSafetyClassifier {
         "fetch_url_content": .normal,
         "set_weather_key": .normal, "set_semantic_scholar_key": .normal,
         "schedule_task": .normal, "open_terminal": .normal,
+        // Subagent tools
+        "spawn_subagent": .elevated, "check_agent_status": .safe,
+        "wait_for_agent": .safe, "list_background_agents": .safe,
+        // Email Briefing
+        "send_email_briefing": .elevated, "schedule_email_briefing": .normal,
+        "list_email_briefings": .safe, "cancel_email_briefing": .normal,
         "browser_extract": .normal, "browser_session": .normal,
+        // Chrome CDP connection
+        "browser_connect_chrome": .normal, "browser_disconnect_chrome": .normal,
+        "browser_read_elements": .safe, "browser_click_element": .normal, "browser_type_element": .normal,
+        // Browser Intelligence
+        "browser_execute_js": .elevated,  // Arbitrary JS execution
+        "browser_read_dom": .safe, "browser_get_console": .safe, "browser_inspect_element": .safe,
+        "browser_click_element_css": .normal, "browser_type_in_element": .normal,
+        "browser_intercept_network": .normal, "browser_navigate": .normal,
+        // Vision & Perception
+        "perceive_screen": .safe, "perceive_screen_visual": .safe, "find_element": .safe,
+        // Fast Input
+        "paste_text": .normal,
 
         // TIER 2: ELEVATED — modifies user files/data
         "write_file": .elevated, "edit_file": .elevated, "append_to_file": .elevated,

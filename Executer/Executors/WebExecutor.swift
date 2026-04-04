@@ -15,7 +15,14 @@ struct OpenURLTool: ToolDefinition {
         guard let url = URL(string: urlString) else {
             return "Invalid URL: \(urlString)"
         }
-        NSWorkspace.shared.open(url)
+        // Prefer Safari for http/https URLs (macOS-native optimization)
+        let scheme = url.scheme?.lowercased() ?? ""
+        if scheme == "http" || scheme == "https" {
+            let escaped = AppleScriptRunner.escape(urlString)
+            try? AppleScriptRunner.runThrowing("tell application \"Safari\" to open location \"\(escaped)\"")
+        } else {
+            NSWorkspace.shared.open(url)
+        }
         return "Opened \(urlString)."
     }
 }
@@ -33,9 +40,16 @@ struct SearchWebTool: ToolDefinition {
         let args = try parseArguments(arguments)
         let query = try requiredString("query", from: args)
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let url = URL(string: "https://www.google.com/search?q=\(encoded)")!
-        NSWorkspace.shared.open(url)
-        return "Searching for '\(query)'."
+        let safariURL = "https://www.google.com/search?q=\(encoded)"
+        let escaped = AppleScriptRunner.escape(safariURL)
+        try? AppleScriptRunner.runThrowing("tell application \"Safari\" to open location \"\(escaped)\"")
+
+        // Also try instant search to return actual data to the LLM
+        let instantResult = try? await InstantSearchTool().execute(arguments: arguments)
+        if let result = instantResult, !result.contains("No instant answer") {
+            return "Opened Google search in Safari.\n\nInstant answer:\n\(result)"
+        }
+        return "Opened Google search in Safari for '\(query)'. Use read_safari_page to get the results."
     }
 }
 
@@ -51,7 +65,11 @@ struct OpenInSafariTool: ToolDefinition {
     func execute(arguments: String) async throws -> String {
         let args = try parseArguments(arguments)
         let url = try requiredString("url", from: args)
-        try AppleScriptRunner.runThrowing("tell application \"Safari\" to open location \"\(url)\"")
+        guard URL(string: url) != nil else {
+            return "Invalid URL: \(url)"
+        }
+        let escaped = AppleScriptRunner.escape(url)
+        try AppleScriptRunner.runThrowing("tell application \"Safari\" to open location \"\(escaped)\"")
         try AppleScriptRunner.runThrowing("tell application \"Safari\" to activate")
         return "Opened in Safari."
     }
@@ -108,11 +126,15 @@ struct NewSafariTabTool: ToolDefinition {
     func execute(arguments: String) async throws -> String {
         let args = try parseArguments(arguments)
         let url = try requiredString("url", from: args)
+        guard URL(string: url) != nil else {
+            return "Invalid URL: \(url)"
+        }
+        let escaped = AppleScriptRunner.escape(url)
         let script = """
         tell application "Safari"
             activate
             tell front window
-                set current tab to (make new tab with properties {URL:"\(url)"})
+                set current tab to (make new tab with properties {URL:"\(escaped)"})
             end tell
         end tell
         """

@@ -59,6 +59,7 @@ class AgentLoop {
     private static let uiSequentialTools: Set<String> = [
         "click", "click_element", "type_text", "press_key", "hotkey",
         "scroll", "drag", "move_cursor", "launch_app", "select_all_text",
+        "paste_text", "browser_click_element_css", "browser_type_in_element",
     ]
 
     private static let toolDelays: [String: UInt64] = [
@@ -187,9 +188,13 @@ class AgentLoop {
         let estimatedTokens = messages.reduce(0) { $0 + (($1.content?.count ?? 0) / 4) }
         guard estimatedTokens > maxEstimatedTokens else { return }
 
-        // Keep: system message (first), last 8 messages (most recent context)
+        // Keep: system message (first), last 8 messages (most recent context), deduped
         let systemMessage = messages.first
-        let recentMessages = Array(messages.suffix(8))
+        // Drop the first element from suffix if it duplicates the system message
+        var recentMessages = Array(messages.suffix(8))
+        if let sys = systemMessage, recentMessages.first?.role == sys.role && recentMessages.first?.content == sys.content {
+            recentMessages.removeFirst()
+        }
         messages = (systemMessage != nil ? [systemMessage!] : []) + recentMessages
 
         let newEstimate = messages.reduce(0) { $0 + (($1.content?.count ?? 0) / 4) }
@@ -258,11 +263,13 @@ class AgentLoop {
 
                 let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments)
                 print("[Agent] Result: \(result)")
-                allResults.append(ToolResult(callId: call.id, toolName: call.function.name, result: result))
+                let sanitized = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+                allResults.append(ToolResult(callId: call.id, toolName: call.function.name, result: sanitized))
 
-                // Apply delay for UI tools
+                // Apply delay for UI tools (halved in speed mode)
                 if let delay = toolDelays[call.function.name] {
-                    try? await Task.sleep(nanoseconds: delay)
+                    let effectiveDelay = speedMode ? max(delay / 2, 30_000_000) : delay
+                    try? await Task.sleep(nanoseconds: effectiveDelay)
                 }
             } else {
                 // Accumulate for parallel execution
@@ -296,7 +303,8 @@ class AgentLoop {
             print("[Agent] Tool call: \(call.function.name)")
             let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments)
             print("[Agent] Result: \(result)")
-            return [ToolResult(callId: call.id, toolName: call.function.name, result: result)]
+            let sanitized = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+            return [ToolResult(callId: call.id, toolName: call.function.name, result: sanitized)]
         }
 
         print("[Agent] Parallel batch: \(calls.map(\.function.name).joined(separator: ", "))")
@@ -305,7 +313,8 @@ class AgentLoop {
             for call in calls {
                 group.addTask {
                     let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments)
-                    return ToolResult(callId: call.id, toolName: call.function.name, result: result)
+                    let sanitized = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+                    return ToolResult(callId: call.id, toolName: call.function.name, result: sanitized)
                 }
             }
 
@@ -366,6 +375,8 @@ class AgentLoop {
                 print("[Agent] Complexity: \(complexity), maxIter: \(maxIterations), maxTokens: \(maxTokens)")
 
                 // Build message chain — reuse previous for follow-ups
+                let taskStartTime = CFAbsoluteTimeGetCurrent()
+
                 var messages: [ChatMessage]
                 if !previousMessages.isEmpty {
                     messages = previousMessages
@@ -374,6 +385,16 @@ class AgentLoop {
                     var systemPrompt = manager.fullSystemPrompt(context: context, query: effectiveCommand)
                     if let override = agent?.systemPromptOverride {
                         systemPrompt += "\n\n" + override
+                    }
+                    // Inject episode recall — past similar tasks
+                    let episodeContext = EpisodeRecall.promptSection(forGoal: effectiveCommand)
+                    if !episodeContext.isEmpty {
+                        systemPrompt += episodeContext
+                    }
+                    // Inject learned rules from observation feedback loop
+                    let rulesContext = LearningFeedbackLoop.promptSection()
+                    if !rulesContext.isEmpty {
+                        systemPrompt += rulesContext
                     }
                     messages = [
                         ChatMessage(role: "system", content: systemPrompt),
@@ -514,7 +535,7 @@ class AgentLoop {
 
                 // Apply personality post-filter before display
                 let filteredText = PersonalityEngine.shared.postFilterResponse(finalText)
-                let displayMessage = filteredText
+                var displayMessage = filteredText
 
                 // Save to handoff
                 HandoffService.shared.saveHandoff(
@@ -533,12 +554,76 @@ class AgentLoop {
                     )
                 }
 
+                // Episode logging: record this task for future recall
+                let taskDuration = CFAbsoluteTimeGetCurrent() - taskStartTime
+                let hasError = finalText.lowercased().contains("error") || finalText.lowercased().contains("failed")
+                EpisodeLogger.shared.record(
+                    goal: resolvedCommand,
+                    plan: nil,
+                    messages: messages,
+                    finalOutcome: hasError ? .failure : .success,
+                    failureReason: hasError ? String(finalText.prefix(200)) : nil,
+                    durationSeconds: taskDuration
+                )
+
+                // Post-task self-evaluation for complex/deep tasks (max 2 retries)
+                if complexity == .complex || complexity == .deep {
+                    let taskType = PostTaskEvaluator.classifyTaskType(fullCommand, messages: messages)
+                    if case .general = taskType {
+                        // Skip evaluation for general tasks
+                    } else {
+                        for retryAttempt in 0..<2 {
+                            let evaluation = await PostTaskEvaluator.shared.evaluate(
+                                goal: fullCommand, result: finalText, taskType: taskType
+                            )
+                            guard evaluation.shouldRetry else {
+                                if !evaluation.passed && !evaluation.feedback.isEmpty {
+                                    finalText += "\n\n[Self-check: \(evaluation.feedback)]"
+                                }
+                                break
+                            }
+
+                            print("[Agent] Self-evaluation failed (attempt \(retryAttempt + 1)): \(evaluation.feedback)")
+                            await MainActor.run {
+                                onStateChange(.executing(toolName: "Self-checking...", step: retryAttempt + 1, total: 2))
+                            }
+
+                            // Inject feedback and retry
+                            messages.append(ChatMessage(role: "user", content: "Your output had issues: \(evaluation.feedback)\nPlease fix these issues."))
+
+                            if let retryResponse = try? await service.sendChatRequest(
+                                messages: messages, tools: tools, maxTokens: maxTokens
+                            ) {
+                                if let retryCalls = retryResponse.toolCalls, !retryCalls.isEmpty {
+                                    messages.append(retryResponse.rawMessage)
+                                    let retryResults = await Self.executeToolCalls(
+                                        retryCalls, registry: registry,
+                                        iteration: 0, maxIterations: 3,
+                                        onStateChange: onStateChange
+                                    )
+                                    for r in retryResults {
+                                        messages.append(ChatMessage(role: "tool", content: r.result, tool_call_id: r.callId))
+                                    }
+                                }
+                                if let retryText = retryResponse.text, !retryText.isEmpty {
+                                    finalText = retryText
+                                }
+                            }
+                        }
+                        // Re-apply personality filter after any retry
+                        let refiltered = PersonalityEngine.shared.postFilterResponse(finalText)
+                        displayMessage = refiltered
+                    }
+                }
+
                 await MainActor.run {
+                    AICursorManager.shared.stopAIControl()
                     onComplete(displayMessage, filteredText, messages)
                 }
             } catch {
                 if Task.isCancelled { return }
                 await MainActor.run {
+                    AICursorManager.shared.stopAIControl()
                     onError(error.localizedDescription)
                 }
             }

@@ -64,17 +64,21 @@ actor BrowserBridgeClient {
         bridgeScriptPath: String? = nil
     ) {
         self.uvPath = uvPath
-        // Default: look for browser_bridge.py next to the app bundle, or in a known location
         if let path = bridgeScriptPath {
             self.bridgeScriptPath = path
         } else {
-            // Try bundle resource first, then fallback to app support
+            // Deploy from bundle to App Support (same pattern as PPTExecutor.ensureResource)
+            let appSupport = "\(NSHomeDirectory())/Library/Application Support/Executer"
+            let destPath = "\(appSupport)/browser_bridge.py"
+            let fm = FileManager.default
+            try? fm.createDirectory(atPath: appSupport, withIntermediateDirectories: true)
+
+            // Always copy from bundle to ensure latest version after app updates
             if let bundlePath = Bundle.main.path(forResource: "browser_bridge", ofType: "py") {
-                self.bridgeScriptPath = bundlePath
-            } else {
-                let appSupport = "\(NSHomeDirectory())/Library/Application Support/Executer"
-                self.bridgeScriptPath = "\(appSupport)/browser_bridge.py"
+                try? fm.removeItem(atPath: destPath)
+                try? fm.copyItem(atPath: bundlePath, toPath: destPath)
             }
+            self.bridgeScriptPath = destPath
         }
     }
 

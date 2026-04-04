@@ -69,6 +69,8 @@ struct OnboardingView: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .liquidGlassCircle()
                     }
                     .buttonStyle(.plain)
                     .opacity(currentPage > 0 ? 1 : 0)
@@ -91,6 +93,8 @@ struct OnboardingView: View {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .liquidGlassCircle()
                     }
                     .buttonStyle(.plain)
                     .opacity(currentPage < pageCount - 1 ? 1 : 0)
@@ -252,10 +256,8 @@ struct OnboardingPermissionsPage: View {
             }
         }
         .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(granted ? Color.green.opacity(0.06) : Color.orange.opacity(0.06))
-        )
+        .background(granted ? Color.green.opacity(0.06) : Color.orange.opacity(0.06))
+        .liquidGlass(cornerRadius: 10, tint: granted ? .green : .orange)
     }
 
     private func startPolling() {

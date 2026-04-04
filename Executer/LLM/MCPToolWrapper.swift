@@ -18,6 +18,8 @@ struct MCPToolWrapper: ToolDefinition {
     }
 
     func execute(arguments: String) async throws -> String {
+        // Liveness check: reconnect if server process died
+        try await client.ensureConnected()
         let args = try parseArguments(arguments)
         return try await client.callTool(name: originalName, arguments: args)
     }

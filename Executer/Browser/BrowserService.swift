@@ -1,5 +1,12 @@
 import Foundation
 
+/// Result of a browser task including the URL trail.
+struct BrowserTaskResult {
+    let text: String
+    let steps: Int
+    let trail: [BrowserTrailEntry]
+}
+
 /// High-level typed API for browser automation via browser-use.
 /// Manages the BrowserBridgeClient singleton and exposes clean async methods.
 /// Follows the same pattern as WeChatService.
@@ -48,7 +55,7 @@ actor BrowserService {
     // MARK: - Browser Task
 
     /// Execute a multi-step browser task via natural language.
-    func executeTask(task: String, url: String? = nil, visible: Bool? = nil, maxSteps: Int? = nil) async throws -> String {
+    func executeTask(task: String, url: String? = nil, visible: Bool? = nil, maxSteps: Int? = nil) async throws -> BrowserTaskResult {
         try await ensureStarted()
 
         var args: [String: Any] = ["task": task]
@@ -64,11 +71,20 @@ actor BrowserService {
         }
 
         let text = extractText(from: result.content)
-        let steps = result.meta["steps"] as? Int
-        if let steps = steps {
-            return "\(text)\n\n[Completed in \(steps) browser steps]"
+        let steps = result.meta["steps"] as? Int ?? 0
+
+        // Parse URL trail from bridge response, sanitize against prompt injection
+        var trail: [BrowserTrailEntry] = []
+        if let rawTrail = result.meta["trail"] as? [[String: Any]] {
+            for entry in rawTrail {
+                guard let entryURL = entry["url"] as? String, !entryURL.isEmpty else { continue }
+                let title = InputSanitizer.stripInjectionPatterns(entry["title"] as? String ?? "")
+                let summary = InputSanitizer.stripInjectionPatterns(entry["summary"] as? String ?? "")
+                trail.append(BrowserTrailEntry(url: entryURL, title: title, summary: summary))
+            }
         }
-        return text
+
+        return BrowserTaskResult(text: text, steps: steps, trail: trail)
     }
 
     // MARK: - Extract Data
@@ -121,6 +137,30 @@ actor BrowserService {
         if result.isError {
             let errorText = extractText(from: result.content)
             throw BrowserBridgeClient.BridgeError.toolError(errorText)
+        }
+
+        return extractText(from: result.content)
+    }
+
+    // MARK: - Generic Tool Call (for Browser Intelligence tools)
+
+    /// Call any bridge tool by name with raw JSON arguments string.
+    /// Used by BrowserIntelligenceExecutor tools.
+    func callBridgeTool(name: String, arguments: String) async throws -> String {
+        try await ensureStarted()
+
+        // Parse the JSON string arguments into a dictionary
+        var args: [String: Any] = [:]
+        if let data = arguments.data(using: .utf8),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            args = parsed
+        }
+
+        let result = try await bridgeClient.callTool(name: name, arguments: args)
+
+        if result.isError {
+            let errorText = extractText(from: result.content)
+            return "Browser error: \(errorText)"
         }
 
         return extractText(from: result.content)

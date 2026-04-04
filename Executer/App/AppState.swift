@@ -235,21 +235,38 @@ class AppState: ObservableObject {
 
     // MARK: - Browser Detection
 
-    private static let browserKeywords: [String] = [
-        "fill form", "fill out", "log in to", "login to", "sign up on", "sign in to",
-        "book a", "book on", "order from", "order on", "purchase", "checkout",
-        "add to cart", "submit form", "automate web", "go to", "navigate to",
-        "browse to", "on the website", "on the site", "using the browser",
+    // Lookup/research/transaction tasks → prompt Watch/Background
+    private static let browserLookupKeywords: [String] = [
+        // Research & lookup
+        "look up", "search for", "find out", "find information",
+        "find reviews", "find the best", "find prices", "compare",
+        "check availability", "check the price", "research",
+        // Form-filling & transactions
+        "fill form", "fill out", "log in to", "login to",
+        "sign up on", "sign in to", "book a", "book on",
+        "order from", "order on", "purchase", "checkout",
+        "add to cart", "submit form", "automate web",
+        "on the website", "on the site", "using the browser",
+    ]
+
+    // Simple navigation → skip prompt, let WebCommandMatcher handle it
+    private static let simpleNavPrefixes: [String] = [
+        "go to ", "navigate to ", "browse to ", "open ",
     ]
 
     private func looksLikeBrowserTask(_ command: String) -> Bool {
         let lower = command.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        // Must contain a browser-like keyword + a URL or site reference
-        let hasBrowserKeyword = Self.browserKeywords.contains { lower.contains($0) }
+
+        // Simple navigation? Don't prompt — WebCommandMatcher handles these
+        if Self.simpleNavPrefixes.contains(where: { lower.hasPrefix($0) }) {
+            return false
+        }
+
+        let hasLookupKeyword = Self.browserLookupKeywords.contains { lower.contains($0) }
         let hasSiteReference = lower.contains(".com") || lower.contains(".org") || lower.contains(".net")
             || lower.contains("http") || lower.contains("website") || lower.contains("site")
-            || lower.contains("page") || lower.contains("browser")
-        return hasBrowserKeyword && hasSiteReference
+            || lower.contains("browser") || lower.contains("online")
+        return hasLookupKeyword && hasSiteReference
     }
 
     /// Called when user picks Watch or Background from the browser choice buttons.
@@ -263,6 +280,11 @@ class AppState: ObservableObject {
 
     func submitCommand(_ command: String) {
         guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        // Clear previous browser trail on new command
+        Task { @MainActor in
+            BrowserTrailStore.shared.currentTrail = []
+        }
 
         // Handle internal commands (not user-facing)
         if command.hasPrefix("__internal_") {
@@ -446,6 +468,44 @@ class AppState: ObservableObject {
             }
         } else {
             fullCommand = resolvedCommand
+        }
+
+        // Route to Computer Use Agent for tasks requiring autonomous screen control
+        if ComputerUseDetector.shouldUseComputerControl(fullCommand) {
+            let currentApp = NSWorkspace.shared.frontmostApplication?.localizedName
+            let config: ComputerUseAgent.Config
+
+            // Check for specialized task profiles first
+            if let profile = TaskProfileRouter.route(command: fullCommand, currentApp: currentApp) {
+                config = profile.config
+                print("[AppState] Using task profile: \(profile.name)")
+            } else {
+                let perceptionMode = ComputerUseDetector.perceptionMode(for: fullCommand)
+                config = ComputerUseAgent.Config(
+                    maxIterations: 50,
+                    perceptionMode: perceptionMode,
+                    useVisionLLM: perceptionMode == .axPlusScreenshot || perceptionMode == .screenshotOnly
+                )
+            }
+
+            ComputerUseAgent.shared.start(
+                goal: fullCommand,
+                config: config,
+                onStateChange: { [weak self] state in
+                    self?.inputBarState = state
+                },
+                onComplete: { [weak self] result in
+                    self?.inputBarState = .result(message: result)
+                    self?.resultText = result
+                    self?.lastCommandTime = Date()
+                    CommandHistory.shared.add(command: resolvedCommand, result: result)
+                },
+                onError: { [weak self] errorMessage in
+                    self?.inputBarState = .error(message: errorMessage)
+                    self?.resultText = errorMessage
+                }
+            )
+            return
         }
 
         currentTask = agentLoop.execute(

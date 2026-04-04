@@ -89,6 +89,19 @@ def extract_fill(shape):
                 except Exception:
                     pass
                 result["gradient_stops"] = stops
+                # Extract gradient angle/direction from XML
+                try:
+                    from lxml import etree
+                    gradFill = shape._element.spPr.find(
+                        '{http://schemas.openxmlformats.org/drawingml/2006/main}gradFill')
+                    if gradFill is not None:
+                        lin = gradFill.find('{http://schemas.openxmlformats.org/drawingml/2006/main}lin')
+                        if lin is not None:
+                            angle = lin.get('ang')
+                            if angle:
+                                result["gradient_angle_deg"] = int(angle) // 60000
+                except Exception:
+                    pass
         return result
     except Exception:
         return None
@@ -125,15 +138,38 @@ def extract_text_formatting(paragraph):
         }
         para_data["alignment"] = align_map.get(paragraph.alignment, str(paragraph.alignment))
 
-    pf = paragraph.paragraph_format
-    if pf.space_before is not None:
-        para_data["space_before_pt"] = emu_to_pt(pf.space_before)
-    if pf.space_after is not None:
-        para_data["space_after_pt"] = emu_to_pt(pf.space_after)
-    if pf.line_spacing is not None:
-        para_data["line_spacing"] = round(pf.line_spacing, 2) if isinstance(pf.line_spacing, float) else emu_to_pt(pf.line_spacing)
-    if pf.level is not None and pf.level > 0:
-        para_data["indent_level"] = pf.level
+    # paragraph_format may not exist in all python-pptx versions — access safely
+    try:
+        pf = paragraph.paragraph_format
+        if pf.space_before is not None:
+            para_data["space_before_pt"] = emu_to_pt(pf.space_before)
+        if pf.space_after is not None:
+            para_data["space_after_pt"] = emu_to_pt(pf.space_after)
+        if pf.line_spacing is not None:
+            para_data["line_spacing"] = round(pf.line_spacing, 2) if isinstance(pf.line_spacing, float) else emu_to_pt(pf.line_spacing)
+        if pf.level is not None and pf.level > 0:
+            para_data["indent_level"] = pf.level
+    except AttributeError:
+        # Fallback: try direct XML access for spacing
+        try:
+            from lxml import etree
+            pPr = paragraph._p.find('{http://schemas.openxmlformats.org/drawingml/2006/main}pPr')
+            if pPr is not None:
+                lvl = pPr.get('lvl')
+                if lvl and int(lvl) > 0:
+                    para_data["indent_level"] = int(lvl)
+                spcBef = pPr.find('{http://schemas.openxmlformats.org/drawingml/2006/main}spcBef')
+                if spcBef is not None:
+                    spcPts = spcBef.find('{http://schemas.openxmlformats.org/drawingml/2006/main}spcPts')
+                    if spcPts is not None:
+                        para_data["space_before_pt"] = int(spcPts.get('val', '0')) / 100
+                spcAft = pPr.find('{http://schemas.openxmlformats.org/drawingml/2006/main}spcAft')
+                if spcAft is not None:
+                    spcPts = spcAft.find('{http://schemas.openxmlformats.org/drawingml/2006/main}spcPts')
+                    if spcPts is not None:
+                        para_data["space_after_pt"] = int(spcPts.get('val', '0')) / 100
+        except Exception:
+            pass
 
     if runs_info:
         para_data["runs"] = runs_info
@@ -187,12 +223,65 @@ def extract_shape_info(shape, slide_width, slide_height):
     except Exception:
         pass
 
-    # Shadow
+    # Shadow — extract full parameters, not just boolean
     try:
         if hasattr(shape, 'shadow') and shape.shadow:
             shadow = shape.shadow
             if shadow.inherit is False:
-                info["has_shadow"] = True
+                shadow_info = {"has_shadow": True}
+                # Extract shadow parameters from XML for full fidelity
+                try:
+                    from lxml import etree
+                    spPr = shape._element.spPr
+                    effectLst = spPr.find('{http://schemas.openxmlformats.org/drawingml/2006/main}effectLst')
+                    if effectLst is not None:
+                        outerShdw = effectLst.find('{http://schemas.openxmlformats.org/drawingml/2006/main}outerShdw')
+                        if outerShdw is not None:
+                            blur = outerShdw.get('blurRad')
+                            if blur:
+                                shadow_info["blur_pt"] = round(int(blur) / 12700, 1)
+                            dist = outerShdw.get('dist')
+                            if dist:
+                                shadow_info["offset_pt"] = round(int(dist) / 12700, 1)
+                            direction = outerShdw.get('dir')
+                            if direction:
+                                shadow_info["direction_deg"] = int(direction) // 60000
+                            # Shadow color + alpha
+                            srgb = outerShdw.find('{http://schemas.openxmlformats.org/drawingml/2006/main}srgbClr')
+                            if srgb is not None:
+                                shadow_info["color"] = srgb.get('val', '000000')
+                                alpha = srgb.find('{http://schemas.openxmlformats.org/drawingml/2006/main}alpha')
+                                if alpha is not None:
+                                    shadow_info["alpha_pct"] = round(int(alpha.get('val', '100000')) / 1000, 1)
+                except Exception:
+                    pass
+                info["shadow"] = shadow_info
+    except Exception:
+        pass
+
+    # Corner radius (adjustment values for rounded rectangles)
+    try:
+        from lxml import etree
+        prstGeom = shape._element.spPr.find('{http://schemas.openxmlformats.org/drawingml/2006/main}prstGeom')
+        if prstGeom is not None and prstGeom.get('prst') == 'roundRect':
+            avLst = prstGeom.find('{http://schemas.openxmlformats.org/drawingml/2006/main}avLst')
+            if avLst is not None:
+                for gd in avLst.findall('{http://schemas.openxmlformats.org/drawingml/2006/main}gd'):
+                    if gd.get('name') == 'adj':
+                        # Value is in 1/50000 of shape size
+                        raw = int(gd.get('fmla', 'val 16667').split()[-1])
+                        info["corner_radius_pct"] = round(raw / 50000 * 100, 1)
+    except Exception:
+        pass
+
+    # Element opacity/transparency
+    try:
+        from lxml import etree
+        fill_elem = shape._element.spPr.find('{http://schemas.openxmlformats.org/drawingml/2006/main}solidFill')
+        if fill_elem is not None and len(fill_elem) > 0:
+            alpha = fill_elem[0].find('{http://schemas.openxmlformats.org/drawingml/2006/main}alpha')
+            if alpha is not None:
+                info["opacity_pct"] = round(int(alpha.get('val', '100000')) / 1000, 1)
     except Exception:
         pass
 
@@ -319,7 +408,8 @@ def _is_near_black(hex_str, threshold=40):
 
 def analyze_design_system(slides_data, all_colors, all_fonts, all_sizes,
                           text_colors=None, fill_colors=None,
-                          bg_colors=None, border_colors=None):
+                          bg_colors=None, border_colors=None,
+                          theme_scheme=None):
     """Derive the design system from collected data with semantic color classification."""
     system = {}
 
@@ -340,63 +430,110 @@ def analyze_design_system(slides_data, all_colors, all_fonts, all_sizes,
         ]
 
     # === Semantic color classification ===
-    # Classify colors by their actual role, not just frequency
+    # Strategy: detect whether deck is light-mode or dark-mode first,
+    # then assign text/bg/accent roles accordingly.
     semantic = {}
 
-    # Text colors: most common non-theme text color
+    # Collect all non-theme colors
     tc = Counter(c for c in (text_colors or []) if c and not c.startswith("theme:"))
-    if tc:
-        # Primary text = most frequent text color
-        semantic["text_primary"] = tc.most_common(1)[0][0]
-        # Secondary text = second most frequent, or a lighter variant
-        if len(tc) >= 2:
-            semantic["text_secondary"] = tc.most_common(2)[1][0]
-
-    # Background colors: prefer slide backgrounds, then large shape fills
     bc = Counter(c for c in (bg_colors or []) if c and not c.startswith("theme:"))
-    if bc:
-        semantic["background"] = bc.most_common(1)[0][0]
-    elif fill_colors:
-        # If no explicit bg colors, use the lightest frequent fill color
-        fc = Counter(c for c in fill_colors if c and not c.startswith("theme:"))
-        light_fills = [(c, n) for c, n in fc.most_common(10) if _hex_luminance(c) > 180]
-        if light_fills:
-            semantic["background"] = light_fills[0][0]
+    fc_all = Counter(c for c in (fill_colors or []) if c and not c.startswith("theme:"))
+    all_notheme = Counter(c for c in all_colors if c and not c.startswith("theme:"))
 
-    # Accent colors: fills that are NOT the background and NOT near-black/near-white
+    # Detect dark mode: use overall color distribution weighted by frequency.
+    # If the most-used colors are dark, it's a dark deck — even if bg is inherited.
+    top_all = all_notheme.most_common(10)
+    if top_all:
+        # Weight by frequency — the dominant visual impression
+        total_uses = sum(n for _, n in top_all)
+        avg_lum = sum(_hex_luminance(c) * n for c, n in top_all) / max(total_uses, 1)
+    else:
+        avg_lum = 200  # assume light if no colors
+
+    is_dark_mode = avg_lum < 100
+
+    if is_dark_mode:
+        # Dark deck: darkest frequent fill = background, lightest text = text
+        dark_fills = sorted(fc_all.most_common(10), key=lambda x: _hex_luminance(x[0]))
+        if dark_fills:
+            semantic["background"] = dark_fills[0][0]
+        # Text: pick the lightest frequent text color
+        if tc:
+            light_texts = sorted(tc.most_common(10), key=lambda x: -_hex_luminance(x[0]))
+            semantic["text_primary"] = light_texts[0][0]
+            if len(light_texts) >= 2:
+                semantic["text_secondary"] = light_texts[1][0]
+    else:
+        # Light deck: lightest fill = background, darkest text = text
+        if bc:
+            semantic["background"] = bc.most_common(1)[0][0]
+        elif fc_all:
+            light_fills = [(c, n) for c, n in fc_all.most_common(10) if _hex_luminance(c) > 180]
+            if light_fills:
+                semantic["background"] = light_fills[0][0]
+        if tc:
+            semantic["text_primary"] = tc.most_common(1)[0][0]
+            if len(tc) >= 2:
+                semantic["text_secondary"] = tc.most_common(2)[1][0]
+
+    # Accent colors: the most vivid colors that aren't background or near-neutral
     bg_hex = semantic.get("background", "").lstrip("#").upper()
     text_hex = semantic.get("text_primary", "").lstrip("#").upper()
 
-    fc_all = Counter(c for c in (fill_colors or []) if c and not c.startswith("theme:"))
+    # Score by saturation — vivid colors make the best accents
+    def _color_saturation(hex_str):
+        h = hex_str.lstrip("#")
+        if len(h) != 6: return 0
+        r, g, b = int(h[:2], 16), int(h[2:4], 16), int(h[4:], 16)
+        mx, mn = max(r, g, b), min(r, g, b)
+        return (mx - mn) / max(mx, 1) * 255
+
     accent_candidates = [
-        (c, n) for c, n in fc_all.most_common(20)
+        (c, n, _color_saturation(c)) for c, n in all_notheme.most_common(30)
         if c.lstrip("#").upper() != bg_hex
         and c.lstrip("#").upper() != text_hex
         and not _is_near_white(c)
         and not _is_near_black(c)
     ]
+    # Sort by saturation * frequency — vivid and common wins
+    accent_candidates.sort(key=lambda x: x[2] * x[1], reverse=True)
+
     if accent_candidates:
         semantic["accent"] = accent_candidates[0][0]
         if len(accent_candidates) >= 2:
             semantic["accent2"] = accent_candidates[1][0]
-    else:
-        # No colorful accents found — look in ALL colors for non-text, non-bg
-        all_notheme = Counter(c for c in all_colors if c and not c.startswith("theme:"))
-        accent_from_all = [
-            (c, n) for c, n in all_notheme.most_common(20)
-            if c.lstrip("#").upper() != bg_hex
-            and c.lstrip("#").upper() != text_hex
-            and not _is_near_white(c)
-            and not _is_near_black(c)
-        ]
-        if accent_from_all:
-            semantic["accent"] = accent_from_all[0][0]
-            if len(accent_from_all) >= 2:
-                semantic["accent2"] = accent_from_all[1][0]
 
     # If we still don't have an accent (monochrome deck), derive from text
     if "accent" not in semantic and text_hex:
         semantic["accent"] = semantic.get("text_primary", "#333333")
+
+    # === Theme-based fallback ===
+    # When the PPT uses mostly theme colors, the RGB-based analysis above can be
+    # unreliable (e.g., white fills counted as text). The theme's dk1/lt1/accent1
+    # directly encode the designer's intent and are authoritative.
+    if theme_scheme:
+        # Always use theme for text/bg if they look wrong (text shouldn't be white on white bg)
+        if semantic.get("text_primary") and semantic.get("background"):
+            tp = semantic["text_primary"].lstrip("#").upper()
+            bg = semantic["background"].lstrip("#").upper()
+            if tp == bg:
+                # Text and background are the same — use theme
+                if "dk1" in theme_scheme:
+                    semantic["text_primary"] = theme_scheme["dk1"]
+                if "lt1" in theme_scheme:
+                    semantic["background"] = theme_scheme["lt1"]
+        # Fill in missing values from theme
+        if "text_primary" not in semantic and "dk1" in theme_scheme:
+            semantic["text_primary"] = theme_scheme["dk1"]
+        if "background" not in semantic and "lt1" in theme_scheme:
+            semantic["background"] = theme_scheme["lt1"]
+        if ("accent" not in semantic or _is_near_white(semantic.get("accent", "")) or
+                _is_near_black(semantic.get("accent", ""))) and "accent1" in theme_scheme:
+            semantic["accent"] = theme_scheme["accent1"]
+        if "accent2" not in semantic and "accent2" in theme_scheme:
+            semantic["accent2"] = theme_scheme["accent2"]
+        if "text_secondary" not in semantic and "dk2" in theme_scheme:
+            semantic["text_secondary"] = theme_scheme["dk2"]
 
     if semantic:
         system["semantic_colors"] = semantic
@@ -568,26 +705,79 @@ def extract_ppt(filepath):
         layouts.append(extract_slide_layout_info(layout))
     result["available_layouts"] = layouts
 
-    # Slide master colors (theme)
+    # Slide master colors (theme) — extract from theme part, not master element
+    theme_info = {}
     try:
         master = prs.slide_masters[0]
-        theme_info = {"name": master.name if hasattr(master, 'name') else None}
-        # Try to extract theme colors from XML
-        theme_el = master.element.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}clrScheme')
+        theme_info["name"] = master.name if hasattr(master, 'name') else None
+
+        # Method 1: look for clrScheme in master element tree
+        ns_a = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
+        theme_el = master.element.find(f'.//{ns_a}clrScheme')
+
+        # Method 2: if not found, look in the theme part (linked via relationship)
+        if theme_el is None:
+            try:
+                for rel in master.part.rels.values():
+                    if 'theme' in str(rel.reltype).lower():
+                        theme_blob = rel.target_part.blob
+                        from lxml import etree
+                        theme_root = etree.fromstring(theme_blob)
+                        theme_el = theme_root.find(f'.//{ns_a}clrScheme')
+                        if theme_el is not None:
+                            theme_info["name"] = theme_el.get("name", theme_info.get("name"))
+                        break
+            except Exception:
+                pass
+
         if theme_el is not None:
             theme_colors = {}
             for child in theme_el:
                 tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
                 for sub in child:
-                    if 'val' in sub.attrib:
-                        theme_colors[tag] = f"#{sub.attrib['val']}"
-                    elif 'lastClr' in sub.attrib:
-                        theme_colors[tag] = f"#{sub.attrib['lastClr']}"
+                    if 'srgbClr' in sub.tag:
+                        theme_colors[tag] = f"#{sub.attrib.get('val', '000000')}"
+                    elif 'sysClr' in sub.tag:
+                        # System colors: use lastClr (actual rendered color)
+                        theme_colors[tag] = f"#{sub.attrib.get('lastClr', sub.attrib.get('val', '000000'))}"
             if theme_colors:
                 theme_info["color_scheme"] = theme_colors
+                print(f"Theme colors resolved: {list(theme_colors.keys())}", file=sys.stderr)
         result["theme"] = theme_info
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Warning: Theme extraction failed: {e}", file=sys.stderr)
+        result["theme"] = theme_info
+
+    # Build theme color resolution map: theme:NAME → #RRGGBB
+    # Maps MSO_THEME_COLOR enum names to actual hex values from the theme
+    _theme_resolve = {}
+    tc_scheme = theme_info.get("color_scheme", {}) if "theme" in result else {}
+    # Map python-pptx theme_color enum names to theme XML tag names
+    _theme_tag_map = {
+        "DARK_1": "dk1", "LIGHT_1": "lt1", "DARK_2": "dk2", "LIGHT_2": "lt2",
+        "ACCENT_1": "accent1", "ACCENT_2": "accent2", "ACCENT_3": "accent3",
+        "ACCENT_4": "accent4", "ACCENT_5": "accent5", "ACCENT_6": "accent6",
+        "HYPERLINK": "hlink", "FOLLOWED_HYPERLINK": "folHlink",
+        "TEXT_1": "dk1", "TEXT_2": "dk2",           # TEXT maps to DK in Office themes
+        "BACKGROUND_1": "lt1", "BACKGROUND_2": "lt2",  # BG maps to LT
+    }
+    for enum_name, tag in _theme_tag_map.items():
+        if tag in tc_scheme:
+            _theme_resolve[enum_name] = tc_scheme[tag]
+
+    def resolve_color(color_str):
+        """Resolve theme: prefixed colors to actual hex values."""
+        if not color_str or not color_str.startswith("theme:"):
+            return color_str
+        # Extract the enum name: "theme:TEXT_1 (13)" → "TEXT_1"
+        theme_ref = color_str.replace("theme:", "").strip()
+        # Remove parenthetical enum value
+        if " (" in theme_ref:
+            theme_ref = theme_ref.split(" (")[0]
+        resolved = _theme_resolve.get(theme_ref)
+        if resolved:
+            return resolved
+        return None  # Can't resolve — drop it
 
     # Process each slide — track colors by semantic category
     all_colors = []
@@ -654,11 +844,27 @@ def extract_ppt(filepath):
 
     result["slides"] = slides_data
 
+    # Resolve theme colors to RGB before analysis
+    # Theme-only PPTs (e.g., Apple-style black/white with accent) would otherwise
+    # produce 0 colors and fall back to ugly defaults.
+    all_colors = [resolve_color(c) or c for c in all_colors]
+    text_colors = [resolve_color(c) or c for c in text_colors]
+    fill_colors = [resolve_color(c) or c for c in fill_colors]
+    bg_colors = [resolve_color(c) or c for c in bg_colors]
+    border_colors = [resolve_color(c) or c for c in border_colors]
+    # Strip any remaining unresolved theme: refs
+    all_colors = [c for c in all_colors if c and not c.startswith("theme:")]
+    text_colors = [c for c in text_colors if c and not c.startswith("theme:")]
+    fill_colors = [c for c in fill_colors if c and not c.startswith("theme:")]
+    bg_colors = [c for c in bg_colors if c and not c.startswith("theme:")]
+    border_colors = [c for c in border_colors if c and not c.startswith("theme:")]
+
     # Derive design system with semantic color classification
     result["design_system"] = analyze_design_system(
         slides_data, all_colors, all_fonts, all_sizes,
         text_colors=text_colors, fill_colors=fill_colors,
-        bg_colors=bg_colors, border_colors=border_colors
+        bg_colors=bg_colors, border_colors=border_colors,
+        theme_scheme=tc_scheme
     )
 
     # Structural patterns
@@ -683,24 +889,53 @@ def extract_ppt(filepath):
     result["layout_patterns"] = spatial.get("layout_patterns", {})
     result["global_spacing"] = spatial.get("global_spacing", {})
 
-    # Derive visual effects summary
+    # Derive visual effects summary — now captures PARAMETERS, not just booleans
     visual_effects = {
         "has_shadows": False,
         "shadow_count": 0,
+        "shadow_style": None,          # Aggregated: typical shadow params from source
         "has_gradients": False,
         "gradient_count": 0,
+        "gradient_angles": [],         # Collected angles for typical direction
+        "has_rounded_corners": False,
+        "corner_radius_pct": None,     # Typical corner radius
+        "has_transparency": False,
         "shape_variety": [],
         "decorative_elements": [],
     }
+    shadow_params = []
+    corner_radii = []
+    gradient_angles = []
     for slide in slides_data:
         for shape in slide.get("shapes", []):
-            if shape.get("has_shadow"):
+            # Shadow with full parameters
+            shadow = shape.get("shadow")
+            if shadow and shadow.get("has_shadow"):
                 visual_effects["has_shadows"] = True
                 visual_effects["shadow_count"] += 1
+                shadow_params.append({
+                    "blur_pt": shadow.get("blur_pt", 4),
+                    "offset_pt": shadow.get("offset_pt", 2),
+                    "alpha_pct": shadow.get("alpha_pct", 25),
+                    "color": shadow.get("color", "000000"),
+                })
+            elif shape.get("has_shadow"):
+                visual_effects["has_shadows"] = True
+                visual_effects["shadow_count"] += 1
+            # Corner radius
+            if shape.get("corner_radius_pct"):
+                visual_effects["has_rounded_corners"] = True
+                corner_radii.append(shape["corner_radius_pct"])
+            # Transparency
+            if shape.get("opacity_pct") and shape["opacity_pct"] < 100:
+                visual_effects["has_transparency"] = True
+            # Gradients with angle
             fill = shape.get("fill", {})
             if isinstance(fill, dict) and fill.get("gradient_stops"):
                 visual_effects["has_gradients"] = True
                 visual_effects["gradient_count"] += 1
+                if fill.get("gradient_angle_deg") is not None:
+                    gradient_angles.append(fill["gradient_angle_deg"])
             st = shape.get("shape_type", "")
             if st and st not in visual_effects["shape_variety"]:
                 visual_effects["shape_variety"].append(st)
@@ -719,6 +954,18 @@ def extract_ppt(filepath):
                         "height": pos.get("height_pct"),
                     },
                 })
+    # Aggregate shadow style (median of observed parameters)
+    if shadow_params:
+        visual_effects["shadow_style"] = {
+            "blur_pt": round(sorted(p["blur_pt"] for p in shadow_params)[len(shadow_params)//2], 1),
+            "offset_pt": round(sorted(p["offset_pt"] for p in shadow_params)[len(shadow_params)//2], 1),
+            "alpha_pct": round(sorted(p["alpha_pct"] for p in shadow_params)[len(shadow_params)//2], 1),
+            "color": shadow_params[0]["color"],  # Most common shadow color
+        }
+    if corner_radii:
+        visual_effects["corner_radius_pct"] = round(sum(corner_radii) / len(corner_radii), 1)
+    if gradient_angles:
+        visual_effects["gradient_angles"] = list(set(gradient_angles))
     result["visual_effects"] = visual_effects
 
     # ── Design Philosophy Analysis ──

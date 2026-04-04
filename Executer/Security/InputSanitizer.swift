@@ -9,6 +9,11 @@ enum InputSanitizer {
         "get_clipboard_text", "get_clipboard_history", "search_clipboard_history",
         "search_file_contents", "file_preview",
         "run_shell_command", "ocr_image",
+        "browser_task", "browser_extract",
+        "browser_read_dom", "browser_get_console", "browser_execute_js",
+        "browser_inspect_element",
+        "browser_read_elements",
+        "safari_read_elements",
     ]
 
     /// Wraps tool output in a frame that tells the LLM it's untrusted data.

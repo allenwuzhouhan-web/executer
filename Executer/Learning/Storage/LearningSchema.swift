@@ -40,6 +40,36 @@ enum LearningSchema {
             version INTEGER PRIMARY KEY
         );
         INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+
+        -- Episode log: records multi-step task executions (v2)
+        CREATE TABLE IF NOT EXISTS episodes (
+            id TEXT PRIMARY KEY,
+            goal TEXT NOT NULL,
+            plan TEXT,
+            actions_json TEXT,
+            outcome TEXT NOT NULL,
+            failure_reason TEXT,
+            what_worked TEXT,
+            duration_seconds REAL,
+            tool_count INTEGER,
+            timestamp REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_episodes_time ON episodes(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_episodes_outcome ON episodes(outcome);
+
+        -- Actionable rules derived from patterns (v2)
+        CREATE TABLE IF NOT EXISTS learned_rules (
+            id TEXT PRIMARY KEY,
+            rule_text TEXT NOT NULL,
+            source_pattern_id TEXT,
+            confidence REAL DEFAULT 0.5,
+            times_applied INTEGER DEFAULT 0,
+            created_at REAL NOT NULL,
+            last_applied REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rules_confidence ON learned_rules(confidence DESC);
+
+        INSERT OR IGNORE INTO schema_version (version) VALUES (2);
         """
 
         queue.sync {

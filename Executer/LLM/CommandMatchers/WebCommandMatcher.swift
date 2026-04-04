@@ -7,10 +7,22 @@ extension LocalCommandRouter {
         let navPrefixes = ["go to ", "navigate to ", "open "]
         for prefix in navPrefixes {
             if input.hasPrefix(prefix) {
-                let target = String(input.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                var target = String(input.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                // Try full target first (e.g., "open google.com/maps")
                 if let url = resolveURL(target) {
                     let jsonArg = "{\"url\": \"\(escapeJSON(url))\"}"
                     return try? await OpenInSafariTool().execute(arguments: jsonArg)
+                }
+                // If target has " and " or " then ", extract just the first part
+                // e.g., "open youtube and search for X" → try "youtube" alone for plain navigation
+                for sep in [" and ", " then "] {
+                    if let range = target.range(of: sep) {
+                        let firstPart = String(target[target.startIndex..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+                        if let url = resolveURL(firstPart) {
+                            // Don't navigate here — let tryCompoundOpenAndSearch handle compound commands
+                            break
+                        }
+                    }
                 }
             }
         }
@@ -41,6 +53,12 @@ extension LocalCommandRouter {
     }
 
     func trySearchCommand(_ input: String) async -> String? {
+        // "open youtube and search for [query]" / "go to youtube and search [query]"
+        // Catches compound "open/go to [platform] and search/look up/find [query]" commands
+        if let result = await tryCompoundOpenAndSearch(input) {
+            return result
+        }
+
         // "search youtube for [query]" / "youtube [query]" / "search [query] on youtube"
         if let query = extractSearchQuery(input, platform: "youtube") {
             let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
@@ -236,5 +254,43 @@ extension LocalCommandRouter {
         default:
             return nil
         }
+    }
+
+    // MARK: - Compound "open X and search for Y"
+
+    /// Handles "open youtube and search for how claw works", "go to reddit and look up swift concurrency", etc.
+    private func tryCompoundOpenAndSearch(_ input: String) async -> String? {
+        // Match: (open|go to) [platform] and (search for|search|look up|find) [query]
+        let openPrefixes = ["open ", "go to "]
+        let searchSeparators = [" and search for ", " and search ", " and look up ", " and find "]
+
+        for prefix in openPrefixes {
+            guard input.hasPrefix(prefix) else { continue }
+            let afterPrefix = String(input.dropFirst(prefix.count))
+
+            for sep in searchSeparators {
+                guard let sepRange = afterPrefix.range(of: sep) else { continue }
+                let platform = String(afterPrefix[afterPrefix.startIndex..<sepRange.lowerBound])
+                    .trimmingCharacters(in: .whitespaces)
+                let query = String(afterPrefix[sepRange.upperBound...])
+                    .trimmingCharacters(in: .whitespaces)
+
+                guard !platform.isEmpty, !query.isEmpty else { continue }
+
+                // Try to build a search URL for this platform
+                if let url = searchURLForPlatform(platform, query: query) {
+                    return try? await OpenInSafariTool().execute(arguments: "{\"url\": \"\(url)\"}")
+                }
+
+                // If it's a known site but without search URL support, open the site + google search
+                if Self.siteShortcuts[platform] != nil {
+                    let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+                    let url = "https://www.google.com/search?q=\(encoded)+site:\(platform).com"
+                    return try? await OpenInSafariTool().execute(arguments: "{\"url\": \"\(url)\"}")
+                }
+            }
+        }
+
+        return nil
     }
 }

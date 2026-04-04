@@ -3,10 +3,12 @@ import AppKit
 
 struct InputBarView: View {
     @EnvironmentObject var appState: AppState
+    @StateObject private var browserTrailStore = BrowserTrailStore.shared
     @State private var isVisible = false
     @FocusState private var isTextFieldFocused: Bool
 
     @State private var isDragHovering = false
+    @Namespace private var glassNS
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,7 +55,6 @@ struct InputBarView: View {
             .padding(.vertical, 12)
             .background {
                 ZStack {
-                    VisualEffectBackground(material: .popover, blendingMode: .behindWindow, cornerRadius: 16)
                     shimmerOverlay
 
                     // Drag hover highlight
@@ -65,15 +66,12 @@ struct InputBarView: View {
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.clear, lineWidth: 0.5)
-            }
-            .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+            .liquidGlassInteractive(cornerRadius: 16)
+            .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
             .onDrop(of: [.fileURL], isTargeted: $isDragHovering) { providers in
                 handleFileDrop(providers)
             }
+            .liquidGlassID("input", in: glassNS)
 
             // Contextual nudge (upcoming meeting, break reminder, etc.)
             if let nudge = appState.contextualNudge,
@@ -113,10 +111,21 @@ struct InputBarView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            // Browser trail card (always shown when available, independent of LLM response)
+            if !browserTrailStore.currentTrail.isEmpty {
+                BrowserTrailCard(
+                    trail: browserTrailStore.currentTrail,
+                    onDismiss: { browserTrailStore.currentTrail = [] }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             // Prompt label + result bubble
             if case .result(let message) = appState.inputBarState {
                 promptLabel
                 ResultBubbleView(message: message, isError: false, onDismiss: { appState.hideInputBar() })
+                    .liquidGlassID("result", in: glassNS)
+                    .liquidGlassMaterialize()
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
@@ -124,11 +133,14 @@ struct InputBarView: View {
             if case .richResult(let result, let raw) = appState.inputBarState {
                 promptLabel
                 RichResultView(result: result, rawMessage: raw, onDismiss: { appState.hideInputBar() })
+                    .liquidGlassID("richResult", in: glassNS)
+                    .liquidGlassMaterialize()
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             if case .error(let message) = appState.inputBarState {
                 promptLabel
                 ResultBubbleView(message: message, isError: true, onDismiss: { appState.hideInputBar() })
+                    .liquidGlassID("error", in: glassNS)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
@@ -141,6 +153,7 @@ struct InputBarView: View {
             // Handoff badge
             HandoffBadge()
         }
+        .liquidGlassContainer(spacing: 16)
         .frame(width: 340, alignment: .top)
         .frame(maxHeight: .infinity, alignment: .top)
         .offset(y: isVisible ? 0 : -30)
@@ -226,9 +239,9 @@ struct InputBarView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
-                .background(Color.accentColor.opacity(0.15))
                 .foregroundStyle(Color.accentColor)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(Color.accentColor.opacity(0.15))
+                .liquidGlassInteractive(cornerRadius: 10, tint: .accentColor)
             }
             .buttonStyle(.plain)
 
@@ -243,9 +256,9 @@ struct InputBarView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
-                .background(Color.secondary.opacity(0.1))
                 .foregroundStyle(.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(Color.secondary.opacity(0.1))
+                .liquidGlassInteractive(cornerRadius: 10)
             }
             .buttonStyle(.plain)
         }
@@ -267,9 +280,9 @@ struct InputBarView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
-                .background(Color.blue.opacity(0.15))
                 .foregroundStyle(Color.blue)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(Color.blue.opacity(0.15))
+                .liquidGlassInteractive(cornerRadius: 10, tint: .blue)
             }
             .buttonStyle(.plain)
 
@@ -284,9 +297,9 @@ struct InputBarView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
-                .background(Color.secondary.opacity(0.1))
                 .foregroundStyle(.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(Color.secondary.opacity(0.1))
+                .liquidGlassInteractive(cornerRadius: 10)
             }
             .buttonStyle(.plain)
         }
@@ -312,11 +325,8 @@ struct InputBarView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background {
-            VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+        .liquidGlass(cornerRadius: 12, tint: .teal)
+        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
         .padding(.top, 6)
     }
 }

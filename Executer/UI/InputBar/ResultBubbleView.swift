@@ -87,10 +87,7 @@ struct ResultBubbleView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background {
-            VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .liquidGlass(cornerRadius: 12, tint: isError ? .red : nil)
         .overlay {
             // Rainbow glow border — outside clipShape so the glow bleeds outward
             if !isError {
@@ -98,7 +95,7 @@ struct ResultBubbleView: View {
                     .allowsHitTesting(false)
             }
         }
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
         .padding(.top, 6)
         .onHover { hovering in
             isHoveringResult = hovering

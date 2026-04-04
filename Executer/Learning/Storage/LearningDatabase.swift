@@ -80,6 +80,7 @@ final class LearningDatabase {
                 return
             }
 
+            var transactionFailed = false
             for action in actions {
                 sqlite3_reset(stmt)
                 sqlite3_bind_text(stmt, 1, (action.type.rawValue as NSString).utf8String, -1, nil)
@@ -91,11 +92,20 @@ final class LearningDatabase {
                 sqlite3_bind_text(stmt, 6, (sanitizedValue as NSString).utf8String, -1, nil)
                 sqlite3_bind_null(stmt, 7)
                 sqlite3_bind_double(stmt, 8, action.timestamp.timeIntervalSince1970)
-                sqlite3_step(stmt)
+                if sqlite3_step(stmt) != SQLITE_DONE {
+                    let errMsg = String(cString: sqlite3_errmsg(db))
+                    print("[LearningDB] Batch insert observation failed: \(errMsg)")
+                    transactionFailed = true
+                    break
+                }
             }
 
             sqlite3_finalize(stmt)
-            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            if transactionFailed {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            } else {
+                sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            }
         }
     }
 
@@ -208,7 +218,13 @@ final class LearningDatabase {
             var delStmt: OpaquePointer?
             sqlite3_prepare_v2(db, delSQL, -1, &delStmt, nil)
             sqlite3_bind_text(delStmt, 1, (appName as NSString).utf8String, -1, nil)
-            sqlite3_step(delStmt)
+            if sqlite3_step(delStmt) != SQLITE_DONE {
+                let errMsg = String(cString: sqlite3_errmsg(db))
+                print("[LearningDB] Delete patterns for app failed: \(errMsg)")
+                sqlite3_finalize(delStmt)
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return
+            }
             sqlite3_finalize(delStmt)
 
             // Insert all new patterns
@@ -220,6 +236,7 @@ final class LearningDatabase {
             }
 
             let encoder = JSONEncoder()
+            var transactionFailed = false
             for pattern in patterns {
                 sqlite3_reset(insertStmt)
                 let actionsJSON = String(data: (try? encoder.encode(pattern.actions)) ?? Data(), encoding: .utf8) ?? "[]"
@@ -231,11 +248,20 @@ final class LearningDatabase {
                 sqlite3_bind_int(insertStmt, 5, Int32(pattern.frequency))
                 sqlite3_bind_double(insertStmt, 6, pattern.firstSeen.timeIntervalSince1970)
                 sqlite3_bind_double(insertStmt, 7, pattern.lastSeen.timeIntervalSince1970)
-                sqlite3_step(insertStmt)
+                if sqlite3_step(insertStmt) != SQLITE_DONE {
+                    let errMsg = String(cString: sqlite3_errmsg(db))
+                    print("[LearningDB] Batch replace pattern failed: \(errMsg)")
+                    transactionFailed = true
+                    break
+                }
             }
 
             sqlite3_finalize(insertStmt)
-            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            if transactionFailed {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            } else {
+                sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            }
         }
     }
 
@@ -308,6 +334,104 @@ final class LearningDatabase {
             sqlite3_bind_text(stmt, 1, (appName as NSString).utf8String, -1, nil)
             sqlite3_step(stmt)
             sqlite3_finalize(stmt)
+        }
+    }
+
+    // MARK: - Episodes
+
+    /// Execute arbitrary SQL with typed bindings. Used by EpisodeLogger and LearningFeedbackLoop.
+    func executeSQL(_ sql: String, bindings: [Any?]) {
+        queue.sync {
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                print("[LearningDB] executeSQL prepare failed for: \(sql.prefix(80))")
+                return
+            }
+
+            for (i, binding) in bindings.enumerated() {
+                let idx = Int32(i + 1)
+                switch binding {
+                case let s as String:
+                    sqlite3_bind_text(stmt, idx, (s as NSString).utf8String, -1, nil)
+                case let d as Double:
+                    sqlite3_bind_double(stmt, idx, d)
+                case let n as Int:
+                    sqlite3_bind_int(stmt, idx, Int32(n))
+                case nil:
+                    sqlite3_bind_null(stmt, idx)
+                default:
+                    if let desc = binding.map({ "\($0)" }) {
+                        sqlite3_bind_text(stmt, idx, (desc as NSString).utf8String, -1, nil)
+                    } else {
+                        sqlite3_bind_null(stmt, idx)
+                    }
+                }
+            }
+            sqlite3_step(stmt)
+        }
+    }
+
+    /// Query episodes by keyword similarity to a goal string.
+    func queryEpisodes(goalQuery: String, limit: Int = 5) -> [(id: String, goal: String, outcome: String, failureReason: String?, whatWorked: String?, toolCount: Int)] {
+        queue.sync {
+            let sql = "SELECT id, goal, outcome, failure_reason, what_worked, tool_count FROM episodes ORDER BY timestamp DESC LIMIT ?"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            sqlite3_bind_int(stmt, 1, Int32(limit * 5)) // fetch extra for filtering
+
+            let queryWords = Set(goalQuery.lowercased().split(separator: " ").filter { $0.count > 2 }.map(String.init))
+
+            var results: [(id: String, goal: String, outcome: String, failureReason: String?, whatWorked: String?, toolCount: Int)] = []
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = String(cString: sqlite3_column_text(stmt, 0))
+                let goal = String(cString: sqlite3_column_text(stmt, 1))
+                let goalWords = Set(goal.lowercased().split(separator: " ").filter { $0.count > 2 }.map(String.init))
+                let overlap = queryWords.intersection(goalWords).count
+                guard overlap >= 1 else { continue }
+
+                let outcome = String(cString: sqlite3_column_text(stmt, 2))
+                let failureReason = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
+                let whatWorked = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+                let toolCount = Int(sqlite3_column_int(stmt, 5))
+
+                results.append((id, goal, outcome, failureReason, whatWorked, toolCount))
+                if results.count >= limit { break }
+            }
+            return results
+        }
+    }
+
+    /// Query learned rules above a confidence threshold.
+    func queryRules(minConfidence: Double = 0.5, limit: Int = 10) -> [String] {
+        queue.sync {
+            let sql = "SELECT rule_text FROM learned_rules WHERE confidence >= ? ORDER BY confidence DESC, times_applied DESC LIMIT ?"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            sqlite3_bind_double(stmt, 1, minConfidence)
+            sqlite3_bind_int(stmt, 2, Int32(limit))
+
+            var results: [String] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                results.append(String(cString: sqlite3_column_text(stmt, 0)))
+            }
+            return results
+        }
+    }
+
+    /// Check if a rule already exists for a given source pattern.
+    func hasRuleForPattern(patternId: String) -> Bool {
+        queue.sync {
+            let sql = "SELECT COUNT(*) FROM learned_rules WHERE source_pattern_id = ?"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            sqlite3_bind_text(stmt, 1, (patternId as NSString).utf8String, -1, nil)
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return false }
+            return sqlite3_column_int(stmt, 0) > 0
         }
     }
 

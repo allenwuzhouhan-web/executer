@@ -114,6 +114,69 @@ def shade_color(hex_str, factor=0.3):
     return f"{r:02X}{g:02X}{b:02X}"
 
 
+def _srgb_to_linear(c):
+    """Convert sRGB channel (0-255) to linear for WCAG luminance."""
+    c = c / 255.0
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def wcag_relative_luminance(hex_str):
+    """Calculate WCAG 2.0 relative luminance from hex color."""
+    r, g, b = _parse_hex(hex_str)
+    return 0.2126 * _srgb_to_linear(r) + 0.7152 * _srgb_to_linear(g) + 0.0722 * _srgb_to_linear(b)
+
+
+def wcag_contrast_ratio(fg_hex, bg_hex):
+    """Calculate WCAG 2.0 contrast ratio between two hex colors."""
+    l1 = wcag_relative_luminance(fg_hex)
+    l2 = wcag_relative_luminance(bg_hex)
+    lighter = max(l1, l2)
+    darker = min(l1, l2)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def ensure_contrast(fg_hex, bg_hex, min_ratio=4.5):
+    """Adjust fg color to meet WCAG contrast ratio against bg.
+
+    For normal text (< 18pt): min_ratio=4.5
+    For large text (>= 18pt bold or >= 24pt): min_ratio=3.0
+    Returns the adjusted foreground hex (without '#').
+    """
+    fg_hex = fg_hex.lstrip("#")
+    bg_hex = bg_hex.lstrip("#")
+
+    ratio = wcag_contrast_ratio(fg_hex, bg_hex)
+    if ratio >= min_ratio:
+        return fg_hex  # Already passes
+
+    # Determine direction: if bg is light, darken fg; if bg is dark, lighten fg
+    bg_lum = wcag_relative_luminance(bg_hex)
+    r, g, b = _parse_hex(fg_hex)
+
+    # Try up to 25 steps of adjustment
+    for step in range(1, 26):
+        factor = step * 0.04  # 4% per step, up to 100%
+        if bg_lum > 0.5:
+            # Dark text on light bg — darken the text
+            nr = int(r * (1 - factor))
+            ng = int(g * (1 - factor))
+            nb = int(b * (1 - factor))
+        else:
+            # Light text on dark bg — lighten the text
+            nr = int(r + (255 - r) * factor)
+            ng = int(g + (255 - g) * factor)
+            nb = int(b + (255 - b) * factor)
+        nr = max(0, min(255, nr))
+        ng = max(0, min(255, ng))
+        nb = max(0, min(255, nb))
+        candidate = f"{nr:02X}{ng:02X}{nb:02X}"
+        if wcag_contrast_ratio(candidate, bg_hex) >= min_ratio:
+            return candidate
+
+    # Fallback: pure black or white
+    return "000000" if bg_lum > 0.5 else "FFFFFF"
+
+
 def pct_to_emu(pct, total_emu):
     """Convert percentage to EMU based on total dimension."""
     return int(total_emu * pct / 100)
@@ -208,21 +271,28 @@ class DesignLanguage:
         else:
             self.d["font_secondary"] = self.d["font_primary"]
 
-        # Text hierarchy
+        # Text hierarchy — clamp to sane ranges so decorative giant text
+        # (e.g., 310pt "HISTORY") doesn't break layouts. The engine's layout
+        # builders are designed for normal presentation sizes.
         hierarchy = ds.get("text_hierarchy", [])
         role_map = {
-            "title": "title_size",
-            "subtitle": "subtitle_size",
-            "heading": "heading_size",
-            "subheading": "heading_size",
-            "body": "body_size",
-            "caption": "caption_size",
-            "footnote": "note_size",
+            "title": ("title_size", 24, 56),
+            "subtitle": ("subtitle_size", 16, 36),
+            "heading": ("heading_size", 18, 40),
+            "subheading": ("heading_size", 14, 32),
+            "body": ("body_size", 12, 24),
+            "caption": ("caption_size", 8, 16),
+            "footnote": ("note_size", 6, 14),
         }
         for item in hierarchy:
             role = item.get("likely_role", "")
             if role in role_map and item.get("size_pt"):
-                self.d[role_map[role]] = item["size_pt"]
+                key, min_pt, max_pt = role_map[role]
+                size = item["size_pt"]
+                # Decorative text (>80pt) is artistic, not functional — scale down
+                if size > 80:
+                    size = max_pt  # Use max of the sane range
+                self.d[key] = max(min_pt, min(max_pt, size))
 
         # Slide dimensions
         dim = self.data.get("slide_dimensions", {})
@@ -244,13 +314,21 @@ class DesignLanguage:
         # Store layout patterns for per-layout position overrides
         self._layout_patterns = self.data.get("layout_patterns", {})
 
-        # Visual effects flags — ONLY enabled when the source deck actually uses them.
+        # Visual effects — ONLY enabled when the source deck actually uses them.
         # Default is OFF for everything. Clean, minimal design by default.
+        # Now captures PARAMETERS so effects match the source deck's style, not generic defaults.
         ve = self.data.get("visual_effects", {}) if self.data else {}
         self._use_shadows = ve.get("has_shadows", False)
         self._use_gradients = ve.get("has_gradients", False)
-        self._use_rounded = "ROUNDED_RECTANGLE" in str(ve.get("shape_variety", []))
+        self._use_rounded = ve.get("has_rounded_corners", False) or \
+                            "ROUNDED_RECTANGLE" in str(ve.get("shape_variety", []))
         self._decorative_elements = ve.get("decorative_elements", [])
+        # Shadow parameters from source deck (used by _add_shadow)
+        self._shadow_style = ve.get("shadow_style", {})
+        # Corner radius from source deck
+        self._corner_radius_pct = ve.get("corner_radius_pct")
+        # Gradient angle from source deck
+        self._gradient_angles = ve.get("gradient_angles", [])
 
         # Tint/shade system — derived automatically from accent colors
         accent = self.d.get("color_accent", "444444")
@@ -267,6 +345,63 @@ class DesignLanguage:
         self._layout_complexity = dp.get("layout_complexity", "clean")
         self._dominant_alignment = dp.get("dominant_alignment", "left")
         self._color_restraint = dp.get("color_restraint", "restrained")
+        self._effects_usage = dp.get("effects_usage", "minimal")
+
+        # Apply philosophy to rendering parameters
+        self._apply_philosophy()
+
+    def _apply_philosophy(self):
+        """Adjust rendering parameters based on design philosophy values."""
+        # --- content_density: affects max bullets and font sizes ---
+        if self._content_density == "sparse":
+            # Fewer items, larger text for breathing room
+            self._max_bullets = 4
+            self._font_size_adjust = 2  # bump all body/bullet sizes up
+        elif self._content_density == "dense":
+            # Allow more items, slightly smaller text
+            self._max_bullets = 8
+            self._font_size_adjust = -1
+        else:  # moderate
+            self._max_bullets = 6
+            self._font_size_adjust = 0
+
+        # Apply font size adjustment to body/bullet sizes
+        if self._font_size_adjust:
+            for key in ("body_size", "bullet_size"):
+                self.d[key] = max(10, self.d[key] + self._font_size_adjust)
+
+        # --- whitespace_style: affects margins and padding ---
+        if self._whitespace_style == "generous":
+            self._margin_adjust = 3   # add 3% to each margin
+            self._card_padding_factor = 1.4
+        elif self._whitespace_style == "tight":
+            self._margin_adjust = -2  # reduce margins
+            self._card_padding_factor = 0.7
+        else:  # balanced
+            self._margin_adjust = 0
+            self._card_padding_factor = 1.0
+
+        if self._margin_adjust:
+            for key in ("margin_left_pct", "margin_right_pct"):
+                self.d[key] = max(2, self.d[key] + self._margin_adjust)
+            self.d["margin_top_pct"] = max(4, self.d["margin_top_pct"] + self._margin_adjust)
+            self.d["content_top_pct"] = max(10, self.d["content_top_pct"] + self._margin_adjust)
+
+        # --- effects_usage: override shadow/gradient flags ---
+        if self._effects_usage == "minimal":
+            self._use_shadows = False
+            self._use_gradients = False
+        elif self._effects_usage == "heavy":
+            self._use_shadows = True
+            # gradients stay as detected — heavy just ensures shadows are on
+
+        # --- color_restraint: limit accent color usage ---
+        if self._color_restraint == "monochrome":
+            # Force accent2 to match accent (single-color palette)
+            self.d["color_accent2"] = self.d["color_accent"]
+            self.d["color_accent2_light"] = self.d["color_accent_light"]
+        # "restrained" — keep as-is (2 accent colors max)
+        # "vibrant" — keep as-is, no restrictions
 
     def _luminance(self, hex_color):
         """Compute perceived luminance (0-255)."""
@@ -339,7 +474,7 @@ class SlideBuilder:
                      bold=False, italic=False, color=None,
                      alignment=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP,
                      line_spacing=None, auto_shrink=False):
-        """Add a text box with styling."""
+        """Add a text box with styling. Auto-checks WCAG contrast."""
         txBox = slide.shapes.add_textbox(left, top, width, height)
         tf = txBox.text_frame
         tf.word_wrap = True
@@ -366,12 +501,21 @@ class SlideBuilder:
         if not p.runs:
             run.text = text
 
+        actual_size = font_size or self.dl["body_size"]
+        fg_color = color or self.dl["color_text"]
+        bg_color = self.dl["color_bg"]
+
+        # WCAG contrast check — large text (>=18pt bold or >=24pt) needs 3:1, else 4.5:1
+        is_large_text = (actual_size >= 24) or (actual_size >= 18 and bold)
+        min_ratio = 3.0 if is_large_text else 4.5
+        fg_color = ensure_contrast(fg_color, bg_color, min_ratio)
+
         font = run.font
         font.name = font_name or self.dl["font_primary"]
-        font.size = Pt(font_size or self.dl["body_size"])
+        font.size = Pt(actual_size)
         font.bold = bold
         font.italic = italic
-        font.color.rgb = hex_to_rgb(color or self.dl["color_text"])
+        font.color.rgb = hex_to_rgb(fg_color)
 
         if line_spacing:
             p.line_spacing = line_spacing
@@ -381,13 +525,23 @@ class SlideBuilder:
     def _add_bullets(self, slide, left, top, width, height,
                      bullets, font_name=None, font_size=None,
                      color=None, bold_first=False):
-        """Add a bulleted list."""
+        """Add a bulleted list with WCAG contrast enforcement."""
         txBox = slide.shapes.add_textbox(left, top, width, height)
         tf = txBox.text_frame
         tf.word_wrap = True
 
+        # Pre-compute contrast-safe colors against slide background
+        bg_color = self.dl["color_bg"]
+        base_size = font_size or self.dl["bullet_size"]
+        base_color = ensure_contrast(color or self.dl["color_body"], bg_color, 4.5)
+        sub_color = ensure_contrast(color or self.dl["color_body"], bg_color, 4.5)
+
+        # Apply max bullets from philosophy (content_density)
+        max_bullets = getattr(self.dl, '_max_bullets', 6)
+        visible_bullets = bullets[:max_bullets]
+
         first_para = True
-        for i, bullet in enumerate(bullets):
+        for i, bullet in enumerate(visible_bullets):
             # Handle nested bullets (sub-items) — level 1
             if isinstance(bullet, list):
                 for j, sub in enumerate(bullet):
@@ -405,16 +559,16 @@ class SlideBuilder:
                             p.level = 2
                             run = p.runs[0]
                             run.font.name = font_name or self.dl["font_primary"]
-                            run.font.size = Pt((font_size or self.dl["bullet_size"]) - 4)
-                            run.font.color.rgb = hex_to_rgb(color or self.dl["color_body"])
+                            run.font.size = Pt(base_size - 4)
+                            run.font.color.rgb = hex_to_rgb(sub_color)
                             p.space_after = Pt(2)
                     else:
                         p.text = f"  \u2013 {sub}"
                         p.level = 1
                         run = p.runs[0]
                         run.font.name = font_name or self.dl["font_primary"]
-                        run.font.size = Pt((font_size or self.dl["bullet_size"]) - 2)
-                        run.font.color.rgb = hex_to_rgb(color or self.dl["color_body"])
+                        run.font.size = Pt(base_size - 2)
+                        run.font.color.rgb = hex_to_rgb(sub_color)
                         p.space_after = Pt(4)
                 continue
 
@@ -428,8 +582,8 @@ class SlideBuilder:
             p.level = 0
             run = p.runs[0]
             run.font.name = font_name or self.dl["font_primary"]
-            run.font.size = Pt(font_size or self.dl["bullet_size"])
-            run.font.color.rgb = hex_to_rgb(color or self.dl["color_body"])
+            run.font.size = Pt(base_size)
+            run.font.color.rgb = hex_to_rgb(base_color)
             if bold_first and i == 0:
                 run.font.bold = True
             p.space_after = Pt(6)
@@ -439,24 +593,33 @@ class SlideBuilder:
 
     # ── Visual Depth Primitives ──
 
-    def _add_shadow(self, shape, blur_pt=4, offset_pt=2, color="000000", alpha_pct=25):
-        """Add a subtle drop shadow to a shape via XML."""
+    def _add_shadow(self, shape, blur_pt=None, offset_pt=None, color=None, alpha_pct=None):
+        """Add a drop shadow to a shape via XML.
+        Uses learned shadow parameters from the source deck if available,
+        otherwise falls back to Apple-style subtle defaults."""
         try:
             from lxml import etree
+            # Use learned shadow style from design language, with Apple-style fallbacks
+            style = getattr(self.dl, '_shadow_style', {}) if hasattr(self.dl, '_shadow_style') else {}
+            blur = blur_pt or style.get("blur_pt", 6)
+            offset = offset_pt or style.get("offset_pt", 2)
+            shd_color = color or style.get("color", "000000")
+            alpha = alpha_pct or style.get("alpha_pct", 20)
+
             spPr = shape._element.spPr
             effectLst = spPr.find(qn('a:effectLst'))
             if effectLst is None:
                 effectLst = etree.SubElement(spPr, qn('a:effectLst'))
             outerShdw = etree.SubElement(effectLst, qn('a:outerShdw'))
-            outerShdw.set('blurRad', str(int(blur_pt * 12700)))
-            outerShdw.set('dist', str(int(offset_pt * 12700)))
+            outerShdw.set('blurRad', str(int(blur * 12700)))
+            outerShdw.set('dist', str(int(offset * 12700)))
             outerShdw.set('dir', '2700000')  # bottom-right
             outerShdw.set('algn', 'tl')
             outerShdw.set('rotWithShape', '0')
             srgbClr = etree.SubElement(outerShdw, qn('a:srgbClr'))
-            srgbClr.set('val', color.lstrip("#"))
+            srgbClr.set('val', shd_color.lstrip("#"))
             alpha_elem = etree.SubElement(srgbClr, qn('a:alpha'))
-            alpha_elem.set('val', str(int(alpha_pct * 1000)))
+            alpha_elem.set('val', str(int(alpha * 1000)))
         except Exception:
             pass
 
@@ -475,9 +638,10 @@ class SlideBuilder:
 
     def _add_rounded_rect(self, slide, left, top, width, height,
                           fill_color=None, shadow=None, border_color=None, border_width_pt=0):
-        """Add a rounded rectangle. Shadow only if source deck uses shadows."""
+        """Add a rounded rectangle with learned corner radius and shadow style."""
         # Use plain rectangle if source deck doesn't use rounded corners
-        shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if getattr(self.dl, '_use_rounded', False) else MSO_SHAPE.RECTANGLE
+        use_rounded = getattr(self.dl, '_use_rounded', False)
+        shape_type = MSO_SHAPE.ROUNDED_RECTANGLE if use_rounded else MSO_SHAPE.RECTANGLE
         shape = slide.shapes.add_shape(shape_type, left, top, width, height)
         if fill_color:
             shape.fill.solid()
@@ -489,6 +653,23 @@ class SlideBuilder:
             shape.line.width = Pt(border_width_pt or 1)
         else:
             shape.line.fill.background()
+        # Apply learned corner radius from source deck
+        if use_rounded and hasattr(self.dl, '_corner_radius_pct') and self.dl._corner_radius_pct:
+            try:
+                from lxml import etree
+                prstGeom = shape._element.spPr.find(qn('a:prstGeom'))
+                if prstGeom is not None:
+                    avLst = prstGeom.find(qn('a:avLst'))
+                    if avLst is None:
+                        avLst = etree.SubElement(prstGeom, qn('a:avLst'))
+                    # Clear existing guides and set learned radius
+                    for child in list(avLst):
+                        avLst.remove(child)
+                    gd = etree.SubElement(avLst, qn('a:gd'))
+                    gd.set('name', 'adj')
+                    gd.set('fmla', f'val {int(self.dl._corner_radius_pct / 100 * 50000)}')
+            except Exception:
+                pass
         # Shadow only when explicitly requested AND source deck uses shadows
         use_shadow = shadow if shadow is not None else getattr(self.dl, '_use_shadows', False)
         if use_shadow:
@@ -497,12 +678,14 @@ class SlideBuilder:
 
     def _add_circle(self, slide, left, top, size, fill_color, text=None,
                     text_color="FFFFFF", text_size=14):
-        """Add a circle shape, optionally with centered text."""
+        """Add a circle shape, optionally with centered text (WCAG contrast enforced)."""
         shape = slide.shapes.add_shape(MSO_SHAPE.OVAL, left, top, size, size)
         shape.fill.solid()
         shape.fill.fore_color.rgb = hex_to_rgb(fill_color)
         shape.line.fill.background()
         if text:
+            # Ensure text is readable against the circle fill color
+            text_color = ensure_contrast(text_color, fill_color, 3.0)
             tf = shape.text_frame
             tf.word_wrap = False
             p = tf.paragraphs[0]
@@ -530,9 +713,10 @@ class SlideBuilder:
             border_width_pt=0.5 if not getattr(self.dl, '_use_shadows', False) else 0,
         )
 
-        # Internal padding
-        pad_x = int(width * 0.08)
-        pad_y = int(height * 0.08)
+        # Internal padding — scaled by whitespace philosophy
+        pad_factor = getattr(self.dl, '_card_padding_factor', 1.0)
+        pad_x = int(width * 0.08 * pad_factor)
+        pad_y = int(height * 0.08 * pad_factor)
         inner_left = left + pad_x
         inner_w = width - 2 * pad_x
         content_top = top + pad_y
@@ -1119,7 +1303,9 @@ class SlideBuilder:
         img_spec can be:
           - A string (path or URL)
           - A dict with 'url', 'path', and optional size overrides
-        Returns True if image was placed, False if placeholder was used.
+        Returns True if image was placed, False if skipped.
+        On failure: fills the area with a subtle accent block instead of an
+        ugly gray placeholder — keeps the slide looking clean.
         """
         if isinstance(img_spec, dict):
             source = img_spec.get("url") or img_spec.get("path", "")
@@ -1127,7 +1313,7 @@ class SlideBuilder:
             source = str(img_spec) if img_spec else ""
 
         if not source:
-            self._add_placeholder_rect(slide, x, y, w, h, "")
+            self._add_clean_image_fallback(slide, x, y, w, h)
             return False
 
         local_path = resolve_image(source, self._img_temp_dir)
@@ -1136,11 +1322,20 @@ class SlideBuilder:
                 slide.shapes.add_picture(local_path, x, y, w, h)
                 return True
             except Exception:
-                self._add_placeholder_rect(slide, x, y, w, h, source)
+                self._add_clean_image_fallback(slide, x, y, w, h)
                 return False
         else:
-            self._add_placeholder_rect(slide, x, y, w, h, source)
+            self._add_clean_image_fallback(slide, x, y, w, h)
             return False
+
+    def _add_clean_image_fallback(self, slide, x, y, w, h):
+        """When an image fails to load, add a subtle tinted rectangle
+        instead of a gray placeholder with a broken filename.
+        Keeps the slide looking intentionally designed."""
+        shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, y, w, h)
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = hex_to_rgb(self.dl["color_bg_subtle"])
+        shape.line.fill.background()  # No border — clean look
 
     # ── Layout: Data Table ──
 
@@ -1196,9 +1391,12 @@ class SlideBuilder:
                 cell_fill.solid()
                 cell_fill.fore_color.rgb = hex_to_rgb(header_bg)
 
-                # Auto-contrast: light text on dark bg, dark text on light bg
-                bg_lum = self.dl._luminance(header_bg) if hasattr(self.dl, '_luminance') else 128
-                header_text_color = RGBColor(0xFF, 0xFF, 0xFF) if bg_lum < 140 else hex_to_rgb(self.dl["color_text"])
+                # WCAG contrast: ensure header text is readable on accent background
+                header_text_hex = ensure_contrast("FFFFFF", header_bg, 4.5)
+                # If white doesn't pass (very light accent), try dark text
+                if wcag_contrast_ratio("FFFFFF", header_bg) < 4.5:
+                    header_text_hex = ensure_contrast(self.dl["color_text"], header_bg, 4.5)
+                header_text_color = hex_to_rgb(header_text_hex)
 
                 # Header text style
                 for p in cell.text_frame.paragraphs:
@@ -1227,11 +1425,14 @@ class SlideBuilder:
                     cell_fill.solid()
                     cell_fill.fore_color.rgb = hex_to_rgb(self.dl["color_bg_subtle"])
 
+                # WCAG contrast for data cells against their row background
+                cell_bg = self.dl["color_bg_subtle"] if data_row_idx % 2 == 1 else self.dl["color_bg"]
+                cell_text_color = ensure_contrast(self.dl["color_body"], cell_bg, 4.5)
                 for p in cell.text_frame.paragraphs:
                     for run in p.runs:
                         run.font.size = Pt(self.dl["body_size"] - 2)
                         run.font.name = self.dl["font_primary"]
-                        run.font.color.rgb = hex_to_rgb(self.dl["color_body"])
+                        run.font.color.rgb = hex_to_rgb(cell_text_color)
 
                 self._set_cell_margins(cell, Inches(0.1))
             row_idx += 1
@@ -1529,18 +1730,24 @@ class SlideBuilder:
         card_top = self.dl["content_top_pct"] + 5
         card_area_h = max(68 - card_top, 15)  # leave room for slide number
 
-        if n <= 2:
-            cols, rows = n, 1
-        elif n <= 3:
-            cols, rows = n, 1
-        elif n <= 4:
-            cols, rows = 2, 2
-        elif n <= 6:
-            cols, rows = 3, 2
-        else:
-            cols, rows = 4, 2
+        # layout_complexity limits grid density
+        complexity = getattr(self.dl, '_layout_complexity', 'moderate')
+        max_cols = 2 if complexity == "simple" else (4 if complexity == "complex" else 3)
 
-        gap_pct = 3
+        if n <= 2:
+            cols, rows = min(n, max_cols), 1
+        elif n <= 3:
+            cols, rows = min(n, max_cols), 1
+        elif n <= 4:
+            cols, rows = min(2, max_cols), 2
+        elif n <= 6:
+            cols, rows = min(3, max_cols), 2
+        else:
+            cols, rows = min(4, max_cols), 2
+
+        # Whitespace style affects card gap
+        ws = getattr(self.dl, '_whitespace_style', 'balanced')
+        gap_pct = 5 if ws == "generous" else (2 if ws == "tight" else 3)
         card_w_pct = (content_w - gap_pct * (cols - 1)) / cols
         card_h_pct = (card_area_h - gap_pct * (rows - 1)) / rows
 
@@ -1906,7 +2113,40 @@ def advise_and_fix_spec(spec):
                 f"vary with cards, big_number, comparison, process, image_right, or full_image"
             )
 
-    # ── Rule 7: Warn on imageless decks ──
+    # ── Rule 7: Strip hallucinated/invalid image references ──
+    # Only keep image URLs that look like real URLs (http/https) or existing local paths.
+    # LLMs frequently hallucinate filenames like "ai-trends-2025.jpg" that don't exist.
+    import os as _os
+    image_keys = ("image", "image_url", "image_path", "left_image", "right_image",
+                  "background_image")
+    stripped_count = 0
+    for s in fixed_slides:
+        c = s.get("content", {})
+        for key in image_keys:
+            val = c.get(key)
+            if not val:
+                continue
+            src = val.get("url", val) if isinstance(val, dict) else val
+            if isinstance(src, str) and src:
+                is_url = src.startswith("http://") or src.startswith("https://")
+                is_local = _os.path.isabs(src) and _os.path.exists(src)
+                if not is_url and not is_local:
+                    # Hallucinated filename — strip it
+                    c.pop(key, None)
+                    stripped_count += 1
+        # Downgrade image-only layouts to content if image was stripped
+        if s["layout"] in ("full_image", "image_left", "image_right"):
+            has_any_img = any(c.get(k) for k in image_keys)
+            if not has_any_img:
+                s["layout"] = "content"
+                stripped_count += 1
+    if stripped_count > 0:
+        warnings.append(
+            f"Stripped {stripped_count} hallucinated image references (not real URLs or files). "
+            f"Use search_images FIRST to get real image URLs before creating the spec."
+        )
+
+    # Warn on imageless decks (after stripping)
     if len(fixed_slides) >= 5:
         has_image = False
         for s in fixed_slides:
@@ -1914,10 +2154,7 @@ def advise_and_fix_spec(spec):
             if s["layout"] in ("full_image", "image_left", "image_right"):
                 has_image = True
                 break
-            if c.get("image") or c.get("image_url") or c.get("image_path"):
-                has_image = True
-                break
-            if c.get("left_image") or c.get("right_image"):
+            if any(c.get(k) for k in image_keys):
                 has_image = True
                 break
         if not has_image:

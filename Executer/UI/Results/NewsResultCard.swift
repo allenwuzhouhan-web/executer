@@ -36,8 +36,7 @@ struct NewsResultCard: View {
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.tertiary)
                         .frame(width: 18, height: 18)
-                        .background(Color.primary.opacity(0.06))
-                        .clipShape(Circle())
+                        .liquidGlassCircle()
                 }
                 .buttonStyle(.plain)
             }
@@ -86,21 +85,8 @@ struct NewsResultCard: View {
             .padding(.bottom, 9)
             .padding(.top, 4)
         }
-        .background { VisualEffectBackground(material: .popover, blendingMode: .behindWindow) }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.blue.opacity(0.3), .purple.opacity(0.2), .orange.opacity(0.15), .clear],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        }
-        .shadow(color: .blue.opacity(0.08), radius: 12, y: 6)
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        .liquidGlass(cornerRadius: 14, tint: .blue)
+        .shadow(color: .blue.opacity(0.06), radius: 8, y: 4)
         .padding(.top, 6)
         .onHover { isHovering = $0 }
         .onAppear {

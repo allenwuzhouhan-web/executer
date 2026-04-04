@@ -53,8 +53,7 @@ struct EventResultCard: View {
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.tertiary)
                         .frame(width: 18, height: 18)
-                        .background(Color.primary.opacity(0.06))
-                        .clipShape(Circle())
+                        .liquidGlassCircle()
                 }
                 .buttonStyle(.plain)
             }
@@ -150,14 +149,8 @@ struct EventResultCard: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
         }
-        .background { VisualEffectBackground(material: .popover, blendingMode: .behindWindow) }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(accentGradient.opacity(0.25), lineWidth: 1)
-        }
-        .shadow(color: .purple.opacity(0.08), radius: 12, y: 6)
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        .liquidGlass(cornerRadius: 14, tint: .purple)
+        .shadow(color: .purple.opacity(0.06), radius: 8, y: 4)
         .padding(.top, 6)
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 10)

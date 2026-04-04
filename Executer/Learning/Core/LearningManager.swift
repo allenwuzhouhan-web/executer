@@ -196,6 +196,9 @@ class LearningManager {
             autoCompilePatterns(profile.patterns, appName: appName)
         }
         print("[Learning] Extracted patterns for \(appNames.count) apps")
+
+        // Trigger learning feedback loop: convert high-frequency patterns to rules
+        Task { await LearningFeedbackLoop.generateRules() }
     }
 
     // MARK: - Auto-Compile Patterns → Skills

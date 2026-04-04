@@ -365,28 +365,33 @@ class LLMServiceManager: ObservableObject {
         return systemPrompt + agenticPromptSection()
     }()
 
-    /// Frozen memory snapshot — loaded once per session with no query filter.
-    /// Preserves LLM prefix cache efficiency. Refreshed when memories change.
+    /// Memory snapshot — cached per query, invalidated when memories change.
     private var frozenMemorySection: String?
+    private var frozenMemoryQuery: String?
     private let memoryLock = NSLock()
 
     /// Call this to refresh the memory snapshot (e.g., when memories are added/removed).
     func refreshMemoryCache() {
         memoryLock.lock()
         frozenMemorySection = nil
+        frozenMemoryQuery = nil
         memoryLock.unlock()
     }
 
     func fullSystemPrompt(context: SystemContext, query: String = "") -> String {
         let personality = PersonalityEngine.shared.systemPromptSection()
         let skills = SkillsManager.shared.filteredPromptSection(for: query)
-        // Frozen memory — no query filter so it stays valid for all topics
+        // Memory — query-filtered, cached until invalidated by write or new query
         memoryLock.lock()
-        let memory = frozenMemorySection ?? {
-            let section = MemoryManager.shared.promptSection(query: "")
+        let memory: String
+        if let cached = frozenMemorySection, frozenMemoryQuery == query {
+            memory = cached
+        } else {
+            let section = MemoryManager.shared.promptSection(query: query)
             frozenMemorySection = section
-            return section
-        }()
+            frozenMemoryQuery = query
+            memory = section
+        }
         memoryLock.unlock()
         let history = recentHistorySection()
         let humor = HumorMode.shared.isEnabled ? humorPromptSection : ""
@@ -423,7 +428,9 @@ class LLMServiceManager: ObservableObject {
             Keep markers inline with your response text.
             """
 
-        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\n\n\(context.systemPromptAddendum)\(catalog)\(docStyles)\(trainedKnowledge)\(designRefinements)\(skills)\(memory)\(history)\(formatGuide)"
+        let goalSection = GoalStack.promptSection
+
+        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\n\n\(context.systemPromptAddendum)\(catalog)\(docStyles)\(trainedKnowledge)\(designRefinements)\(skills)\(memory)\(goalSection)\(history)\(formatGuide)"
     }
 
     /// Provider-specific agentic execution guidance. DeepSeek needs explicit

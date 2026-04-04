@@ -26,7 +26,18 @@ struct LaunchAppTool: ToolDefinition {
         if result.exitCode == 0 {
             return "Launched \(appName)."
         }
-        return "Could not find \(appName)."
+
+        // Check if this is a website the user wants to visit, not an app
+        let webServices: Set<String> = [
+            "youtube", "google", "gmail", "twitter", "x", "reddit", "github",
+            "facebook", "instagram", "linkedin", "amazon", "netflix", "spotify",
+            "twitch", "discord", "slack", "notion", "figma", "chatgpt", "claude",
+            "wikipedia", "stackoverflow", "tiktok", "pinterest", "whatsapp",
+        ]
+        if webServices.contains(appName.lowercased()) {
+            return "'\(appName)' is not a macOS app. Use open_url_in_safari to open it as a website instead."
+        }
+        return "Could not find app '\(appName)'. If this is a website, use open_url_in_safari instead."
     }
 
     private func bundleID(for appName: String) -> String {
@@ -56,7 +67,7 @@ struct LaunchAppTool: ToolDefinition {
             "vscode": "com.microsoft.VSCode",
             "visual studio code": "com.microsoft.VSCode",
         ]
-        return known[appName.lowercased()] ?? "com.apple.\(appName)"
+        return known[appName.lowercased()] ?? ""
     }
 }
 

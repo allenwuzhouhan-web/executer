@@ -78,6 +78,7 @@ struct TypeTextTool: ToolDefinition {
             try await Task.sleep(nanoseconds: 30_000_000) // 30ms between characters
         }
 
+        VisionEngine.shared.invalidateCache()
         return "Typed \(text.count) characters."
     }
 

@@ -55,6 +55,8 @@ class MemoryManager {
     /// All memories across all namespaces (keyed by namespace)
     private var memoriesByNamespace: [String: [Memory]] = [:]
     private let maxMemoriesPerNamespace = 200
+    /// Serial queue for thread-safe access to memoriesByNamespace
+    private let queue = DispatchQueue(label: "com.executer.memory", qos: .utility)
 
     private let memoriesDir: URL
     private let legacyStorageURL: URL
@@ -78,11 +80,11 @@ class MemoryManager {
 
     /// All memories in a given namespace.
     var memories: [Memory] {
-        memoriesByNamespace["general"] ?? []
+        queue.sync { memoriesByNamespace["general"] ?? [] }
     }
 
     func memories(for namespace: String) -> [Memory] {
-        memoriesByNamespace[namespace] ?? []
+        queue.sync { memoriesByNamespace[namespace] ?? [] }
     }
 
     // MARK: - CRUD
@@ -97,68 +99,104 @@ class MemoryManager {
             namespace: namespace
         )
 
-        memoriesByNamespace[namespace, default: []].append(memory)
+        queue.sync {
+            memoriesByNamespace[namespace, default: []].append(memory)
 
-        // Enforce limit per namespace
-        if let count = memoriesByNamespace[namespace]?.count, count > maxMemoriesPerNamespace {
-            memoriesByNamespace[namespace]?.sort { $0.accessCount < $1.accessCount }
-            memoriesByNamespace[namespace]?.removeFirst(count - maxMemoriesPerNamespace)
+            // Enforce limit per namespace
+            if let count = memoriesByNamespace[namespace]?.count, count > maxMemoriesPerNamespace {
+                memoriesByNamespace[namespace]?.sort { $0.accessCount < $1.accessCount }
+                memoriesByNamespace[namespace]?.removeFirst(count - maxMemoriesPerNamespace)
+            }
+
+            save(namespace: namespace)
         }
-
-        save(namespace: namespace)
         // Invalidate frozen memory cache so new memories are visible to LLM
         LLMServiceManager.shared.refreshMemoryCache()
         print("[Memory] Added \(category.rawValue) in '\(namespace)': \(content.prefix(60))...")
+
+        // Trigger consolidation if approaching limit
+        Task { await MemoryConsolidator.shared.consolidateIfNeeded(namespace: namespace) }
+
         return memory
     }
 
     func recall(query: String? = nil, category: MemoryCategory? = nil, limit: Int = 10, namespace: String = "general") -> [Memory] {
-        var results = memoriesByNamespace[namespace] ?? []
+        return queue.sync {
+            var results = memoriesByNamespace[namespace] ?? []
 
-        if let category = category {
-            results = results.filter { $0.category == category }
-        }
-
-        if let query = query, !query.isEmpty {
-            let queryWords = Set(query.lowercased().split(separator: " ").map(String.init))
-            results = results.sorted { a, b in
-                score(memory: a, queryWords: queryWords) > score(memory: b, queryWords: queryWords)
+            if let category = category {
+                results = results.filter { $0.category == category }
             }
-        } else {
-            results.sort { $0.lastAccessedAt > $1.lastAccessedAt }
-        }
 
-        let topResults = Array(results.prefix(limit))
-
-        // Update access counts
-        for result in topResults {
-            if let idx = memoriesByNamespace[namespace]?.firstIndex(where: { $0.id == result.id }) {
-                memoriesByNamespace[namespace]?[idx].lastAccessedAt = Date()
-                memoriesByNamespace[namespace]?[idx].accessCount += 1
+            if let query = query, !query.isEmpty {
+                let queryWords = Set(query.lowercased().split(separator: " ").map(String.init))
+                results = results.sorted { a, b in
+                    score(memory: a, queryWords: queryWords) > score(memory: b, queryWords: queryWords)
+                }
+            } else {
+                results.sort { $0.lastAccessedAt > $1.lastAccessedAt }
             }
-        }
-        save(namespace: namespace)
 
-        return topResults
+            let topResults = Array(results.prefix(limit))
+
+            // Update access counts
+            for result in topResults {
+                if let idx = memoriesByNamespace[namespace]?.firstIndex(where: { $0.id == result.id }) {
+                    memoriesByNamespace[namespace]?[idx].lastAccessedAt = Date()
+                    memoriesByNamespace[namespace]?[idx].accessCount += 1
+                }
+            }
+            save(namespace: namespace)
+
+            return topResults
+        }
     }
 
     func forget(query: String, namespace: String = "general") -> Bool {
-        let lowered = query.lowercased()
-        if let idx = memoriesByNamespace[namespace]?.firstIndex(where: { $0.content.lowercased().contains(lowered) }) {
-            let removed = memoriesByNamespace[namespace]?.remove(at: idx)
-            save(namespace: namespace)
-            print("[Memory] Forgot from '\(namespace)': \(removed?.content.prefix(60) ?? "")...")
-            return true
+        return queue.sync {
+            let lowered = query.lowercased()
+            if let idx = memoriesByNamespace[namespace]?.firstIndex(where: { $0.content.lowercased().contains(lowered) }) {
+                let removed = memoriesByNamespace[namespace]?.remove(at: idx)
+                save(namespace: namespace)
+                print("[Memory] Forgot from '\(namespace)': \(removed?.content.prefix(60) ?? "")...")
+                return true
+            }
+            return false
         }
-        return false
+    }
+
+    /// Remove a memory by its UUID. Used by MemoryConsolidator.
+    @discardableResult
+    func forgetById(_ id: UUID, namespace: String = "general") -> Bool {
+        return queue.sync {
+            if let idx = memoriesByNamespace[namespace]?.firstIndex(where: { $0.id == id }) {
+                memoriesByNamespace[namespace]?.remove(at: idx)
+                save(namespace: namespace)
+                return true
+            }
+            return false
+        }
+    }
+
+    /// Async recall with semantic re-ranking for better accuracy.
+    /// Fast path: keyword scoring for top-30, then LLM-based re-ranking.
+    func recallSemantic(query: String, category: MemoryCategory? = nil, limit: Int = 10, namespace: String = "general") async -> [Memory] {
+        let keywordResults = recall(query: query, category: category, limit: 30, namespace: namespace)
+        guard keywordResults.count > 3 else { return keywordResults }
+        let reranked = await SemanticMemoryScorer.shared.scoreRelevance(
+            query: query, candidates: keywordResults, limit: limit
+        )
+        return reranked
     }
 
     func list(category: MemoryCategory? = nil, namespace: String = "general") -> [Memory] {
-        let all = memoriesByNamespace[namespace] ?? []
-        if let category = category {
-            return all.filter { $0.category == category }
+        return queue.sync {
+            let all = memoriesByNamespace[namespace] ?? []
+            if let category = category {
+                return all.filter { $0.category == category }
+            }
+            return all
         }
-        return all
     }
 
     // MARK: - System Prompt Injection
@@ -166,15 +204,15 @@ class MemoryManager {
     /// Build a memory section for the system prompt, scoped by namespace.
     /// Includes general preferences + namespace-specific memories.
     func promptSection(query: String, namespace: String = "general") -> String {
-        // Always include general preferences
-        let generalPrefs = (memoriesByNamespace["general"] ?? [])
-            .filter { $0.category == .preference }
-            .prefix(20)
-
-        // Get namespace-specific memories
-        let nsMemories = namespace == "general" ? [] : (memoriesByNamespace[namespace] ?? [])
-
-        let allMemories = (memoriesByNamespace["general"] ?? []) + nsMemories
+        // Snapshot state under lock, then process outside
+        let (generalPrefs, allMemories): (ArraySlice<Memory>, [Memory]) = queue.sync {
+            let prefs = (memoriesByNamespace["general"] ?? [])
+                .filter { $0.category == .preference }
+                .prefix(20)
+            let nsMemories = namespace == "general" ? [] : (memoriesByNamespace[namespace] ?? [])
+            let all = (memoriesByNamespace["general"] ?? []) + nsMemories
+            return (prefs, all)
+        }
         guard !allMemories.isEmpty else { return "" }
 
         var included: [Memory] = []
@@ -243,8 +281,8 @@ class MemoryManager {
         let memWords = Set(memory.keywords.map { $0.lowercased() })
         let overlap = Double(memWords.intersection(queryWords).count)
 
-        let hoursSinceAccess = Date().timeIntervalSince(memory.lastAccessedAt) / 3600
-        let recencyBoost = hoursSinceAccess < 24 ? 1.0 : 0.0
+        let daysSinceAccess = Date().timeIntervalSince(memory.lastAccessedAt) / 86400
+        let recencyBoost = pow(0.5, daysSinceAccess / 7.0)
 
         let categoryWeight: Double
         switch memory.category {

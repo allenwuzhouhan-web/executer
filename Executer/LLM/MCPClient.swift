@@ -8,10 +8,20 @@ actor MCPClient {
     private var stdin: FileHandle?
     private var stdoutHandle: FileHandle?
     private var pendingRequests: [Int: CheckedContinuation<[String: Any], Error>] = [:]
+    private var timeoutTasks: [Int: Task<Void, any Error>] = [:]
     private var nextId = 1
     private var readBuffer = Data()
     private var isConnected = false
     private var readTask: Task<Void, Never>?
+
+    // Reconnection state
+    private var lastCommand: String?
+    private var lastArgs: [String]?
+    private var lastEnv: [String: String]?
+    private var reconnectAttempts = 0
+    private var isReconnecting = false
+    private static let maxReconnectAttempts = 5
+    private static let maxBackoffSeconds: Double = 30
 
     struct MCPTool {
         let name: String
@@ -26,6 +36,11 @@ actor MCPClient {
     // MARK: - Connection
 
     func connect(command: String, args: [String], env: [String: String] = [:]) async throws {
+        // Store connection params for reconnection
+        self.lastCommand = command
+        self.lastArgs = args
+        self.lastEnv = env
+
         let proc = Process()
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
@@ -49,17 +64,26 @@ actor MCPClient {
         self.stdoutHandle = stdoutPipe.fileHandleForReading
         self.isConnected = true
 
-        // Start reading responses on a background task
+        // Monitor process termination to detect crashes
+        proc.terminationHandler = { [weak self] terminatedProc in
+            guard let self = self else { return }
+            Task {
+                await self.handleProcessTermination(exitCode: terminatedProc.terminationStatus)
+            }
+        }
+
+        // Start reading responses via readabilityHandler (OS-level efficient, no polling)
         let handle = stdoutPipe.fileHandleForReading
         readTask = Task.detached { [weak self] in
             while !Task.isCancelled {
                 let data = handle.availableData
                 if data.isEmpty {
-                    // EOF — server disconnected
                     await self?.handleDisconnect()
                     break
                 }
                 await self?.handleData(data)
+                // Yield to prevent tight-loop CPU spinning when data arrives in bursts
+                try? await Task.sleep(nanoseconds: 1_000_000) // 1ms
             }
         }
 
@@ -72,6 +96,10 @@ actor MCPClient {
 
         // Send initialized notification (no response expected)
         sendNotification("notifications/initialized", params: [:])
+
+        // Reset reconnect counter on successful connection
+        self.reconnectAttempts = 0
+        self.isReconnecting = false
 
         let serverName = (initResult["serverInfo"] as? [String: Any])?["name"] as? String ?? "unknown"
         print("[MCP] Connected to \(serverName)")
@@ -88,7 +116,9 @@ actor MCPClient {
         stdin = nil
         process?.terminate()
         process = nil
-        // Cancel any pending requests
+        // Cancel all timeout tasks and pending requests
+        for (_, task) in timeoutTasks { task.cancel() }
+        timeoutTasks.removeAll()
         for (_, continuation) in pendingRequests {
             continuation.resume(throwing: MCPError.disconnected)
         }
@@ -170,18 +200,20 @@ actor MCPClient {
             throw MCPError.disconnected
         }
 
-        // Register the continuation, then race against timeout
+        // Register the continuation with a cancellable timeout to prevent double-resume
         let result: [String: Any] = try await withCheckedThrowingContinuation { continuation in
             self.pendingRequests[id] = continuation
 
-            // Start a timeout task
-            Task {
+            // Start a timeout task that we can cancel when the response arrives
+            let timeoutTask = Task {
                 try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                // If still pending after timeout, resume with error
+                // Only resume if still pending (removeValue is atomic — first caller wins)
                 if let cont = self.pendingRequests.removeValue(forKey: id) {
+                    self.timeoutTasks.removeValue(forKey: id)
                     cont.resume(throwing: MCPError.timeout)
                 }
             }
+            self.timeoutTasks[id] = timeoutTask
         }
         return result
     }
@@ -235,6 +267,9 @@ actor MCPClient {
         // Response (has "id") — support both Int and NSNumber from JSONSerialization
         if let id = (message["id"] as? Int) ?? (message["id"] as? NSNumber)?.intValue,
            let continuation = pendingRequests.removeValue(forKey: id) {
+            // Cancel the timeout task so it doesn't fire after we resume
+            timeoutTasks.removeValue(forKey: id)?.cancel()
+
             if let error = message["error"] as? [String: Any] {
                 let msg = error["message"] as? String ?? "Unknown MCP error"
                 let code = error["code"] as? Int ?? -1
@@ -252,13 +287,108 @@ actor MCPClient {
         isConnected = false
         stdin?.closeFile()
         stdin = nil
-        process?.terminate()
+        // Don't terminate process here — it may already be dead (terminationHandler handles that path)
         process = nil
+        for (_, task) in timeoutTasks { task.cancel() }
+        timeoutTasks.removeAll()
         for (_, continuation) in pendingRequests {
             continuation.resume(throwing: MCPError.disconnected)
         }
         pendingRequests.removeAll()
         print("[MCP] Server \(serverName) disconnected")
+    }
+
+    // MARK: - Process Termination & Reconnection
+
+    private func handleProcessTermination(exitCode: Int32) {
+        let wasConnected = isConnected
+        if isConnected {
+            // Clean up without calling process.terminate() since it already exited
+            isConnected = false
+            readTask?.cancel()
+            readTask = nil
+            stdoutHandle?.closeFile()
+            stdoutHandle = nil
+            stdin?.closeFile()
+            stdin = nil
+            process = nil
+            for (_, task) in timeoutTasks { task.cancel() }
+            timeoutTasks.removeAll()
+            for (_, continuation) in pendingRequests {
+                continuation.resume(throwing: MCPError.disconnected)
+            }
+            pendingRequests.removeAll()
+        }
+
+        if wasConnected {
+            print("[MCP] Server \(serverName) process terminated (exit code \(exitCode)), scheduling reconnect")
+            Task { await attemptReconnect() }
+        }
+    }
+
+    /// Attempt to reconnect with exponential backoff.
+    private func attemptReconnect() async {
+        guard !isReconnecting else { return }
+        guard let command = lastCommand, let args = lastArgs else {
+            print("[MCP] Cannot reconnect \(serverName): no stored connection params")
+            return
+        }
+
+        isReconnecting = true
+        defer { isReconnecting = false }
+
+        while reconnectAttempts < Self.maxReconnectAttempts {
+            reconnectAttempts += 1
+            let delay = min(pow(2.0, Double(reconnectAttempts - 1)), Self.maxBackoffSeconds)
+            print("[MCP] Reconnecting \(serverName) in \(delay)s (attempt \(reconnectAttempts)/\(Self.maxReconnectAttempts))")
+
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+
+            do {
+                try await connect(command: command, args: args, env: lastEnv ?? [:])
+                print("[MCP] Reconnected \(serverName) successfully")
+                return
+            } catch {
+                print("[MCP] Reconnect \(serverName) attempt \(reconnectAttempts) failed: \(error.localizedDescription)")
+            }
+        }
+
+        print("[MCP] Giving up reconnecting \(serverName) after \(Self.maxReconnectAttempts) attempts")
+    }
+
+    // MARK: - Liveness Check
+
+    /// Check if the server is alive. Returns true if connected and process is running.
+    var isAlive: Bool {
+        isConnected && (process?.isRunning == true)
+    }
+
+    /// Ensure the server is connected, attempting reconnect if needed.
+    /// Call this before tool execution to detect stale connections.
+    func ensureConnected() async throws {
+        if isAlive { return }
+
+        // Not alive — try reconnecting
+        guard let command = lastCommand, let args = lastArgs else {
+            throw MCPError.disconnected
+        }
+
+        // Clean up stale state if needed
+        if isConnected {
+            handleDisconnect()
+        }
+
+        // Attempt a single reconnect (with fresh counter if exhausted)
+        if reconnectAttempts >= Self.maxReconnectAttempts {
+            reconnectAttempts = 0  // Reset for on-demand reconnect
+        }
+
+        print("[MCP] Liveness check failed for \(serverName), reconnecting...")
+        do {
+            try await connect(command: command, args: args, env: lastEnv ?? [:])
+        } catch {
+            throw MCPError.disconnected
+        }
     }
 }
 

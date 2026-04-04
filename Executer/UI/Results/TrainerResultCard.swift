@@ -58,8 +58,7 @@ struct TrainerResultCard: View {
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.tertiary)
                         .frame(width: 18, height: 18)
-                        .background(Color.primary.opacity(0.06))
-                        .clipShape(Circle())
+                        .liquidGlassCircle()
                 }
                 .buttonStyle(.plain)
             }
@@ -92,45 +91,60 @@ struct TrainerResultCard: View {
                     // Key Takeaways
                     if !profile.summary.bullets.isEmpty {
                         sectionHeader("Key Points", icon: "list.bullet.circle.fill", color: .blue)
-                        ForEach(Array(profile.summary.bullets.enumerated()), id: \.offset) { i, bullet in
-                            bulletRow(bullet)
-                                .opacity(appeared ? 1 : 0)
-                                .animation(.easeOut.delay(Double(i) * 0.03), value: appeared)
+                        if isSectionExpanded("Key Points") {
+                            ForEach(Array(profile.summary.bullets.enumerated()), id: \.offset) { i, bullet in
+                                bulletRow(bullet)
+                                    .opacity(appeared ? 1 : 0)
+                                    .animation(.easeOut.delay(Double(i) * 0.03), value: appeared)
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
 
                     // Design Rules
                     if !profile.style.formattingPatterns.isEmpty {
                         sectionHeader("Design Rules", icon: "paintpalette.fill", color: .purple)
-                        ForEach(profile.style.formattingPatterns, id: \.self) { rule in
-                            ruleRow(rule, color: .purple)
+                        if isSectionExpanded("Design Rules") {
+                            ForEach(profile.style.formattingPatterns, id: \.self) { rule in
+                                ruleRow(rule, color: .purple)
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
 
                     // Key Terms
                     if !profile.content.keyTerms.isEmpty {
                         sectionHeader("Key Terms", icon: "text.book.closed.fill", color: .teal)
-                        ForEach(Array(profile.content.keyTerms.enumerated()), id: \.offset) { _, term in
-                            termRow(term)
+                        if isSectionExpanded("Key Terms") {
+                            ForEach(Array(profile.content.keyTerms.enumerated()), id: \.offset) { _, term in
+                                termRow(term)
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
 
                     // Quality Notes
                     if let notes = profile.qualityNotes, !notes.isEmpty {
                         sectionHeader("Quality Assessment", icon: "checkmark.shield.fill", color: qualityColor)
-                        Text(notes)
-                            .font(.system(size: 10, weight: .regular, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 20)
+                        if isSectionExpanded("Quality Assessment") {
+                            Text(notes)
+                                .font(.system(size: 10, weight: .regular, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 20)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
 
                     // Study Recommendation
                     if !profile.summary.studyRecommendation.isEmpty {
                         sectionHeader("Study Recommendation", icon: "lightbulb.fill", color: .yellow)
-                        Text(profile.summary.studyRecommendation)
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 20)
+                        if isSectionExpanded("Study Recommendation") {
+                            Text(profile.summary.studyRecommendation)
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 20)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
                 }
                 .padding(.horizontal, 14)
@@ -138,14 +152,8 @@ struct TrainerResultCard: View {
             }
             .frame(maxHeight: 300)
         }
-        .background { VisualEffectBackground(material: .popover, blendingMode: .behindWindow) }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(accentGradient.opacity(0.25), lineWidth: 1)
-        }
-        .shadow(color: .purple.opacity(0.08), radius: 12, y: 6)
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        .liquidGlass(cornerRadius: 14, tint: .purple)
+        .shadow(color: .purple.opacity(0.06), radius: 8, y: 4)
         .padding(.top, 6)
         .onHover { isHovering = $0 }
         .onAppear {
@@ -157,16 +165,35 @@ struct TrainerResultCard: View {
 
     // MARK: - Components
 
+    private func isSectionExpanded(_ title: String) -> Bool {
+        expandedSection == nil || expandedSection == title
+    }
+
     @ViewBuilder
     private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(color)
-            Text(title)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.primary)
+        Button {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                if expandedSection == title {
+                    expandedSection = nil // collapse back to show all
+                } else {
+                    expandedSection = title // focus this section
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(color)
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: isSectionExpanded(title) ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
+        .buttonStyle(.plain)
         .padding(.top, 4)
     }
 
