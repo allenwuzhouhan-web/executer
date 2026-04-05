@@ -83,4 +83,47 @@ enum NeverTouchList {
     static func allBlockedTools() -> Set<String> {
         hardBlockedTools.union(userBlockedTools())
     }
+
+    // MARK: - Workspace-Aware File Operations
+
+    /// Check if a file operation is allowed within the designated workspace.
+    /// move_file and copy_file are ALLOWED when:
+    ///   - Both source AND destination are within ~/Documents/works/G8/
+    ///   - OR source is in ~/Downloads/ and destination is in workspace
+    /// trash_file is ONLY allowed for system junk (.DS_Store, ~$ lock files).
+    static func isAllowedInWorkspace(toolName: String, arguments: String) -> Bool {
+        let tool = toolName.lowercased()
+        let config = WorkspaceConfig.shared
+
+        switch tool {
+        case "move_file", "copy_file":
+            // Parse source and destination from arguments
+            guard let data = arguments.data(using: .utf8),
+                  let args = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return false
+            }
+
+            let source = (args["source"] as? String ?? args["file_path"] as? String ?? args["from"] as? String ?? "")
+            let destination = (args["destination"] as? String ?? args["new_path"] as? String ?? args["to"] as? String ?? "")
+
+            let sourceOK = config.isInWorkspace(source) || config.isInDownloads(source)
+            let destOK = config.isInWorkspace(destination)
+
+            return sourceOK && destOK
+
+        case "trash_file", "delete_file", "move_to_trash":
+            // Only allowed for junk files
+            guard let data = arguments.data(using: .utf8),
+                  let args = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let filePath = args["file_path"] as? String ?? args["path"] as? String else {
+                return false
+            }
+
+            let filename = (filePath as NSString).lastPathComponent
+            return WorkspaceConfig.isJunkFile(filename) && config.isInWorkspace(filePath)
+
+        default:
+            return false
+        }
+    }
 }

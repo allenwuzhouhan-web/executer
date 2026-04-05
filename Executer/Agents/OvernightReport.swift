@@ -12,6 +12,7 @@ struct OvernightReport: Codable {
     let totalActionsExecuted: Int
     let agentChainsUsed: Int
     let estimatedTimeSavedMinutes: Int
+    var jobResults: JobRunResult?       // Structured job results (email, files, calendar, research)
 
     /// Generate a markdown report.
     func toMarkdown() -> String {
@@ -25,6 +26,23 @@ struct OvernightReport: Codable {
         lines.append("**Actions executed:** \(totalActionsExecuted) | **Agent chains:** \(agentChainsUsed)")
         lines.append("**Estimated time saved:** \(estimatedTimeSavedMinutes) minutes")
         lines.append("")
+
+        // Structured job results
+        if let jobs = jobResults {
+            lines.append("## Overnight Jobs")
+            for job in jobs.jobs {
+                let icon = job.status == .completed ? "+" : job.status == .failed ? "x" : "-"
+                lines.append("### [\(icon)] \(job.name)")
+                lines.append(job.summary)
+                for action in job.actions {
+                    lines.append("  - \(action)")
+                }
+                if let path = job.outputPath {
+                    lines.append("  Output: `\(path)`")
+                }
+                lines.append("")
+            }
+        }
 
         // Completed
         if !tasksCompleted.isEmpty {

@@ -34,6 +34,9 @@ class OvernightAgent: ObservableObject {
             .appendingPathComponent("overnight_session.json")
     }
 
+    /// Results from the structured job runner (email, files, calendar, research).
+    private var lastJobResult: JobRunResult?
+
     // MARK: - Lifecycle
 
     /// Activate the overnight agent. Runs until `endTime` (default: 7 AM next day).
@@ -85,38 +88,44 @@ class OvernightAgent: ObservableObject {
 
     // MARK: - Main Loop
 
-    /// The core overnight loop. Discovers tasks, executes them, sleeps between iterations.
+    /// The core overnight loop. Runs concrete jobs first, then processes queued tasks.
     func overnightLoop() async {
         print("[OvernightAgent] Loop started")
 
+        // Start idle screen monitoring for workflow replay
+        IdleScreenDetector.shared.startMonitoring()
+
+        // Phase 1: Run structured overnight jobs (email, files, calendar, research)
+        let jobResult = await OvernightJobRunner.runAllJobs()
+        lastJobResult = jobResult
+        print("[OvernightAgent] Jobs complete: \(jobResult.completedJobs)/\(jobResult.jobs.count) succeeded")
+
+        // Phase 2: Discovery + task execution loop (runs for remaining time)
         while isActive && isWithinWindow() && !Task.isCancelled {
-            // 1. Discovery pass (every 30 min)
+            // Discovery pass (every 30 min)
             if Date().timeIntervalSince(lastDiscoveryTime) >= discoveryInterval {
                 await discoverAndEnqueue()
                 lastDiscoveryTime = Date()
             }
 
-            // 2. Execute next task
+            // Execute next queued task
             if let task = OvernightTaskQueue.shared.dequeueNext() {
                 guard checkSafetyBudget() else {
                     print("[OvernightAgent] Safety budget exhausted — pausing")
-                    try? await Task.sleep(nanoseconds: 300_000_000_000) // 5 min pause
+                    try? await Task.sleep(nanoseconds: 300_000_000_000)
                     actionsThisHour = 0
                     consecutiveFailures = 0
                     continue
                 }
-
                 await executeTask(task)
             } else {
-                // No pending tasks — sleep longer
                 try? await Task.sleep(nanoseconds: 60_000_000_000) // 1 min idle
                 continue
             }
 
-            // 3. Sleep between tasks (CPU budget)
-            try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s between tasks
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
 
-            // 4. Hourly action counter reset
+            // Hourly reset
             if let start = sessionStartTime {
                 let hoursSinceStart = Date().timeIntervalSince(start) / 3600
                 let expectedResets = Int(hoursSinceStart)
@@ -126,6 +135,8 @@ class OvernightAgent: ObservableObject {
                 }
             }
         }
+
+        IdleScreenDetector.shared.stopMonitoring()
 
         // Session ended
         if isActive {
@@ -267,7 +278,7 @@ class OvernightAgent: ObservableObject {
 
     func generateMorningReport() -> OvernightReport {
         let queue = OvernightTaskQueue.shared
-        return OvernightReport(
+        var report = OvernightReport(
             sessionId: currentSessionId ?? UUID(),
             startTime: sessionStartTime ?? Date(),
             endTime: Date(),
@@ -279,6 +290,8 @@ class OvernightAgent: ObservableObject {
             agentChainsUsed: agentChainsUsed,
             estimatedTimeSavedMinutes: queue.completedTasks().reduce(0) { $0 + $1.estimatedMinutes }
         )
+        report.jobResults = lastJobResult
+        return report
     }
 
     // MARK: - Session Persistence
