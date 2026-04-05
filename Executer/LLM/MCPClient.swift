@@ -2,7 +2,7 @@ import Foundation
 
 /// Lightweight MCP (Model Context Protocol) client using stdio transport.
 /// Connects to MCP servers as child processes, communicates via JSON-RPC 2.0.
-actor MCPClient {
+actor MCPClient: MCPTransport {
     let serverName: String
     private var process: Process?
     private var stdin: FileHandle?
@@ -23,14 +23,22 @@ actor MCPClient {
     private static let maxReconnectAttempts = 5
     private static let maxBackoffSeconds: Double = 30
 
-    struct MCPTool {
-        let name: String
-        let description: String
-        let inputSchema: [String: Any]
-    }
-
     init(name: String) {
         self.serverName = name
+    }
+
+    // MARK: - MCPTransport Conformance
+
+    var isAlive: Bool {
+        isConnected && (process?.isRunning == true)
+    }
+
+    /// Protocol-required no-arg connect. Uses stored connection params.
+    func connect() async throws {
+        guard let command = lastCommand, let args = lastArgs else {
+            throw MCPError.connectionFailed("No stored connection params for stdio server \(serverName)")
+        }
+        try await connect(command: command, args: args, env: lastEnv ?? [:])
     }
 
     // MARK: - Connection
@@ -101,8 +109,8 @@ actor MCPClient {
         self.reconnectAttempts = 0
         self.isReconnecting = false
 
-        let serverName = (initResult["serverInfo"] as? [String: Any])?["name"] as? String ?? "unknown"
-        print("[MCP] Connected to \(serverName)")
+        let serverInfo = (initResult["serverInfo"] as? [String: Any])?["name"] as? String ?? "unknown"
+        print("[MCP] Connected to \(serverInfo)")
     }
 
     func disconnect() {
@@ -127,7 +135,7 @@ actor MCPClient {
 
     // MARK: - MCP Operations
 
-    func listTools() async throws -> [MCPTool] {
+    func listTools() async throws -> [MCPToolInfo] {
         let result = try await sendRequest("tools/list", params: [:])
         guard let tools = result["tools"] as? [[String: Any]] else {
             return []
@@ -136,7 +144,7 @@ actor MCPClient {
             guard let name = tool["name"] as? String else { return nil }
             let desc = tool["description"] as? String ?? ""
             let schema = tool["inputSchema"] as? [String: Any] ?? ["type": "object", "properties": [:]]
-            return MCPTool(name: name, description: desc, inputSchema: schema)
+            return MCPToolInfo(name: name, description: desc, inputSchema: schema)
         }
     }
 
@@ -358,11 +366,6 @@ actor MCPClient {
 
     // MARK: - Liveness Check
 
-    /// Check if the server is alive. Returns true if connected and process is running.
-    var isAlive: Bool {
-        isConnected && (process?.isRunning == true)
-    }
-
     /// Ensure the server is connected, attempting reconnect if needed.
     /// Call this before tool execution to detect stale connections.
     func ensureConnected() async throws {
@@ -388,24 +391,6 @@ actor MCPClient {
             try await connect(command: command, args: args, env: lastEnv ?? [:])
         } catch {
             throw MCPError.disconnected
-        }
-    }
-}
-
-// MARK: - Errors
-
-enum MCPError: LocalizedError {
-    case disconnected
-    case encodingError
-    case serverError(code: Int, message: String)
-    case timeout
-
-    var errorDescription: String? {
-        switch self {
-        case .disconnected: return "MCP server disconnected"
-        case .encodingError: return "Failed to encode MCP message"
-        case .serverError(_, let msg): return "MCP server error: \(msg)"
-        case .timeout: return "MCP request timed out"
         }
     }
 }

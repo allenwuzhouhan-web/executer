@@ -40,10 +40,11 @@ class LearningGlowWindow {
         }
 
         glowLayer?.removeFromSuperlayer()
+        guard let win = window, let contentView = win.contentView else { return }
         let glow = LearningGlowLayer()
-        glow.frame = window!.contentView!.bounds
+        glow.frame = contentView.bounds
         glow.contentsScale = screen.backingScaleFactor
-        window!.contentView!.layer?.addSublayer(glow)
+        contentView.layer?.addSublayer(glow)
         glowLayer = glow
 
         window?.orderFrontRegardless()

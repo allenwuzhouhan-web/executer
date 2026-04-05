@@ -100,7 +100,7 @@ final class DocumentStudyStore {
     private(set) var profiles: [DocumentStudyProfile] = []
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         storageDir = appSupport.appendingPathComponent("Executer/trained_documents", isDirectory: true)
         try? FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
         loadAll()
@@ -164,7 +164,7 @@ final class DocumentStudyStore {
                 }
 
                 // Load design philosophy from design_language.json if available
-                let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                let appSupport = URL.applicationSupportDirectory
                 let execDir = appSupport.appendingPathComponent("Executer")
                 let globalDesign = execDir.appendingPathComponent("design_language.json")
                 if let data = try? Data(contentsOf: globalDesign),

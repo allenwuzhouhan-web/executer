@@ -5,15 +5,34 @@ import Foundation
 actor MCPServerManager {
     static let shared = MCPServerManager()
 
-    private var clients: [String: MCPClient] = [:]
+    private var clients: [String: any MCPTransport] = [:]
     private var discoveredTools: [MCPToolWrapper] = []
     private let configURL: URL
 
+    // MARK: - Config Model
+
+    enum TransportType: String, Codable {
+        case stdio
+        case sse
+        case streamableHTTP = "streamable-http"
+    }
+
     struct ServerConfig: Codable {
         let name: String
-        let command: String
-        let args: [String]
+        let transport: TransportType?  // nil = stdio (backward compat)
+
+        // stdio fields
+        let command: String?
+        let args: [String]?
         let env: [String: String]?
+
+        // HTTP fields (SSE / streamable-http)
+        let url: String?
+        let headers: [String: String]?
+
+        var effectiveTransport: TransportType {
+            transport ?? .stdio
+        }
     }
 
     struct Config: Codable {
@@ -21,7 +40,7 @@ actor MCPServerManager {
     }
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         configURL = appSupport.appendingPathComponent("Executer/mcp_servers.json")
     }
 
@@ -73,31 +92,79 @@ actor MCPServerManager {
     // MARK: - Server Management
 
     private func connectServer(_ config: ServerConfig) async {
-        let client = MCPClient(name: config.name)
-        do {
-            try await client.connect(
-                command: config.command,
-                args: config.args,
-                env: config.env ?? [:]
-            )
+        let client: any MCPTransport
 
+        switch config.effectiveTransport {
+        case .stdio:
+            guard let command = config.command, let args = config.args else {
+                print("[MCP] stdio server \(config.name) missing command/args")
+                return
+            }
+            let stdioClient = MCPClient(name: config.name)
+            do {
+                try await stdioClient.connect(command: command, args: args, env: config.env ?? [:])
+            } catch {
+                print("[MCP] Failed to connect stdio \(config.name): \(error.localizedDescription)")
+                await stdioClient.disconnect()
+                return
+            }
+            client = stdioClient
+
+        case .sse:
+            guard let urlStr = config.url, let url = URL(string: urlStr) else {
+                print("[MCP] SSE server \(config.name) missing/invalid url")
+                return
+            }
+            let httpClient = MCPHTTPClient(
+                name: config.name, url: url,
+                mode: .sse, headers: config.headers ?? [:]
+            )
+            do {
+                try await httpClient.connect()
+            } catch {
+                print("[MCP] Failed to connect SSE \(config.name): \(error.localizedDescription)")
+                await httpClient.disconnect()
+                return
+            }
+            client = httpClient
+
+        case .streamableHTTP:
+            guard let urlStr = config.url, let url = URL(string: urlStr) else {
+                print("[MCP] streamable-http server \(config.name) missing/invalid url")
+                return
+            }
+            let httpClient = MCPHTTPClient(
+                name: config.name, url: url,
+                mode: .streamableHTTP, headers: config.headers ?? [:]
+            )
+            do {
+                try await httpClient.connect()
+            } catch {
+                print("[MCP] Failed to connect streamable-http \(config.name): \(error.localizedDescription)")
+                await httpClient.disconnect()
+                return
+            }
+            client = httpClient
+        }
+
+        // Discover tools (same for all transports)
+        do {
             let tools = try await client.listTools()
             let wrappers = tools.map { MCPToolWrapper(serverName: config.name, tool: $0, client: client) }
-
             clients[config.name] = client
             discoveredTools.append(contentsOf: wrappers)
 
-            print("[MCP] \(config.name): discovered \(tools.count) tools")
+            print("[MCP] \(config.name) [\(config.effectiveTransport)]: discovered \(tools.count) tools")
             for t in tools {
                 print("[MCP]   - \(t.name): \(t.description.prefix(60))")
             }
         } catch {
-            print("[MCP] Failed to connect \(config.name): \(error.localizedDescription)")
+            print("[MCP] Failed to discover tools for \(config.name): \(error.localizedDescription)")
             await client.disconnect()
         }
     }
 
-    // MARK: - Config (nonisolated since it only reads files)
+    // MARK: - Config (nonisolated since it only reads/writes files)
 
     nonisolated func loadConfig() -> [ServerConfig] {
         guard FileManager.default.fileExists(atPath: configURL.path) else { return [] }
@@ -112,7 +179,9 @@ actor MCPServerManager {
 
     nonisolated func saveConfig(_ servers: [ServerConfig]) {
         let config = Config(servers: servers)
-        if let data = try? JSONEncoder().encode(config) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(config) {
             try? FileManager.default.createDirectory(
                 at: configURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true

@@ -10,7 +10,7 @@ private func getFrontmostWindowElement() -> AXUIElement? {
     guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue) == .success else {
         return nil
     }
-    return (windowValue as! AXUIElement)
+    return (windowValue as! AXUIElement) // CFType cast always succeeds; nil handled by guard above
 }
 
 private func setWindowPosition(_ window: AXUIElement, x: CGFloat, y: CGFloat) {
@@ -166,8 +166,9 @@ struct FullscreenWindowTool: ToolDefinition {
 
         // Fallback: press the fullscreen button (green traffic light)
         var buttonValue: AnyObject?
-        if AXUIElementCopyAttributeValue(window, "AXFullScreenButton" as CFString, &buttonValue) == .success {
-            AXUIElementPerformAction(buttonValue as! AXUIElement, kAXPressAction as CFString)
+        if AXUIElementCopyAttributeValue(window, "AXFullScreenButton" as CFString, &buttonValue) == .success,
+           let bv = buttonValue {
+            AXUIElementPerformAction(bv as! AXUIElement, kAXPressAction as CFString)
             return "Toggled fullscreen via zoom button."
         }
 

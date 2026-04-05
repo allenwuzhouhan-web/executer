@@ -265,6 +265,7 @@ class ComputerUseAgent {
             messages.append(response.rawMessage)
 
             // Execute browser tools sequentially (DOM state changes between calls)
+            var consecutiveErrors = 0
             for call in toolCalls {
                 if Task.isCancelled { return "Cancelled." }
 
@@ -275,8 +276,22 @@ class ComputerUseAgent {
                 )
                 let sanitized = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
                 messages.append(ChatMessage(role: "tool", content: sanitized, tool_call_id: call.id))
-                workingMemory.addAction(action: call.function.name, result: String(result.prefix(200)))
+                workingMemory.addAction(action: call.function.name, result: String(result.prefix(400)))
                 workingMemory.lastActionDescription = AgentLoop.friendlyName(for: call.function.name)
+
+                // Track errors and inject hints
+                let lower = result.lowercased()
+                if lower.contains("error") || lower.contains("not found") || lower.contains("failed") || lower.contains("disabled") {
+                    consecutiveErrors += 1
+                } else {
+                    consecutiveErrors = 0
+                }
+            }
+
+            // If multiple tools failed, suggest debug action
+            if consecutiveErrors >= 2 {
+                messages.append(ChatMessage(role: "user", content:
+                    "[HINT: Multiple tool errors. Call browser_page_state to diagnose, then browser_read_elements to re-scan the page.]"))
             }
         }
 
@@ -468,6 +483,9 @@ extension AgentLoop {
             "browser_read_elements": "Scanning page",
             "browser_click_element": "Clicking element",
             "browser_type_element": "Typing answer",
+            "browser_page_state": "Checking page",
+            "browser_wait_for": "Waiting",
+            "browser_select_tab": "Switching tab",
         ]
         return names[toolName] ?? toolName.replacingOccurrences(of: "_", with: " ").capitalized
     }

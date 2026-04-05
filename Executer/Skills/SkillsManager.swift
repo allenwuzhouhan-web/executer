@@ -18,21 +18,21 @@ class SkillsManager {
     private var cachedPromptSection: String?
 
     private let userSkillsURL: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let dir = appSupport.appendingPathComponent("Executer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("user_skills.json")
     }()
 
     private let pendingSkillsURL: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let dir = appSupport.appendingPathComponent("Executer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("pending_skills.json")
     }()
 
     private let rejectedSkillsURL: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let dir = appSupport.appendingPathComponent("Executer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("rejected_skills.json")
@@ -40,7 +40,7 @@ class SkillsManager {
 
     /// Folder-based skill catalog: ~/Library/Application Support/Executer/skills/
     private let skillsDirectoryURL: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let dir = appSupport.appendingPathComponent("Executer/skills", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir

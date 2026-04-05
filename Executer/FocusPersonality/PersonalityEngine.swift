@@ -234,7 +234,7 @@ class PersonalityEngine {
     }
 
     private func loadUserOverrides() {
-        let configURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let configURL = URL.applicationSupportDirectory
             .appendingPathComponent("Executer/focus_personality.json")
 
         guard FileManager.default.fileExists(atPath: configURL.path) else { return }

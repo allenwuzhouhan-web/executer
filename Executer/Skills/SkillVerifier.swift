@@ -37,7 +37,7 @@ final class SkillVerifier {
     static let shared = SkillVerifier()
 
     private let verificationStorageURL: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let dir = appSupport.appendingPathComponent("Executer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("skill_verifications.json")

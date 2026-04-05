@@ -620,8 +620,8 @@ class SlideBuilder:
             srgbClr.set('val', shd_color.lstrip("#"))
             alpha_elem = etree.SubElement(srgbClr, qn('a:alpha'))
             alpha_elem.set('val', str(int(alpha * 1000)))
-        except Exception:
-            pass
+        except Exception as e:
+            log(f"[warning] Shadow effect failed: {e}")
 
     def _set_transparency(self, shape, alpha_pct):
         """Set fill transparency on a shape (0=opaque, 100=invisible)."""
@@ -633,8 +633,8 @@ class SlideBuilder:
                 color_elem = solidFill[0]
                 alpha_elem = etree.SubElement(color_elem, qn('a:alpha'))
                 alpha_elem.set('val', str(int((100 - alpha_pct) * 1000)))
-        except Exception:
-            pass
+        except Exception as e:
+            log(f"[warning] Transparency effect failed: {e}")
 
     def _add_rounded_rect(self, slide, left, top, width, height,
                           fill_color=None, shadow=None, border_color=None, border_width_pt=0):
@@ -668,8 +668,8 @@ class SlideBuilder:
                     gd = etree.SubElement(avLst, qn('a:gd'))
                     gd.set('name', 'adj')
                     gd.set('fmla', f'val {int(self.dl._corner_radius_pct / 100 * 50000)}')
-            except Exception:
-                pass
+            except Exception as e:
+                log(f"[warning] Rounded corner effect failed: {e}")
         # Shadow only when explicitly requested AND source deck uses shadows
         use_shadow = shadow if shadow is not None else getattr(self.dl, '_use_shadows', False)
         if use_shadow:
@@ -2047,8 +2047,8 @@ def advise_and_fix_spec(spec):
         content = slide.get("content", {})
 
         # ── Rule 1: Split dense content slides ──
-        # If a content slide has 7+ bullets, split into multiple slides
-        if layout == "content" and len(content.get("bullets", [])) > 6:
+        # If a slide with bullets has 7+, split into multiple slides
+        if layout in ("content", "image_left", "image_right") and len(content.get("bullets", [])) > 6:
             bullets = content["bullets"]
             title = content.get("title", "")
             # Split into chunks of 4
@@ -2165,7 +2165,7 @@ def advise_and_fix_spec(spec):
 
     # ── Rule 8: Suggest cards for short bullet lists ──
     for i, s in enumerate(fixed_slides):
-        if s["layout"] == "content":
+        if s["layout"] in ("content", "image_left", "image_right"):
             bullets = s.get("content", {}).get("bullets", [])
             if 3 <= len(bullets) <= 5:
                 avg_len = sum(len(str(b)) for b in bullets if isinstance(b, str)) / max(len(bullets), 1)
@@ -2242,8 +2242,8 @@ def create_ppt(spec, design_path=None, output_path="output.pptx"):
         dl = DesignLanguage(design_path)
 
         prs = Presentation()
-        prs.slide_width = dl["slide_width"] if isinstance(dl["slide_width"], int) else dl["slide_width"]
-        prs.slide_height = dl["slide_height"] if isinstance(dl["slide_height"], int) else dl["slide_height"]
+        prs.slide_width = Inches(dl["slide_width"]) if isinstance(dl["slide_width"], (int, float)) else dl["slide_width"]
+        prs.slide_height = Inches(dl["slide_height"]) if isinstance(dl["slide_height"], (int, float)) else dl["slide_height"]
 
         builder = SlideBuilder(prs, dl)
 

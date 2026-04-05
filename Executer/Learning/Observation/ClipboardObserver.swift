@@ -38,9 +38,12 @@ final class ClipboardObserver {
         isRunning = true
         lastChangeCount = NSPasteboard.general.changeCount
 
-        // Check clipboard every 1.5 seconds (same interval as ClipboardHistoryManager)
-        timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            self?.checkClipboard()
+        // Must schedule on main RunLoop — start() may be called from a Task/actor context
+        // whose thread has no active RunLoop, causing the timer to silently never fire.
+        DispatchQueue.main.async { [weak self] in
+            self?.timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+                self?.checkClipboard()
+            }
         }
 
         print("[ClipboardObserver] Started monitoring clipboard flows")

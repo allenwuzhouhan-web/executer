@@ -63,7 +63,7 @@ final class SummaryScheduler {
     private func saveSummary(_ summary: DailySummary) {
         // Save markdown file
         let fm = FileManager.default
-        let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer/daily_summaries", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
 

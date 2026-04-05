@@ -59,6 +59,12 @@
 		4E883725E7285E755AE673B4 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F29CE3665998EBF05BEC0B91 /* SettingsView.swift */; };
 		0B1D1155F2B42FA3B2C170F2 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5542F1BA5FDA04D0F84CAE65 /* WelcomeView.swift */; };
 		B20ED576C3597CF021754D1A /* WelcomeWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88B2D3B96C7D1B6067EDB0B4 /* WelcomeWindowController.swift */; };
+		7D3F405D925A67A91E03F30F /* CoworkerAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D906E6A27A4E5FE3027F80D /* CoworkerAgent.swift */; };
+		CF725BF3C16D656BCFED04FB /* CoworkingSuggestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3D95B23F8E90C9603FF96D /* CoworkingSuggestion.swift */; };
+		4DF83505F06F723CFF7E5A5A /* CoworkingSuggestionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEFD2E9C65733FF08F533B4 /* CoworkingSuggestionCard.swift */; };
+		6FCFBD863D408E52F8238DB0 /* CoworkingSuggestionPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC148B6845FA1E53CFBD9745 /* CoworkingSuggestionPipeline.swift */; };
+		5B927E8F07E2C3FC32E65FF5 /* InterruptionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E737F1C2F37E1AADE386C2B1 /* InterruptionPolicy.swift */; };
+		43795247FCAF4FB79ED09501 /* WorkStateEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C15F5FBC2B85A6090E3DB3C /* WorkStateEngine.swift */; };
 		13B70409796503BE1BB58FC2 /* APIKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12206B3EAF198D0E76125D8 /* APIKeyManager.swift */; };
 		B5CC8D47D0CF211A7F5E921F /* AgentLoop.swift in Sources */ = {isa = PBXBuildFile; fileRef = C48EE295FD8EDA374E2A7A64 /* AgentLoop.swift */; };
 		4C54AF64E3843676D8C0D318 /* AgentTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F7E3A8463048FBCB45E768D /* AgentTrace.swift */; };
@@ -275,6 +281,16 @@
 		15B42E9869E4C5AA445A2700 /* BackgroundAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74E9BB7D7948693857E32400 /* BackgroundAgent.swift */; };
 		789ECBFE545BE72EC12271C4 /* BackgroundAgentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93DC02ED07A0190C4548B54C /* BackgroundAgentManager.swift */; };
 		9657EC9BA342BED5A23C616C /* BackgroundAgentTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FC0AAA7698F0A868349E313 /* BackgroundAgentTools.swift */; };
+		210266954FEE445280EC67A3 /* IdleScreenDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2B16A260D7639990C9AB13 /* IdleScreenDetector.swift */; };
+		1F585D2075855B8B77CB6F5C /* NeverTouchList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80E7714AA80869BAE13DF31C /* NeverTouchList.swift */; };
+		9EB92135DBB447848BF758D0 /* OutputRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 847CB38C3DEE9E89CA220ACA /* OutputRouter.swift */; };
+		03459427A0225CC68719DD04 /* OvernightAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DEB15021B08C8902C2D322C /* OvernightAgent.swift */; };
+		B8AA8982F00DF7CDF8A3759E /* OvernightAgentTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDA074700A3BA4BD83FD156E /* OvernightAgentTools.swift */; };
+		6A1CDE5BEBB0F9CC5A910457 /* OvernightJobRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C950FB683123BAEB904A776 /* OvernightJobRunner.swift */; };
+		8F4DADF409435F51D8EC0058 /* OvernightReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E96F1514860B177630FED6 /* OvernightReport.swift */; };
+		6B3EE76789EE66C6D3623A84 /* OvernightTaskQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A712E45388FB531064A47401 /* OvernightTaskQueue.swift */; };
+		BD71B6368DD48E304269285C /* TaskDiscoveryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84F7F19ACF824171A42AB647 /* TaskDiscoveryEngine.swift */; };
+		B9568C18AE6DA9B48D23E40C /* WorkspaceConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CC86C8A9E37CE2BB7A8E294 /* WorkspaceConfig.swift */; };
 		96A566CB8CD65D9B53E8C83E /* OCRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CE91DE21ED526F939789D56 /* OCRService.swift */; };
 		922D48385296EBF97771412B /* ScreenCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE2F6FA16C969B77A2ABA0A /* ScreenCapture.swift */; };
 		4F8CB8C680DD55CCBE650715 /* VisionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B69563A7BCCAB938DF69B468 /* VisionEngine.swift */; };
@@ -447,6 +463,12 @@
 		F29CE3665998EBF05BEC0B91 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		5542F1BA5FDA04D0F84CAE65 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		88B2D3B96C7D1B6067EDB0B4 /* WelcomeWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeWindowController.swift; sourceTree = "<group>"; };
+		2D906E6A27A4E5FE3027F80D /* CoworkerAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoworkerAgent.swift; sourceTree = "<group>"; };
+		CC3D95B23F8E90C9603FF96D /* CoworkingSuggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoworkingSuggestion.swift; sourceTree = "<group>"; };
+		ADEFD2E9C65733FF08F533B4 /* CoworkingSuggestionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoworkingSuggestionCard.swift; sourceTree = "<group>"; };
+		FC148B6845FA1E53CFBD9745 /* CoworkingSuggestionPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoworkingSuggestionPipeline.swift; sourceTree = "<group>"; };
+		E737F1C2F37E1AADE386C2B1 /* InterruptionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterruptionPolicy.swift; sourceTree = "<group>"; };
+		8C15F5FBC2B85A6090E3DB3C /* WorkStateEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkStateEngine.swift; sourceTree = "<group>"; };
 		A12206B3EAF198D0E76125D8 /* APIKeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeyManager.swift; sourceTree = "<group>"; };
 		C48EE295FD8EDA374E2A7A64 /* AgentLoop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLoop.swift; sourceTree = "<group>"; };
 		1F7E3A8463048FBCB45E768D /* AgentTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTrace.swift; sourceTree = "<group>"; };
@@ -663,6 +685,16 @@
 		74E9BB7D7948693857E32400 /* BackgroundAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundAgent.swift; sourceTree = "<group>"; };
 		93DC02ED07A0190C4548B54C /* BackgroundAgentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundAgentManager.swift; sourceTree = "<group>"; };
 		3FC0AAA7698F0A868349E313 /* BackgroundAgentTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundAgentTools.swift; sourceTree = "<group>"; };
+		DD2B16A260D7639990C9AB13 /* IdleScreenDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdleScreenDetector.swift; sourceTree = "<group>"; };
+		80E7714AA80869BAE13DF31C /* NeverTouchList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeverTouchList.swift; sourceTree = "<group>"; };
+		847CB38C3DEE9E89CA220ACA /* OutputRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputRouter.swift; sourceTree = "<group>"; };
+		1DEB15021B08C8902C2D322C /* OvernightAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OvernightAgent.swift; sourceTree = "<group>"; };
+		DDA074700A3BA4BD83FD156E /* OvernightAgentTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OvernightAgentTools.swift; sourceTree = "<group>"; };
+		2C950FB683123BAEB904A776 /* OvernightJobRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OvernightJobRunner.swift; sourceTree = "<group>"; };
+		83E96F1514860B177630FED6 /* OvernightReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OvernightReport.swift; sourceTree = "<group>"; };
+		A712E45388FB531064A47401 /* OvernightTaskQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OvernightTaskQueue.swift; sourceTree = "<group>"; };
+		84F7F19ACF824171A42AB647 /* TaskDiscoveryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDiscoveryEngine.swift; sourceTree = "<group>"; };
+		0CC86C8A9E37CE2BB7A8E294 /* WorkspaceConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceConfig.swift; sourceTree = "<group>"; };
 		3CE91DE21ED526F939789D56 /* OCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRService.swift; sourceTree = "<group>"; };
 		DEE2F6FA16C969B77A2ABA0A /* ScreenCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCapture.swift; sourceTree = "<group>"; };
 		B69563A7BCCAB938DF69B468 /* VisionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionEngine.swift; sourceTree = "<group>"; };
@@ -844,6 +876,7 @@
 				268D6FC7D0A460CC9B9450CB /* Automation */,
 				2760484CD8E929249439960A /* Browser */,
 				7254E2FA36742DBF3E2E1A62 /* ComputerUse */,
+				FE7EB49A13683269D9665F5B /* Coworking */,
 				83C986504F5AE4D537430AD5 /* Evaluation */,
 				1DAD2880CC9BB10D6AE37B5B /* Executors */,
 				E65225E2E01012565F050D40 /* FocusPersonality */,
@@ -886,6 +919,16 @@
 				74E9BB7D7948693857E32400 /* BackgroundAgent.swift */,
 				93DC02ED07A0190C4548B54C /* BackgroundAgentManager.swift */,
 				3FC0AAA7698F0A868349E313 /* BackgroundAgentTools.swift */,
+				DD2B16A260D7639990C9AB13 /* IdleScreenDetector.swift */,
+				80E7714AA80869BAE13DF31C /* NeverTouchList.swift */,
+				847CB38C3DEE9E89CA220ACA /* OutputRouter.swift */,
+				1DEB15021B08C8902C2D322C /* OvernightAgent.swift */,
+				DDA074700A3BA4BD83FD156E /* OvernightAgentTools.swift */,
+				2C950FB683123BAEB904A776 /* OvernightJobRunner.swift */,
+				83E96F1514860B177630FED6 /* OvernightReport.swift */,
+				A712E45388FB531064A47401 /* OvernightTaskQueue.swift */,
+				84F7F19ACF824171A42AB647 /* TaskDiscoveryEngine.swift */,
+				0CC86C8A9E37CE2BB7A8E294 /* WorkspaceConfig.swift */,
 			);
 			path = Agents;
 			sourceTree = "<group>";
@@ -966,6 +1009,19 @@
 				30A39B586F2467D16116018E /* VideoEditProfile.swift */,
 			);
 			path = TaskProfiles;
+			sourceTree = "<group>";
+		};
+		FE7EB49A13683269D9665F5B /* Coworking */ = {
+			isa = PBXGroup;
+			children = (
+				2D906E6A27A4E5FE3027F80D /* CoworkerAgent.swift */,
+				CC3D95B23F8E90C9603FF96D /* CoworkingSuggestion.swift */,
+				ADEFD2E9C65733FF08F533B4 /* CoworkingSuggestionCard.swift */,
+				FC148B6845FA1E53CFBD9745 /* CoworkingSuggestionPipeline.swift */,
+				E737F1C2F37E1AADE386C2B1 /* InterruptionPolicy.swift */,
+				8C15F5FBC2B85A6090E3DB3C /* WorkStateEngine.swift */,
+			);
+			path = Coworking;
 			sourceTree = "<group>";
 		};
 		83C986504F5AE4D537430AD5 /* Evaluation */ = {
@@ -1783,6 +1839,12 @@
 				4E883725E7285E755AE673B4 /* SettingsView.swift in Sources */,
 				0B1D1155F2B42FA3B2C170F2 /* WelcomeView.swift in Sources */,
 				B20ED576C3597CF021754D1A /* WelcomeWindowController.swift in Sources */,
+				7D3F405D925A67A91E03F30F /* CoworkerAgent.swift in Sources */,
+				CF725BF3C16D656BCFED04FB /* CoworkingSuggestion.swift in Sources */,
+				4DF83505F06F723CFF7E5A5A /* CoworkingSuggestionCard.swift in Sources */,
+				6FCFBD863D408E52F8238DB0 /* CoworkingSuggestionPipeline.swift in Sources */,
+				5B927E8F07E2C3FC32E65FF5 /* InterruptionPolicy.swift in Sources */,
+				43795247FCAF4FB79ED09501 /* WorkStateEngine.swift in Sources */,
 				13B70409796503BE1BB58FC2 /* APIKeyManager.swift in Sources */,
 				B5CC8D47D0CF211A7F5E921F /* AgentLoop.swift in Sources */,
 				4C54AF64E3843676D8C0D318 /* AgentTrace.swift in Sources */,
@@ -1999,6 +2061,16 @@
 				15B42E9869E4C5AA445A2700 /* BackgroundAgent.swift in Sources */,
 				789ECBFE545BE72EC12271C4 /* BackgroundAgentManager.swift in Sources */,
 				9657EC9BA342BED5A23C616C /* BackgroundAgentTools.swift in Sources */,
+				210266954FEE445280EC67A3 /* IdleScreenDetector.swift in Sources */,
+				1F585D2075855B8B77CB6F5C /* NeverTouchList.swift in Sources */,
+				9EB92135DBB447848BF758D0 /* OutputRouter.swift in Sources */,
+				03459427A0225CC68719DD04 /* OvernightAgent.swift in Sources */,
+				B8AA8982F00DF7CDF8A3759E /* OvernightAgentTools.swift in Sources */,
+				6A1CDE5BEBB0F9CC5A910457 /* OvernightJobRunner.swift in Sources */,
+				8F4DADF409435F51D8EC0058 /* OvernightReport.swift in Sources */,
+				6B3EE76789EE66C6D3623A84 /* OvernightTaskQueue.swift in Sources */,
+				BD71B6368DD48E304269285C /* TaskDiscoveryEngine.swift in Sources */,
+				B9568C18AE6DA9B48D23E40C /* WorkspaceConfig.swift in Sources */,
 				96A566CB8CD65D9B53E8C83E /* OCRService.swift in Sources */,
 				922D48385296EBF97771412B /* ScreenCapture.swift in Sources */,
 				4F8CB8C680DD55CCBE650715 /* VisionEngine.swift in Sources */,

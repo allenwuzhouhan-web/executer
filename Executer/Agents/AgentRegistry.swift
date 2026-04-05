@@ -15,7 +15,7 @@ final class AgentRegistry {
     private(set) var keywordIndex: [String: Set<String>] = [:]  // agentId → lowercased keywords
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         agentsDir = appSupport.appendingPathComponent("Executer/agents", isDirectory: true)
         try? FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
 
@@ -153,7 +153,7 @@ final class AgentRegistry {
     // MARK: - Built-in Export
 
     private func exportBuiltInProfilesIfNeeded() {
-        let builtInNames = ["general", "chem", "dev", "daily"]
+        let builtInNames = ["general", "chem", "dev", "daily", "coworking"]
         let fm = FileManager.default
 
         for name in builtInNames {
@@ -302,6 +302,41 @@ final class AgentRegistry {
                     "mom", "dad", "妈", "爸", "给", "发消息", "提醒", "天气",
                     "日程", "日历", "闹钟", "新闻"
                 ]
+            )
+
+        case "coworking":
+            return AgentProfile(
+                id: "coworking",
+                displayName: "Coworker",
+                systemPromptOverride: """
+                    You are a proactive coworking assistant. The user is actively working and you \
+                    are observing their activity to offer contextual help at natural pause moments.
+
+                    RULES:
+                    - Be extremely concise. One sentence per suggestion.
+                    - Never repeat a suggestion the user dismissed.
+                    - Phrase suggestions as questions: "Want me to..." not "I will..."
+                    - If the user accepts, execute efficiently with minimal tool calls.
+                    - Respect focus mode — in Work mode, only suggest high-value items.
+                    - Never suggest anything during presentations or screen sharing.
+                    """,
+                allowedToolIDs: [
+                    "recall_memories", "save_memory",
+                    "query_calendar_events", "create_reminder", "query_reminders",
+                    "read_file", "list_directory", "find_files",
+                    "open_file", "reveal_in_finder",
+                    "get_clipboard_text", "set_clipboard_text",
+                    "fetch_url_content", "instant_search",
+                    "show_notification",
+                    "request_tools"
+                ],
+                memoryNamespace: "coworking",
+                modelOverride: nil,
+                maxTokenBudget: 500,
+                color: "#FFB347",
+                icon: "person.2.fill",
+                isBuiltIn: true,
+                keywords: []  // Not command-routed — this is a proactive-only agent
             )
 
         default:

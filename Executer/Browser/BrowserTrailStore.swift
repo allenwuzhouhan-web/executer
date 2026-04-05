@@ -30,7 +30,7 @@ final class BrowserTrailStore: ObservableObject {
     private static let maxEntries = 500
 
     private static var persistenceURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("browser_trails.json")

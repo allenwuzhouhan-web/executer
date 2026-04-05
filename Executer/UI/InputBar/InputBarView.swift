@@ -121,25 +121,25 @@ struct InputBarView: View {
             }
 
             // Prompt label + result bubble
-            if case .result(let message) = appState.inputBarState {
+            if case .result(let message, let trace) = appState.inputBarState {
                 promptLabel
-                ResultBubbleView(message: message, isError: false, onDismiss: { appState.hideInputBar() })
+                ResultBubbleView(message: message, isError: false, onDismiss: { appState.hideInputBar() }, trace: trace)
                     .liquidGlassID("result", in: glassNS)
                     .liquidGlassMaterialize()
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             // Rich result cards (date, event, news, list)
-            if case .richResult(let result, let raw) = appState.inputBarState {
+            if case .richResult(let result, let raw, _) = appState.inputBarState {
                 promptLabel
                 RichResultView(result: result, rawMessage: raw, onDismiss: { appState.hideInputBar() })
                     .liquidGlassID("richResult", in: glassNS)
                     .liquidGlassMaterialize()
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            if case .error(let message) = appState.inputBarState {
+            if case .error(let message, let trace) = appState.inputBarState {
                 promptLabel
-                ResultBubbleView(message: message, isError: true, onDismiss: { appState.hideInputBar() })
+                ResultBubbleView(message: message, isError: true, onDismiss: { appState.hideInputBar() }, trace: trace)
                     .liquidGlassID("error", in: glassNS)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -147,6 +147,12 @@ struct InputBarView: View {
             // Health check card
             if case .healthCard(let message) = appState.inputBarState {
                 healthCardBubble(message: message)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            // Coworking suggestion card
+            if case .coworkingSuggestion(let suggestion) = appState.inputBarState {
+                CoworkingSuggestionCard(suggestion: suggestion)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
@@ -309,12 +315,35 @@ struct InputBarView: View {
 
     @ViewBuilder
     private func healthCardBubble(message: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "heart.circle.fill")
-                .foregroundStyle(.teal)
-                .font(.system(size: 12, weight: .semibold))
-                .padding(.top, 2)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 8) {
+                Image(systemName: "heart.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.teal, .green], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
 
+                Text("Health Check")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Button { appState.hideInputBar() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 18, height: 18)
+                        .liquidGlassCircle()
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 11)
+            .padding(.bottom, 8)
+
+            // Body
             ScrollView(.vertical, showsIndicators: false) {
                 Text(message)
                     .font(.system(size: 12, weight: .regular, design: .rounded))
@@ -322,11 +351,11 @@ struct InputBarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 200)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .liquidGlass(cornerRadius: 12, tint: .teal)
-        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+        .liquidGlass(cornerRadius: 14, tint: .teal)
+        .shadow(color: .teal.opacity(0.06), radius: 8, y: 4)
         .padding(.top, 6)
     }
 }

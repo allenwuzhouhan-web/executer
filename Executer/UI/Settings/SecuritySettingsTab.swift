@@ -228,7 +228,7 @@ struct SecuritySettingsTab: View {
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                 let data = try encoder.encode(allEntries)
 
-                let dir = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+                let dir = URL.desktopDirectory
                 let filename = "executer_audit_\(ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")).json"
                 let fileURL = dir.appendingPathComponent(filename)
                 try data.write(to: fileURL, options: .atomic)

@@ -106,7 +106,7 @@ struct CreatePresentationTool: ToolDefinition {
         )
 
         // Find the PPT engine
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let execDir = appSupport.appendingPathComponent("Executer")
         let enginePath = execDir.appendingPathComponent("ppt_engine.py")
 
@@ -255,7 +255,7 @@ struct ExtractPPTDesignTool: ToolDefinition {
             return "Error: File not found at \(path)"
         }
 
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let execDir = appSupport.appendingPathComponent("Executer")
         let extractorPath = execDir.appendingPathComponent("ppt_design_extractor.py")
 
@@ -342,7 +342,7 @@ struct CreateWordDocumentTool: ToolDefinition {
             filename.hasSuffix(".docx") ? filename : filename + ".docx"
         )
 
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let execDir = appSupport.appendingPathComponent("Executer")
         let enginePath = execDir.appendingPathComponent("docx_engine.py")
 
@@ -422,7 +422,7 @@ struct CreateSpreadsheetTool: ToolDefinition {
             filename.hasSuffix(".xlsx") ? filename : filename + ".xlsx"
         )
 
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let execDir = appSupport.appendingPathComponent("Executer")
         let enginePath = execDir.appendingPathComponent("xlsx_engine.py")
 
@@ -475,7 +475,7 @@ enum PPTExecutor {
     }
 
     static func findPython() -> String {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let venvPython = appSupport.appendingPathComponent("Executer/python_env/bin/python3").path
 
         let candidates = [

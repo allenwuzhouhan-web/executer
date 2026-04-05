@@ -60,7 +60,7 @@ final class PPTReflectionEngine {
     // MARK: - Design Extraction
 
     private func extractDesign(from pptxPath: String) async -> [String: Any]? {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let execDir = appSupport.appendingPathComponent("Executer")
         let extractorPath = execDir.appendingPathComponent("ppt_design_extractor.py")
 
@@ -86,7 +86,7 @@ final class PPTReflectionEngine {
     // MARK: - Reference Loading
 
     private func loadReferenceDesign() -> [String: Any]? {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let execDir = appSupport.appendingPathComponent("Executer")
 
         // Try per-file designs first (best quality trained profile)

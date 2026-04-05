@@ -62,7 +62,7 @@ class MemoryManager {
     private let legacyStorageURL: URL
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let baseDir = appSupport.appendingPathComponent("Executer", isDirectory: true)
         memoriesDir = baseDir.appendingPathComponent("memories", isDirectory: true)
         legacyStorageURL = baseDir.appendingPathComponent("memories.json")

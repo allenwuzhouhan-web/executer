@@ -65,6 +65,7 @@ enum ScreenReader {
             return nil
         }
 
+        // CFType cast always succeeds — safety comes from the nil guard above
         let windowAX = windowElement as! AXUIElement
         let windowTitle = getStringAttribute(windowAX, kAXTitleAttribute) ?? ""
 

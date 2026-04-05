@@ -112,12 +112,10 @@ final class FileMonitor {
     func stop() {
         isRunning = false
         for source in sources {
-            source.cancel()
+            source.cancel()  // cancel handler calls close(fd)
         }
         sources.removeAll()
-        for fd in fileDescriptors {
-            close(fd)
-        }
+        // Don't close fds here — the cancel handlers do it (double-close corrupts other fds)
         fileDescriptors.removeAll()
         print("[FileMonitor] Stopped")
     }

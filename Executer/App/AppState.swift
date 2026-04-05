@@ -267,10 +267,16 @@ class AppState: ObservableObject {
         inputBarPanel?.showBar()
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
 
-        // Check for interrupted agent session (takes priority over thought recall)
+        // Check for interrupted agent session (takes priority over everything)
         if pendingResumeSession != nil {
             checkForInterruptedAgent()
             return  // Don't check thoughts/nudges — interrupted session is showing
+        }
+
+        // Check for pending coworking suggestion (takes priority over thought recall)
+        if let suggestion = CoworkerAgent.shared.pendingSuggestion() {
+            inputBarState = .coworkingSuggestion(suggestion)
+            return
         }
 
         // Check for abandoned thoughts (async — only shows if user hasn't started typing)

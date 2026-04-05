@@ -31,6 +31,8 @@ struct ThoughtRecallCard: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.tertiary)
+                        .frame(width: 18, height: 18)
+                        .liquidGlassCircle()
                 }
                 .buttonStyle(.plain)
             }
@@ -87,15 +89,8 @@ struct ThoughtRecallCard: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background {
-            VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.purple.opacity(0.2), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+        .liquidGlass(cornerRadius: 12, tint: .purple)
+        .shadow(color: .purple.opacity(0.06), radius: 8, y: 4)
         .padding(.top, 6)
         .task {
             // Auto-dismiss after 10 seconds if user hasn't interacted

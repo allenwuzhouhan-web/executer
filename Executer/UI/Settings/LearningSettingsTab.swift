@@ -22,7 +22,7 @@ struct LearningSettingsTab: View {
                     }
                 Text("When enabled, Executer silently observes your app usage to learn your workflows and preferences. All data stays local.")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             } header: {
                 Label("Learning Engine", systemImage: "brain")
             }
@@ -42,11 +42,11 @@ struct LearningSettingsTab: View {
                         Spacer()
                         Text(AdaptiveSampling.shared.statusDescription())
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     Text("Sampling is adaptive: aggressive during the first week to learn your workflows, then relaxes over time. Key apps (PowerPoint, Keynote) get boosted sampling automatically.")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             } header: {
                 Label("Observation", systemImage: "eye")
@@ -59,50 +59,50 @@ struct LearningSettingsTab: View {
                     }
                 Text("When ON, your learned patterns are included in AI prompts for better answers. When OFF, learning still observes but doesn't affect responses (saves tokens).")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                             .font(.caption)
                         Text("Observation (screen, apps, files, clipboard)")
                         Spacer()
                         Text("FREE")
                             .font(.caption)
                             .fontWeight(.bold)
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                     }
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                             .font(.caption)
                         Text("Pattern extraction & session detection")
                         Spacer()
                         Text("FREE")
                             .font(.caption)
                             .fontWeight(.bold)
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                     }
                     HStack {
                         Image(systemName: "info.circle.fill")
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                             .font(.caption)
                         Text("Context injection per AI prompt")
                         Spacer()
                         Text("~$0.002")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     HStack {
                         Image(systemName: "dollarsign.circle")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                             .font(.caption)
                         Text("Learning overhead today")
                         Spacer()
                         Text("\(CostTracker.shared.learningTokensToday) tokens")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .font(.caption)
@@ -113,7 +113,7 @@ struct LearningSettingsTab: View {
             Section {
                 if blockedApps.isEmpty {
                     Text("No apps blocked — all apps are observed.")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 } else {
                     ForEach(blockedApps, id: \.self) { bundleId in
                         HStack {
@@ -125,13 +125,13 @@ struct LearningSettingsTab: View {
                                 blockedApps = AppAllowlist.blockedApps()
                             }
                             .buttonStyle(.borderless)
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                         }
                     }
                 }
                 Text("Block apps by bundle ID to prevent learning from observing them.")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
             } header: {
                 Label("Blocked Apps", systemImage: "hand.raised")
             }
@@ -140,18 +140,18 @@ struct LearningSettingsTab: View {
                 let apps = LearningManager.shared.learnedApps
                 if apps.isEmpty {
                     Text("No data collected yet. Use your Mac normally and check back later.")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 } else {
                     ForEach(apps, id: \.name) { app in
                         HStack {
                             Text(app.name)
                             Spacer()
                             Text("\(app.patternCount) patterns")
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             Text("·")
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             Text("\(app.actionCount) actions")
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -187,7 +187,7 @@ struct LearningSettingsTab: View {
                     Text("• You can delete everything at any time")
                 }
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             }
 
             Section {

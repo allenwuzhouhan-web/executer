@@ -72,7 +72,7 @@ final class TrustManager {
     // MARK: - Persistence
 
     private var fileURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer", isDirectory: true)
         return dir.appendingPathComponent("trust_levels.json")
     }

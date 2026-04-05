@@ -239,7 +239,7 @@ struct EmailBriefingSchedule: Codable, Identifiable {
 
 enum EmailBriefingStore {
     private static var storageURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("email_briefings.json")

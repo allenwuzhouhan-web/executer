@@ -222,7 +222,7 @@ enum IntegrityChecker {
         let logEntry = "[\(timestamp)] INTEGRITY FAILURE: \(reason)\n"
 
         // Write to a plaintext log (not encrypted — encryption may be compromised)
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let logFile = dir.appendingPathComponent("integrity_failures.log")

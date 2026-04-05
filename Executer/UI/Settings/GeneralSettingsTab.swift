@@ -64,12 +64,12 @@ struct AlarmSettingsSection: View {
 
                 Text("Choose the sound that plays when an alarm goes off.")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
 
                 ForEach(systemSounds, id: \.self) { sound in
                     HStack {
                         Image(systemName: selectedSound == sound ? "checkmark.circle.fill" : "circle")
-                            .foregroundColor(selectedSound == sound ? .accentColor : .secondary)
+                            .foregroundStyle(selectedSound == sound ? Color.accentColor : .secondary)
                             .font(.system(size: 16))
 
                         Text(sound)
@@ -80,7 +80,7 @@ struct AlarmSettingsSection: View {
                         Button(action: { previewSound(sound) }) {
                             Image(systemName: "speaker.wave.2")
                                 .font(.system(size: 12))
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
                     }

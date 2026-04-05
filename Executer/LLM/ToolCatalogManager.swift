@@ -61,8 +61,8 @@ final class ToolCatalogManager {
             for example in guide.examples.prefix(maxExamples) {
                 lines.append("  Example: \"\(example.userRequest)\" → \(example.toolChain.joined(separator: " → "))")
             }
-            if !guide.commonMistakes.isEmpty && isWeakerModel {
-                lines.append("  Avoid: \(guide.commonMistakes.first!)")
+            if let firstMistake = guide.commonMistakes.first, isWeakerModel {
+                lines.append("  Avoid: \(firstMistake)")
             }
         }
 

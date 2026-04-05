@@ -117,11 +117,13 @@ actor TextSnapshotService {
         let windowTitle = await MainActor.run {
             let appElement = AXUIElementCreateApplication(appInfo.pid)
             var windowValue: AnyObject?
-            guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue) == .success else {
+            guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue) == .success,
+                  let wv = windowValue else {
                 return nil as String?
             }
             var titleValue: AnyObject?
-            guard AXUIElementCopyAttributeValue(windowValue as! AXUIElement, kAXTitleAttribute as CFString, &titleValue) == .success else {
+            // CFType cast always succeeds — safety comes from the nil guard above
+            guard AXUIElementCopyAttributeValue(wv as! AXUIElement, kAXTitleAttribute as CFString, &titleValue) == .success else {
                 return nil as String?
             }
             return titleValue as? String
@@ -152,6 +154,7 @@ actor TextSnapshotService {
         let focusResult = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedValue)
         guard focusResult == .success, let focused = focusedValue else { return nil }
 
+        // CFType cast always succeeds — safety comes from the nil guard above
         let element = focused as! AXUIElement
 
         // Check role — only capture text inputs

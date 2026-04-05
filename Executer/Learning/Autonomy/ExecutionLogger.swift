@@ -30,7 +30,7 @@ final class ExecutionLogger {
     }
 
     private var fileURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer", isDirectory: true)
         return dir.appendingPathComponent("execution_log.json")
     }

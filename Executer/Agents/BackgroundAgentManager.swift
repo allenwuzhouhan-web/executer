@@ -10,7 +10,7 @@ class BackgroundAgentManager: ObservableObject {
 
     /// Path to the persistence file.
     private static var persistenceURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let dir = appSupport.appendingPathComponent("Executer")
         return dir.appendingPathComponent("background_agents.json")
     }

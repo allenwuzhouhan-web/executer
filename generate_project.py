@@ -266,6 +266,7 @@ frameworks = [
     ("IOBluetooth.framework", "System/Library/Frameworks"),
     ("AVFoundation.framework", "System/Library/Frameworks"),
     ("Vision.framework", "System/Library/Frameworks"),
+    ("Speech.framework", "System/Library/Frameworks"),
 ]
 fw_refs = {}
 fw_builds = {}

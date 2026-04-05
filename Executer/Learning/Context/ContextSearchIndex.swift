@@ -22,7 +22,7 @@ final class ContextSearchIndex {
         index.removeAll()
 
         let fm = FileManager.default
-        let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer/daily_summaries", isDirectory: true)
 
         guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }

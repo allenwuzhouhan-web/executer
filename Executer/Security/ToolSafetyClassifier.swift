@@ -78,6 +78,7 @@ enum ToolSafetyClassifier {
         // Chrome CDP connection
         "browser_connect_chrome": .normal, "browser_disconnect_chrome": .normal,
         "browser_read_elements": .safe, "browser_click_element": .normal, "browser_type_element": .normal,
+        "browser_page_state": .safe, "browser_wait_for": .safe, "browser_select_tab": .normal,
         // Browser Intelligence
         "browser_execute_js": .elevated,  // Arbitrary JS execution
         "browser_read_dom": .safe, "browser_get_console": .safe, "browser_inspect_element": .safe,

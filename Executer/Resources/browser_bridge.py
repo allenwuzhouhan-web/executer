@@ -593,7 +593,8 @@ async def handle_browser_intercept_network(params: dict) -> dict:
         async def on_resp(response):
             if not _network_intercepting: return
             h = {k: ("[REDACTED]" if k.lower() in REDACTED_HEADERS else v[:200]) for k, v in (response.headers or {}).items()}
-            _network_log.append({"url": response.url[:200], "status": response.status, "method": response.request.method, "headers": h})
+            req = response.request
+            _network_log.append({"url": response.url[:200], "status": response.status, "method": req.method if req else "UNKNOWN", "headers": h})
             if len(_network_log) > 50: _network_log.pop(0)
         _network_listener = on_resp
         page.on("response", on_resp)
@@ -695,136 +696,249 @@ async def handle_connect_chrome(params: dict) -> dict:
 
 
 async def handle_read_elements(params: dict) -> dict:
-    """Read all interactive elements with indices for reliable clicking."""
+    """Read all interactive elements with indices, state, and visibility info."""
     page = await _get_pw_page()
     scope = params.get("scope", "body")
+    include_iframes = params.get("include_iframes", True)
 
+    # Comprehensive element reader — includes disabled/checked/readonly state,
+    # visibility verification, iframe traversal, and form values.
     js = """(function() {
         var root = document.querySelector('%s');
-        if (!root) return 'ERR:Scope not found';
-        var sels = 'button, input, select, textarea, a[href], [role="button"], [role="option"], [role="menuitem"], [role="radio"], [role="checkbox"], [role="link"], [onclick], [tabindex="0"], label[for]';
-        var els = root.querySelectorAll(sels);
+        if (!root) return JSON.stringify({error: 'Scope not found'});
+        var sels = 'button, input, select, textarea, a[href], [role="button"], [role="option"], [role="menuitem"], [role="radio"], [role="checkbox"], [role="link"], [onclick], [tabindex="0"], label[for], [contenteditable="true"]';
         var results = [];
-        for (var i = 0; i < els.length && i < 120; i++) {
-            var el = els[i];
+        var idx = 0;
+
+        function isVisible(el) {
             var rect = el.getBoundingClientRect();
-            if (rect.width === 0 && rect.height === 0) continue;
-            if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
-            var text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || el.title || '').trim().substring(0, 100);
-            var tag = el.tagName.toLowerCase();
-            var type = el.type || el.getAttribute('role') || '';
-            el.setAttribute('data-exec-idx', i);
-            results.push(i + '|' + tag + '|' + type + '|' + text + '|' + Math.round(rect.left) + ',' + Math.round(rect.top) + ',' + Math.round(rect.width) + 'x' + Math.round(rect.height));
+            if (rect.width === 0 && rect.height === 0) return false;
+            var style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden') return false;
+            if (parseFloat(style.opacity) < 0.1) return false;
+            if (style.pointerEvents === 'none' && el.tagName !== 'LABEL') return false;
+            return true;
         }
-        return results.join('\\n');
-    })()""" % scope.replace("'", "\\'")
+
+        function processElements(doc, prefix) {
+            var els = doc.querySelectorAll(sels);
+            for (var i = 0; i < els.length && idx < 150; i++) {
+                var el = els[i];
+                if (!isVisible(el)) continue;
+                var rect = el.getBoundingClientRect();
+                var text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || el.title || '').trim().substring(0, 120);
+                var tag = el.tagName.toLowerCase();
+                var type = el.type || el.getAttribute('role') || '';
+
+                // State flags
+                var flags = [];
+                if (el.disabled || el.getAttribute('aria-disabled') === 'true') flags.push('DISABLED');
+                if (el.readOnly) flags.push('readonly');
+                if (el.checked) flags.push('checked');
+                if (el.getAttribute('aria-expanded') === 'true') flags.push('expanded');
+                if (el.getAttribute('aria-selected') === 'true') flags.push('selected');
+                if (el.required) flags.push('required');
+
+                // For inputs, show current value
+                var val = '';
+                if ((tag === 'input' || tag === 'textarea') && el.value) {
+                    val = el.value.substring(0, 40);
+                }
+                if (tag === 'select' && el.selectedIndex >= 0) {
+                    val = (el.options[el.selectedIndex].text || '').substring(0, 40);
+                }
+
+                el.setAttribute('data-exec-idx', idx);
+                var pos = Math.round(rect.left) + ',' + Math.round(rect.top) + ',' + Math.round(rect.width) + 'x' + Math.round(rect.height);
+                results.push({i: idx, tag: tag, type: type, text: text, pos: pos, flags: flags.join(','), val: val, prefix: prefix || ''});
+                idx++;
+            }
+        }
+
+        processElements(root, '');
+
+        // Traverse iframes
+        if (%s) {
+            var iframes = root.querySelectorAll('iframe');
+            for (var f = 0; f < iframes.length && f < 5; f++) {
+                try {
+                    var fdoc = iframes[f].contentDocument || iframes[f].contentWindow.document;
+                    if (fdoc) processElements(fdoc, 'iframe' + f + ':');
+                } catch(e) { /* cross-origin iframe, skip */ }
+            }
+        }
+
+        return JSON.stringify({elements: results, url: window.location.href, title: document.title});
+    })()""" % (scope.replace("'", "\\'"), 'true' if include_iframes else 'false')
 
     try:
         raw = await page.evaluate(js)
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Read elements error: {e}"}], "isError": True}
 
-    if isinstance(raw, str) and raw.startswith("ERR:"):
-        return {"content": [{"type": "text", "text": raw[4:]}], "isError": True}
+    # Parse JSON result
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        data = None
 
-    if not raw:
+    if isinstance(data, dict) and "error" in data:
+        return {"content": [{"type": "text", "text": data["error"]}], "isError": True}
+
+    if not data or not data.get("elements"):
         return {"content": [{"type": "text", "text": "No interactive elements found on page."}], "isError": False}
 
-    lines = raw.strip().split('\n')
-    output = [f"Interactive elements ({len(lines)}):"]
-    output.append("idx | tag    | type   | text                    | position")
-    output.append("--- | ------ | ------ | ----------------------- | --------")
-    for line in lines:
-        parts = line.split('|', 4)
-        if len(parts) < 5:
-            continue
-        parts = [p.strip() for p in parts]
-        idx = parts[0].ljust(3)
-        tag = parts[1].ljust(6)
-        tp = parts[2][:6].ljust(6)
-        text = parts[3][:23].ljust(23)
-        output.append(f"{idx} | {tag} | {tp} | {text} | {parts[4]}")
+    elements = data["elements"]
+    page_url = data.get("url", "")
+    page_title = data.get("title", "")
+
+    output = [f"Page: {page_title} ({page_url})"]
+    output.append(f"Interactive elements ({len(elements)}):")
+    output.append("idx | tag    | type   | text                         | state       | value")
+    output.append("--- | ------ | ------ | ---------------------------- | ----------- | -----")
+    for el in elements:
+        prefix = el.get("prefix", "")
+        idx_str = (prefix + str(el["i"])).ljust(3)
+        tag = el["tag"][:6].ljust(6)
+        tp = el["type"][:6].ljust(6)
+        text = el["text"][:28].ljust(28)
+        flags = el.get("flags", "")[:11].ljust(11)
+        val = el.get("val", "")[:20]
+        output.append(f"{idx_str} | {tag} | {tp} | {text} | {flags} | {val}")
 
     return {"content": [{"type": "text", "text": "\n".join(output)}], "isError": False}
 
 
 async def handle_click_element(params: dict) -> dict:
-    """Click an element by index (from read_elements), text, or CSS selector."""
+    """Click element with visibility verification, full event dispatch, and effect detection."""
     page = await _get_pw_page()
     index = params.get("index")
     text = params.get("text")
     selector = params.get("selector")
+    wait_ms = params.get("wait_after", 300)
+
+    # Shared robust click JS — checks visibility, dispatches full event chain,
+    # detects page changes (URL, new modals, DOM mutations).
+    CLICK_JS = """
+    (function(el) {
+        // 1. Visibility check
+        var rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return {error: 'Element has zero size (hidden)'};
+        var style = window.getComputedStyle(el);
+        if (style.display === 'none') return {error: 'Element has display:none'};
+        if (style.visibility === 'hidden') return {error: 'Element has visibility:hidden'};
+        if (parseFloat(style.opacity) < 0.1) return {error: 'Element has opacity near 0'};
+        if (style.pointerEvents === 'none') return {error: 'Element has pointer-events:none'};
+
+        // 2. Disabled check
+        if (el.disabled || el.getAttribute('aria-disabled') === 'true')
+            return {error: 'Element is DISABLED. Check if prerequisites are met.'};
+
+        // 3. Snapshot pre-click state
+        var urlBefore = window.location.href;
+        var modalsBefore = document.querySelectorAll('[role="dialog"], [role="alertdialog"], .modal, .popup').length;
+
+        // 4. Scroll into view and click with full event chain
+        el.scrollIntoView({block: 'center', behavior: 'instant'});
+        el.focus();
+        var cx = rect.left + rect.width / 2;
+        var cy = rect.top + rect.height / 2;
+        el.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, clientX: cx, clientY: cy}));
+        el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, clientX: cx, clientY: cy}));
+        el.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, clientX: cx, clientY: cy}));
+        el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, clientX: cx, clientY: cy}));
+        el.click();
+
+        // 5. Detect effects
+        var tag = el.tagName.toLowerCase();
+        var t = (el.innerText || el.value || '').trim().substring(0, 60);
+        var effects = [];
+        if (window.location.href !== urlBefore) effects.push('page navigated to ' + window.location.href);
+        var modalsAfter = document.querySelectorAll('[role="dialog"], [role="alertdialog"], .modal, .popup').length;
+        if (modalsAfter > modalsBefore) effects.push('modal/popup appeared');
+        if (modalsAfter < modalsBefore) effects.push('modal/popup closed');
+
+        var result = 'Clicked ' + tag + ': ' + t;
+        if (effects.length > 0) result += ' [' + effects.join(', ') + ']';
+        return {ok: result};
+    })"""
 
     if index is not None:
-        js = """(function() {
-            var el = document.querySelector('[data-exec-idx="%d"]');
-            if (!el) return 'ERR:Element #%d not found. Run browser_read_elements again.';
-            el.scrollIntoView({block: 'center'});
-            el.focus();
-            el.click();
-            var tag = el.tagName.toLowerCase();
-            var t = (el.innerText || el.value || '').trim().substring(0, 60);
-            return 'Clicked ' + tag + ': ' + t;
-        })()""" % (index, index)
-        try:
-            result = await page.evaluate(js)
-            if isinstance(result, str) and result.startswith("ERR:"):
-                return {"content": [{"type": "text", "text": result[4:]}], "isError": True}
-            return {"content": [{"type": "text", "text": result}], "isError": False}
-        except Exception as e:
-            return {"content": [{"type": "text", "text": f"Click error: {e}"}], "isError": True}
+        # Click by data-exec-idx
+        js = CLICK_JS + """(document.querySelector('[data-exec-idx="%d"]') || null)""" % index
+        null_msg = "Element #%d not found. DOM may have changed — run browser_read_elements again." % index
 
     elif text:
-        escaped = text.replace("\\", "\\\\").replace("'", "\\'")
+        escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
         js = """(function() {
             var target = '%s'.toLowerCase();
-            var all = document.querySelectorAll('button, a, input, [role="button"], [role="option"], [role="radio"], label, [onclick], [tabindex="0"]');
+            var sels = 'button, a, input[type="submit"], input[type="button"], [role="button"], [role="option"], [role="radio"], [role="checkbox"], label, [onclick], [tabindex="0"]';
+            var all = document.querySelectorAll(sels);
+            // Try exact match first, then partial
+            var candidates = [];
             for (var i = 0; i < all.length; i++) {
                 var el = all[i];
                 var elText = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                if (elText.indexOf(target) !== -1 || elText === target) {
-                    var rect = el.getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0) {
-                        el.scrollIntoView({block: 'center'});
-                        el.focus();
-                        el.click();
-                        return 'Clicked: ' + el.tagName.toLowerCase() + ' "' + elText.substring(0, 60) + '"';
-                    }
-                }
+                if (elText === target) return %s(el);
+                if (elText.indexOf(target) !== -1) candidates.push(el);
             }
-            return 'ERR:No visible element contains text: ' + target;
-        })()""" % escaped
-        try:
-            result = await page.evaluate(js)
-            if isinstance(result, str) and result.startswith("ERR:"):
-                return {"content": [{"type": "text", "text": result[4:]}], "isError": True}
-            return {"content": [{"type": "text", "text": result}], "isError": False}
-        except Exception as e:
-            return {"content": [{"type": "text", "text": f"Click error: {e}"}], "isError": True}
+            if (candidates.length > 0) return %s(candidates[0]);
+            return null;
+        })()""" % (escaped, CLICK_JS, CLICK_JS)
+        null_msg = "No interactive element contains text: '%s'" % text
 
     elif selector:
+        # Use Playwright's built-in click for CSS selectors (handles waits better)
         try:
+            url_before = await page.evaluate("window.location.href")
             await page.click(selector, timeout=5000)
-            return {"content": [{"type": "text", "text": f"Clicked '{selector}'."}], "isError": False}
+            url_after = await page.evaluate("window.location.href")
+            effects = ""
+            if url_after != url_before:
+                effects = f" [page navigated to {url_after}]"
+            return {"content": [{"type": "text", "text": f"Clicked '{selector}'.{effects}"}], "isError": False}
         except Exception as e:
-            return {"content": [{"type": "text", "text": f"Click failed: {e}"}], "isError": True}
+            err = str(e)
+            if "timeout" in err.lower():
+                return {"content": [{"type": "text", "text": f"Timeout waiting for '{selector}'. Element may not exist or is hidden."}], "isError": True}
+            return {"content": [{"type": "text", "text": f"Click failed on '{selector}': {e}"}], "isError": True}
 
     else:
         return {"content": [{"type": "text", "text": "Provide one of: index, text, or selector."}], "isError": True}
 
+    # Execute JS-based click (for index and text modes)
+    try:
+        result = await page.evaluate(js)
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Click error: {e}"}], "isError": True}
+
+    if result is None:
+        return {"content": [{"type": "text", "text": null_msg}], "isError": True}
+    if isinstance(result, dict):
+        if "error" in result:
+            return {"content": [{"type": "text", "text": result["error"]}], "isError": True}
+        if "ok" in result:
+            # Brief wait for DOM to settle after click
+            if wait_ms > 0:
+                await asyncio.sleep(wait_ms / 1000.0)
+            return {"content": [{"type": "text", "text": result["ok"]}], "isError": False}
+
+    return {"content": [{"type": "text", "text": str(result)}], "isError": False}
+
 
 async def handle_type_element(params: dict) -> dict:
-    """Type text into an input. React-compatible with native setter + event dispatch."""
+    """Type text with React compat, input validation, contenteditable support, and verification."""
     page = await _get_pw_page()
     text = params.get("text", "")
     index = params.get("index")
     selector = params.get("selector")
     clear_first = params.get("clear_first", True)
+    press_enter = params.get("press_enter", False)
 
-    if not text:
+    if not text and not press_enter:
         return {"content": [{"type": "text", "text": "No text provided."}], "isError": True}
 
-    escaped = text.replace("\\", "\\\\").replace("'", "\\'")
+    escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
 
     # Build element finder
     if index is not None:
@@ -834,38 +948,257 @@ async def handle_type_element(params: dict) -> dict:
         find_el = "document.querySelector('%s')" % sel
     else:
         find_el = ("document.activeElement && "
-                   "(document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') "
+                   "(document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.getAttribute('contenteditable') === 'true') "
                    "? document.activeElement "
-                   ": document.querySelector('input:not([type=hidden]):not([type=submit]):not([type=button]), textarea')")
+                   ": document.querySelector('input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, [contenteditable=\"true\"]')")
 
-    clear_js = "el.value = '';" if clear_first else ""
-    val_expr = "'%s'" % escaped if clear_first else "el.value + '%s'" % escaped
+    clear_js = "true" if clear_first else "false"
+    enter_js = "true" if press_enter else "false"
 
     js = """(function() {
         var el = %s;
-        if (!el) return 'ERR:No input field found. Use browser_read_elements to find inputs.';
-        el.scrollIntoView({block: 'center'});
+        if (!el) return {error: 'No input field found. Use browser_read_elements to find inputs.'};
+
+        // Check state
+        if (el.disabled || el.getAttribute('aria-disabled') === 'true')
+            return {error: 'Input is DISABLED.'};
+        if (el.readOnly) return {error: 'Input is READONLY.'};
+
+        var tag = el.tagName.toLowerCase();
+        var isContentEditable = el.getAttribute('contenteditable') === 'true';
+
+        el.scrollIntoView({block: 'center', behavior: 'instant'});
         el.focus();
-        %s
-        var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')
-                        || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
-        if (nativeSetter && nativeSetter.set) {
-            nativeSetter.set.call(el, %s);
+
+        var inputText = '%s';
+        var doClear = %s;
+        var doEnter = %s;
+
+        if (isContentEditable) {
+            // ContentEditable (rich text editors, MathJax, etc.)
+            if (doClear) el.innerHTML = '';
+            el.focus();
+            document.execCommand('insertText', false, inputText);
         } else {
-            el.value = %s;
+            // Standard input/textarea — React-compatible native setter
+            if (doClear) {
+                var nsClear = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')
+                           || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+                if (nsClear && nsClear.set) nsClear.set.call(el, '');
+                else el.value = '';
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+            }
+            var newVal = doClear ? inputText : el.value + inputText;
+            var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')
+                            || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+            if (nativeSetter && nativeSetter.set) {
+                nativeSetter.set.call(el, newVal);
+            } else {
+                el.value = newVal;
+            }
+            el.dispatchEvent(new Event('input', {bubbles: true}));
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            // Also dispatch KeyboardEvent for apps that listen to keystrokes
+            for (var c = 0; c < Math.min(inputText.length, 3); c++) {
+                el.dispatchEvent(new KeyboardEvent('keydown', {key: inputText[c], bubbles: true}));
+                el.dispatchEvent(new KeyboardEvent('keyup', {key: inputText[c], bubbles: true}));
+            }
         }
-        el.dispatchEvent(new Event('input', {bubbles: true}));
-        el.dispatchEvent(new Event('change', {bubbles: true}));
-        return 'Typed "' + '%s'.substring(0, 40) + '" into ' + el.tagName.toLowerCase();
-    })()""" % (find_el, clear_js, val_expr, val_expr, escaped)
+
+        // Optional Enter key
+        if (doEnter) {
+            el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true}));
+            el.dispatchEvent(new KeyboardEvent('keyup', {key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true}));
+        }
+
+        // Verify
+        var actualVal = isContentEditable ? el.innerText.trim() : el.value;
+        var inputType = el.type || 'text';
+        var msg = 'Typed "' + inputText.substring(0, 40) + '" into ' + tag + '[type=' + inputType + ']';
+        if (actualVal !== newVal && !isContentEditable) {
+            msg += ' (WARNING: field shows "' + actualVal.substring(0, 30) + '" — may have validation)';
+        }
+        return {ok: msg};
+    })()""" % (find_el, escaped, clear_js, enter_js)
 
     try:
         result = await page.evaluate(js)
-        if isinstance(result, str) and result.startswith("ERR:"):
-            return {"content": [{"type": "text", "text": result[4:]}], "isError": True}
-        return {"content": [{"type": "text", "text": result}], "isError": False}
     except Exception as e:
         return {"content": [{"type": "text", "text": f"Type error: {e}"}], "isError": True}
+
+    if isinstance(result, dict):
+        if "error" in result:
+            return {"content": [{"type": "text", "text": result["error"]}], "isError": True}
+        if "ok" in result:
+            return {"content": [{"type": "text", "text": result["ok"]}], "isError": False}
+
+    return {"content": [{"type": "text", "text": str(result)}], "isError": False}
+
+
+async def handle_page_state(params: dict) -> dict:
+    """Comprehensive page diagnostics — URL, loading state, modals, errors, form state."""
+    page = await _get_pw_page()
+
+    js = """(function() {
+        var state = {};
+        state.url = window.location.href;
+        state.title = document.title;
+        state.readyState = document.readyState;
+
+        // Loading indicators
+        var loaders = document.querySelectorAll('[aria-busy="true"], .loading, .spinner, [class*="load"]');
+        state.loading = loaders.length > 0;
+
+        // Open modals/dialogs
+        var modals = document.querySelectorAll('[role="dialog"], [role="alertdialog"], .modal.show, .modal[open], dialog[open]');
+        state.modals = [];
+        for (var m = 0; m < modals.length; m++) {
+            state.modals.push((modals[m].innerText || '').trim().substring(0, 200));
+        }
+
+        // Error messages (common patterns)
+        var errors = document.querySelectorAll('[class*="error"], [class*="Error"], [role="alert"], .alert-danger, .validation-error');
+        state.errors = [];
+        for (var e = 0; e < errors.length && e < 5; e++) {
+            var t = (errors[e].innerText || '').trim();
+            if (t.length > 0 && t.length < 200) state.errors.push(t);
+        }
+
+        // Form state (all visible inputs with values)
+        var inputs = document.querySelectorAll('input:not([type=hidden]), textarea, select');
+        state.formFields = [];
+        for (var i = 0; i < inputs.length && i < 20; i++) {
+            var inp = inputs[i];
+            var rect = inp.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) continue;
+            state.formFields.push({
+                tag: inp.tagName.toLowerCase(),
+                type: inp.type || '',
+                name: inp.name || inp.id || '',
+                value: (inp.value || '').substring(0, 50),
+                checked: inp.checked || false,
+                disabled: inp.disabled || false,
+            });
+        }
+
+        // Console errors (if we have access)
+        state.jsErrors = [];
+
+        // Iframe count
+        state.iframeCount = document.querySelectorAll('iframe').length;
+
+        return JSON.stringify(state);
+    })()"""
+
+    try:
+        raw = await page.evaluate(js)
+        data = json.loads(raw) if isinstance(raw, str) else raw
+
+        lines = []
+        lines.append(f"URL: {data.get('url', '?')}")
+        lines.append(f"Title: {data.get('title', '?')}")
+        lines.append(f"Ready: {data.get('readyState', '?')} | Loading: {data.get('loading', False)} | Iframes: {data.get('iframeCount', 0)}")
+
+        if data.get("modals"):
+            lines.append(f"\nOpen modals ({len(data['modals'])}):")
+            for m in data["modals"]:
+                lines.append(f"  - {m[:100]}")
+
+        if data.get("errors"):
+            lines.append(f"\nError messages ({len(data['errors'])}):")
+            for e in data["errors"]:
+                lines.append(f"  ! {e}")
+
+        if data.get("formFields"):
+            lines.append(f"\nForm fields ({len(data['formFields'])}):")
+            for f in data["formFields"]:
+                status = []
+                if f.get("checked"): status.append("checked")
+                if f.get("disabled"): status.append("DISABLED")
+                st = f" [{','.join(status)}]" if status else ""
+                lines.append(f"  {f['name'] or '(unnamed)'} [{f['type']}] = \"{f['value']}\"{st}")
+
+        return {"content": [{"type": "text", "text": "\n".join(lines)}], "isError": False}
+
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Page state error: {e}"}], "isError": True}
+
+
+async def handle_wait_for(params: dict) -> dict:
+    """Wait for an element or condition before proceeding."""
+    page = await _get_pw_page()
+    css_selector = params.get("selector", "")
+    text_content = params.get("text", "")
+    timeout_ms = params.get("timeout", 5000)
+    wait_hidden = params.get("wait_hidden", False)
+
+    if not css_selector and not text_content:
+        return {"content": [{"type": "text", "text": "Provide 'selector' or 'text' to wait for."}], "isError": True}
+
+    try:
+        if css_selector:
+            if wait_hidden:
+                await page.wait_for_selector(css_selector, state="hidden", timeout=timeout_ms)
+                return {"content": [{"type": "text", "text": f"'{css_selector}' is now hidden/gone."}], "isError": False}
+            else:
+                await page.wait_for_selector(css_selector, state="visible", timeout=timeout_ms)
+                return {"content": [{"type": "text", "text": f"'{css_selector}' is now visible."}], "isError": False}
+
+        elif text_content:
+            escaped = text_content.replace("'", "\\'")
+            # Poll for text appearance
+            end_time = asyncio.get_event_loop().time() + timeout_ms / 1000.0
+            while asyncio.get_event_loop().time() < end_time:
+                found = await page.evaluate(
+                    "document.body.innerText.toLowerCase().includes('%s'.toLowerCase())" % escaped
+                )
+                if found and not wait_hidden:
+                    return {"content": [{"type": "text", "text": f"Text '{text_content}' found on page."}], "isError": False}
+                if not found and wait_hidden:
+                    return {"content": [{"type": "text", "text": f"Text '{text_content}' is gone."}], "isError": False}
+                await asyncio.sleep(0.3)
+
+            if wait_hidden:
+                return {"content": [{"type": "text", "text": f"Timeout: text '{text_content}' still present after {timeout_ms}ms."}], "isError": True}
+            return {"content": [{"type": "text", "text": f"Timeout: text '{text_content}' not found after {timeout_ms}ms."}], "isError": True}
+
+    except Exception as e:
+        err = str(e)
+        if "timeout" in err.lower():
+            what = css_selector or text_content
+            return {"content": [{"type": "text", "text": f"Timeout after {timeout_ms}ms waiting for: {what}"}], "isError": True}
+        return {"content": [{"type": "text", "text": f"Wait error: {e}"}], "isError": True}
+
+
+async def handle_select_tab(params: dict) -> dict:
+    """Switch to a different Chrome tab by index or URL pattern."""
+    global _cdp_page
+    if not _cdp_connected or not _cdp_browser:
+        return {"content": [{"type": "text", "text": "Not connected to Chrome via CDP."}], "isError": True}
+
+    tab_index = params.get("tab_index")
+    url_pattern = params.get("url_pattern", "")
+
+    all_pages = []
+    for context in _cdp_browser.contexts:
+        all_pages.extend(context.pages)
+
+    if tab_index is not None:
+        if 0 <= tab_index < len(all_pages):
+            _cdp_page = all_pages[tab_index]
+            title = await _cdp_page.title()
+            return {"content": [{"type": "text", "text": f"Switched to tab [{tab_index}]: {_cdp_page.url} — {title}"}], "isError": False}
+        return {"content": [{"type": "text", "text": f"Tab index {tab_index} out of range (0-{len(all_pages)-1})."}], "isError": True}
+
+    if url_pattern:
+        for i, p in enumerate(all_pages):
+            if url_pattern.lower() in p.url.lower():
+                _cdp_page = p
+                title = await _cdp_page.title()
+                return {"content": [{"type": "text", "text": f"Switched to tab [{i}]: {_cdp_page.url} — {title}"}], "isError": False}
+        return {"content": [{"type": "text", "text": f"No tab contains '{url_pattern}' in URL."}], "isError": True}
+
+    return {"content": [{"type": "text", "text": "Provide tab_index or url_pattern."}], "isError": True}
 
 
 async def handle_disconnect_chrome(params: dict) -> dict:
@@ -902,6 +1235,9 @@ TOOLS = {
     "browser_click_element": handle_click_element,
     "browser_type_element": handle_type_element,
     "browser_disconnect_chrome": handle_disconnect_chrome,
+    "browser_page_state": handle_page_state,
+    "browser_wait_for": handle_wait_for,
+    "browser_select_tab": handle_select_tab,
 }
 
 

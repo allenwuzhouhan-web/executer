@@ -7,9 +7,9 @@ struct MCPToolWrapper: ToolDefinition {
     let parameters: [String: Any]
 
     private let originalName: String
-    private let client: MCPClient
+    private let client: any MCPTransport
 
-    init(serverName: String, tool: MCPClient.MCPTool, client: MCPClient) {
+    init(serverName: String, tool: MCPToolInfo, client: any MCPTransport) {
         self.originalName = tool.name
         self.name = "mcp_\(serverName)_\(tool.name)"
         self.description = "\(tool.description) [MCP: \(serverName)]"

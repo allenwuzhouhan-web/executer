@@ -8,7 +8,7 @@ enum LearningMigration {
     /// Safe to call multiple times — checks if migration is needed.
     static func migrateIfNeeded() {
         let fm = FileManager.default
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let legacyDir = appSupport
             .appendingPathComponent(LearningConstants.appSupportSubdirectory, isDirectory: true)
             .appendingPathComponent(LearningConstants.legacyJSONSubdirectory, isDirectory: true)

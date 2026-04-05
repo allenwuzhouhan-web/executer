@@ -36,7 +36,7 @@ class HandoffService: ObservableObject {
 
     private init() {
         // Local fallback path
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         localHandoffDir = appSupport.appendingPathComponent("Executer/Handoffs", isDirectory: true)
         try? FileManager.default.createDirectory(at: localHandoffDir, withIntermediateDirectories: true)
 

@@ -186,7 +186,8 @@ struct BrowserTypeElementTool: ToolDefinition {
     let name = "browser_type_element"
     let description = """
         Type text into an input field in the browser. Targets by index (from browser_read_elements), \
-        CSS selector, or the currently focused input. Handles React inputs correctly with native setter.
+        CSS selector, or the currently focused input. Handles React inputs correctly with native setter. \
+        Supports contenteditable divs (rich text editors). Verifies the text was accepted.
         """
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
@@ -194,10 +195,64 @@ struct BrowserTypeElementTool: ToolDefinition {
             "index": JSONSchema.integer(description: "Element index from browser_read_elements"),
             "selector": JSONSchema.string(description: "CSS selector for the input field"),
             "clear_first": JSONSchema.boolean(description: "Clear existing content before typing (default true)"),
+            "press_enter": JSONSchema.boolean(description: "Press Enter after typing (for search fields, chat inputs)"),
         ], required: ["text"])
     }
 
     func execute(arguments: String) async throws -> String {
         try await BrowserService.shared.callBridgeTool(name: "browser_type_element", arguments: arguments)
+    }
+}
+
+// MARK: - Debug & Diagnostic Tools
+
+struct BrowserPageStateTool: ToolDefinition {
+    let name = "browser_page_state"
+    let description = """
+        Get comprehensive page diagnostics: URL, title, loading state, open modals/dialogs, \
+        error messages, all form field values, and iframe count. Use this to debug when actions \
+        seem to fail or to verify the page state after an action.
+        """
+    var parameters: [String: Any] {
+        JSONSchema.object(properties: [:])
+    }
+
+    func execute(arguments: String) async throws -> String {
+        try await BrowserService.shared.callBridgeTool(name: "browser_page_state", arguments: arguments)
+    }
+}
+
+struct BrowserWaitForTool: ToolDefinition {
+    let name = "browser_wait_for"
+    let description = """
+        Wait for an element to appear/disappear or for text to show on the page. \
+        Use after clicking submit to wait for the result, or to wait for a loading spinner to disappear.
+        """
+    var parameters: [String: Any] {
+        JSONSchema.object(properties: [
+            "selector": JSONSchema.string(description: "CSS selector to wait for (e.g., '.result', 'button.next')"),
+            "text": JSONSchema.string(description: "Text content to wait for on the page"),
+            "timeout": JSONSchema.integer(description: "Max wait time in milliseconds (default 5000)"),
+            "wait_hidden": JSONSchema.boolean(description: "Wait for element/text to DISAPPEAR instead of appear"),
+        ])
+    }
+
+    func execute(arguments: String) async throws -> String {
+        try await BrowserService.shared.callBridgeTool(name: "browser_wait_for", arguments: arguments)
+    }
+}
+
+struct BrowserSelectTabTool: ToolDefinition {
+    let name = "browser_select_tab"
+    let description = "Switch to a different Chrome tab by index or URL pattern. Use to navigate between tabs when connected via CDP."
+    var parameters: [String: Any] {
+        JSONSchema.object(properties: [
+            "tab_index": JSONSchema.integer(description: "Tab index (from browser_connect_chrome output)"),
+            "url_pattern": JSONSchema.string(description: "Switch to tab whose URL contains this text"),
+        ])
+    }
+
+    func execute(arguments: String) async throws -> String {
+        try await BrowserService.shared.callBridgeTool(name: "browser_select_tab", arguments: arguments)
     }
 }

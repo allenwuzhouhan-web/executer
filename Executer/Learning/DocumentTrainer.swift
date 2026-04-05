@@ -17,7 +17,7 @@ final class DocumentTrainer {
 
     /// Path to bundled/installed Python scripts in App Support.
     private let scriptsDir: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         return appSupport.appendingPathComponent("Executer", isDirectory: true)
     }()
 

@@ -34,13 +34,9 @@ class InputBarPanel: NSWindow {
         hostingView.frame = CGRect(x: 0, y: 0, width: 340, height: 200)
         hostingView.autoresizingMask = [.width, .height]
         contentView = hostingView
-
-        print("[InputBarPanel] Created")
     }
 
     func showBar() {
-        print("[InputBarPanel] showBar()")
-
         // Local event monitor catches escape even when the field editor swallows it
         if escapeMonitor == nil {
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -54,13 +50,10 @@ class InputBarPanel: NSWindow {
 
         // Get screen — try built-in first, then main, then any
         let screen = NSScreen.builtIn ?? NSScreen.main ?? NSScreen.screens.first
-        guard let screenFrame = screen?.frame else {
-            print("[InputBarPanel] ERROR: No screen found!")
-            return
-        }
+        guard let screenFrame = screen?.frame else { return }
 
         // Position: centered horizontally, just below the notch
-        let panelWidth: CGFloat = 300
+        let panelWidth: CGFloat = 340
         let panelHeight: CGFloat = 360
         let panelX = screenFrame.midX - panelWidth / 2
         let panelY = screenFrame.maxY - panelHeight - 44
@@ -75,20 +68,16 @@ class InputBarPanel: NSWindow {
         orderFrontRegardless()
         makeKeyAndOrderFront(nil)
 
-        print("[InputBarPanel] Frame: \(frame), visible: \(isVisible), key: \(isKeyWindow)")
-
         // Focus the text field after SwiftUI has laid out
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self = self else { return }
             NSApp.activate()
             self.makeKeyAndOrderFront(nil)
             self.focusTextField(in: self.contentView ?? NSView())
-            print("[InputBarPanel] After focus attempt — key: \(self.isKeyWindow)")
         }
     }
 
     func hideBar() {
-        print("[InputBarPanel] hideBar()")
         if let monitor = escapeMonitor {
             NSEvent.removeMonitor(monitor)
             escapeMonitor = nil
@@ -100,7 +89,6 @@ class InputBarPanel: NSWindow {
         for subview in view.subviews {
             if let textField = subview as? NSTextField, textField.isEditable {
                 makeFirstResponder(textField)
-                print("[InputBarPanel] Focused text field: \(textField)")
                 return
             }
             focusTextField(in: subview)

@@ -66,14 +66,14 @@ struct WorkflowEditorView: View {
                 HStack {
                     Text(viewModel.workflow.name)
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundStyle(.white)
 
                     Spacer()
 
                     // Step count
                     Text("\(viewModel.nodes.count) steps")
                         .font(.caption)
-                        .foregroundColor(.gray)
+                        .foregroundStyle(.gray)
 
                     // Zoom controls
                     Button(action: { scale = min(scale + 0.1, 2.0) }) {
@@ -88,19 +88,19 @@ struct WorkflowEditorView: View {
                     // Debug controls
                     Button(action: { viewModel.startDebugReplay() }) {
                         Image(systemName: "play.fill")
-                            .foregroundColor(.green)
+                            .foregroundStyle(.green)
                     }
                     .disabled(viewModel.isReplaying)
 
                     Button(action: { viewModel.stepOver() }) {
                         Image(systemName: "arrow.right")
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                     }
                     .disabled(!viewModel.isPaused)
 
                     Button(action: { viewModel.stopReplay() }) {
                         Image(systemName: "stop.fill")
-                            .foregroundColor(.red)
+                            .foregroundStyle(.red)
                     }
                     .disabled(!viewModel.isReplaying)
                 }
@@ -146,18 +146,18 @@ struct NodeView: View {
             HStack(spacing: 6) {
                 Image(systemName: node.iconName)
                     .font(.system(size: 12))
-                    .foregroundColor(node.color)
+                    .foregroundStyle(node.color)
 
                 Text(node.title)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .lineLimit(1)
             }
 
             // App context
             Text(node.appContext)
                 .font(.system(size: 9))
-                .foregroundColor(.gray)
+                .foregroundStyle(.gray)
 
             // Breakpoint indicator
             if hasBreakpoint {
@@ -217,18 +217,18 @@ struct NodeDetailPanel: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(node.description)
                     .font(.system(size: 12))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
 
                 if !node.parameterBindings.isEmpty {
                     Text("Parameters: \(node.parameterBindings.keys.joined(separator: ", "))")
                         .font(.system(size: 10))
-                        .foregroundColor(.gray)
+                        .foregroundStyle(.gray)
                 }
 
                 if let precondition = node.precondition {
                     Text("Requires: \(precondition)")
                         .font(.system(size: 10))
-                        .foregroundColor(.orange)
+                        .foregroundStyle(.orange)
                 }
             }
 
@@ -239,7 +239,7 @@ struct NodeDetailPanel: View {
 
             Button(action: onDelete) {
                 Image(systemName: "trash")
-                    .foregroundColor(.red)
+                    .foregroundStyle(.red)
             }
         }
         .padding()
@@ -263,7 +263,7 @@ struct ParameterEditorSheet: View {
                 HStack {
                     Text(key)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .frame(width: 100, alignment: .trailing)
 
                     TextField("Value", text: Binding(

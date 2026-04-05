@@ -108,6 +108,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             Task { await TextSnapshotService.shared.start() }
             // Start background learning — observes how user interacts with apps
             LearningManager.shared.start()
+            // Start coworking agent — daytime proactive assistant
+            Task { @MainActor in CoworkerAgent.shared.start() }
         }
     }
 

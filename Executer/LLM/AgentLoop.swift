@@ -110,7 +110,7 @@ class AgentLoop {
         ]
 
         // Save to auto_skills.json (locked to prevent concurrent file corruption)
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let skillFile = appSupport.appendingPathComponent("Executer/auto_skills.json")
 
         skillFileLock.lock()
@@ -207,7 +207,8 @@ class AgentLoop {
         registry: ToolRegistry,
         toolName: String,
         arguments: String,
-        maxRetries: Int = 1
+        maxRetries: Int = 1,
+        trace: AgentTrace? = nil
     ) async -> String {
         for attempt in 0...maxRetries {
             do {
@@ -217,6 +218,11 @@ class AgentLoop {
                     let backoff = UInt64(pow(2.0, Double(attempt))) * 500_000_000
                     try? await Task.sleep(nanoseconds: backoff)
                     print("[Agent] Retry \(attempt + 1) for \(toolName): \(error.localizedDescription)")
+                    trace?.append(TraceEntry(kind: .retry(
+                        toolName: toolName,
+                        attempt: attempt + 1,
+                        reason: error.localizedDescription
+                    )))
                     continue
                 }
                 return "Error after \(maxRetries + 1) attempts: \(error.localizedDescription)"
@@ -233,7 +239,8 @@ class AgentLoop {
         registry: ToolRegistry,
         iteration: Int,
         maxIterations: Int,
-        onStateChange: @MainActor @escaping (InputBarState) -> Void
+        onStateChange: @MainActor @escaping (InputBarState) -> Void,
+        trace: AgentTrace? = nil
     ) async -> [ToolResult] {
         var allResults: [ToolResult] = []
         allResults.reserveCapacity(toolCalls.count)
@@ -249,7 +256,7 @@ class AgentLoop {
             if isUITool {
                 // Flush any pending parallel batch first
                 if !pendingBatch.isEmpty {
-                    let batchResults = await executeParallelBatch(pendingBatch, registry: registry)
+                    let batchResults = await executeParallelBatch(pendingBatch, registry: registry, trace: trace)
                     allResults.append(contentsOf: batchResults)
                     pendingBatch.removeAll()
                 }
@@ -261,9 +268,19 @@ class AgentLoop {
                     onStateChange(.executing(toolName: displayName, step: iteration + 1, total: maxIterations))
                 }
 
-                let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments)
+                let toolStart = CFAbsoluteTimeGetCurrent()
+                let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments, trace: trace)
+                let toolMs = (CFAbsoluteTimeGetCurrent() - toolStart) * 1000
                 print("[Agent] Result: \(result)")
                 let sanitized = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+
+                trace?.append(TraceEntry(kind: .toolCall(
+                    name: call.function.name,
+                    arguments: call.function.arguments,
+                    result: result,
+                    durationMs: toolMs,
+                    success: !result.hasPrefix("Error")
+                ), durationMs: toolMs))
                 allResults.append(ToolResult(callId: call.id, toolName: call.function.name, result: sanitized))
 
                 // Apply delay for UI tools (halved in speed mode)
@@ -285,7 +302,7 @@ class AgentLoop {
             await MainActor.run {
                 onStateChange(.executing(toolName: batchDisplay, step: iteration + 1, total: maxIterations))
             }
-            let batchResults = await executeParallelBatch(pendingBatch, registry: registry)
+            let batchResults = await executeParallelBatch(pendingBatch, registry: registry, trace: trace)
             allResults.append(contentsOf: batchResults)
         }
 
@@ -295,15 +312,25 @@ class AgentLoop {
     /// Execute a batch of independent tools in parallel using TaskGroup.
     static func executeParallelBatch(
         _ calls: [ToolCall],
-        registry: ToolRegistry
+        registry: ToolRegistry,
+        trace: AgentTrace? = nil
     ) async -> [ToolResult] {
         if calls.count == 1 {
             // Single tool — no need for TaskGroup overhead
             let call = calls[0]
             print("[Agent] Tool call: \(call.function.name)")
-            let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments)
+            let toolStart = CFAbsoluteTimeGetCurrent()
+            let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments, trace: trace)
+            let toolMs = (CFAbsoluteTimeGetCurrent() - toolStart) * 1000
             print("[Agent] Result: \(result)")
             let sanitized = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+            trace?.append(TraceEntry(kind: .toolCall(
+                name: call.function.name,
+                arguments: call.function.arguments,
+                result: result,
+                durationMs: toolMs,
+                success: !result.hasPrefix("Error")
+            ), durationMs: toolMs))
             return [ToolResult(callId: call.id, toolName: call.function.name, result: sanitized)]
         }
 
@@ -312,8 +339,17 @@ class AgentLoop {
         return await withTaskGroup(of: ToolResult.self) { group in
             for call in calls {
                 group.addTask {
-                    let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments)
+                    let toolStart = CFAbsoluteTimeGetCurrent()
+                    let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments, trace: trace)
+                    let toolMs = (CFAbsoluteTimeGetCurrent() - toolStart) * 1000
                     let sanitized = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+                    trace?.append(TraceEntry(kind: .toolCall(
+                        name: call.function.name,
+                        arguments: call.function.arguments,
+                        result: result,
+                        durationMs: toolMs,
+                        success: !result.hasPrefix("Error")
+                    ), durationMs: toolMs))
                     return ToolResult(callId: call.id, toolName: call.function.name, result: sanitized)
                 }
             }
@@ -335,11 +371,14 @@ class AgentLoop {
         resolvedCommand: String,
         previousMessages: [ChatMessage],
         agent: AgentProfile? = nil,
+        resumeFromIteration: Int = 0,
         onStateChange: @MainActor @escaping (InputBarState) -> Void,
-        onComplete: @MainActor @escaping (_ displayMessage: String, _ filteredText: String, _ messages: [ChatMessage]) -> Void,
-        onError: @MainActor @escaping (String) -> Void
+        onComplete: @MainActor @escaping (_ displayMessage: String, _ filteredText: String, _ messages: [ChatMessage], _ trace: AgentTrace?) -> Void,
+        onError: @MainActor @escaping (_ message: String, _ trace: AgentTrace?) -> Void
     ) -> Task<Void, Never> {
         return Task.detached {
+            let trace = AgentTrace(goal: fullCommand)
+            let isResume = resumeFromIteration > 0
             do {
                 let manager = LLMServiceManager.shared
                 let registry = ToolRegistry.shared
@@ -404,6 +443,17 @@ class AgentLoop {
 
                 messages.reserveCapacity(messages.count + maxIterations * 3)
 
+                // Persist session for crash recovery (unless resuming — session already exists)
+                if !isResume {
+                    await MainActor.run {
+                        AgentSessionStore.shared.startSession(
+                            command: resolvedCommand,
+                            agentId: agent?.id ?? "general",
+                            messages: messages
+                        )
+                    }
+                }
+
                 // Planning phase for complex tasks
                 if complexity == .complex || complexity == .deep {
                     await MainActor.run {
@@ -421,6 +471,8 @@ class AgentLoop {
                         maxTokens: 512
                     ), let plan = planResponse.text {
                         print("[Agent] Plan: \(plan)")
+                        trace.planOutput = plan
+                        trace.append(TraceEntry(kind: .planning(output: plan)))
                         await MainActor.run {
                             onStateChange(.planning(summary: String(plan.prefix(200))))
                         }
@@ -436,6 +488,7 @@ class AgentLoop {
                     let coordinator = SubAgentCoordinator()
                     if let subTasks = await coordinator.decompose(command: fullCommand, manager: manager) {
                         print("[Agent] Decomposed into \(subTasks.count) sub-agents")
+                        trace.append(TraceEntry(kind: .subAgentDecomposition(taskCount: subTasks.count)))
                         await MainActor.run {
                             onStateChange(.executing(toolName: "Coordinating \(subTasks.count) sub-agents", step: 0, total: subTasks.count))
                         }
@@ -453,7 +506,14 @@ class AgentLoop {
                             // Skip to post-processing
                             let filteredText = PersonalityEngine.shared.postFilterResponse(finalText)
                             HandoffService.shared.saveHandoff(command: resolvedCommand, response: finalText, appContext: context.frontmostApp)
-                            await MainActor.run { onComplete(filteredText, filteredText, messages) }
+                            trace.finalOutcome = .success
+                            trace.endTime = Date()
+                            await MainActor.run {
+                                AgentSessionStore.shared.complete(
+                                    result: filteredText, messages: messages, trace: trace
+                                )
+                                onComplete(filteredText, filteredText, messages, trace)
+                            }
                             return
                         }
                         // If decomposition execution failed, fall through to normal agent loop
@@ -472,11 +532,20 @@ class AgentLoop {
 
                     print("[Agent] Iteration \(iteration + 1)/\(maxIterations) — \(messages.count) messages")
 
+                    let llmStart = CFAbsoluteTimeGetCurrent()
                     let response = try await service.sendChatRequest(
                         messages: messages,
                         tools: tools,
                         maxTokens: maxTokens
                     )
+                    let llmMs = (CFAbsoluteTimeGetCurrent() - llmStart) * 1000
+
+                    trace.append(TraceEntry(kind: .llmCall(
+                        messageCount: messages.count,
+                        responseLength: response.text?.count ?? 0,
+                        hasToolCalls: response.toolCalls != nil && !(response.toolCalls?.isEmpty ?? true),
+                        reasoning: response.rawMessage.reasoning_content
+                    ), durationMs: llmMs))
 
                     guard let toolCalls = response.toolCalls, !toolCalls.isEmpty else {
                         finalText = response.text ?? "Done."
@@ -493,7 +562,8 @@ class AgentLoop {
                         registry: registry,
                         iteration: iteration,
                         maxIterations: maxIterations,
-                        onStateChange: onStateChange
+                        onStateChange: onStateChange,
+                        trace: trace
                     )
 
                     // Append results as tool messages
@@ -530,6 +600,11 @@ class AgentLoop {
                                 }
                             }
                         }
+                    }
+
+                    // Checkpoint session to disk after each iteration (crash recovery)
+                    await MainActor.run {
+                        AgentSessionStore.shared.checkpoint(messages: messages, iteration: iteration)
                     }
                 }
 
@@ -576,6 +651,10 @@ class AgentLoop {
                             let evaluation = await PostTaskEvaluator.shared.evaluate(
                                 goal: fullCommand, result: finalText, taskType: taskType
                             )
+                            trace.append(TraceEntry(kind: .selfEvaluation(
+                                passed: !evaluation.shouldRetry,
+                                feedback: evaluation.feedback
+                            )))
                             guard evaluation.shouldRetry else {
                                 if !evaluation.passed && !evaluation.feedback.isEmpty {
                                     finalText += "\n\n[Self-check: \(evaluation.feedback)]"
@@ -599,7 +678,8 @@ class AgentLoop {
                                     let retryResults = await Self.executeToolCalls(
                                         retryCalls, registry: registry,
                                         iteration: 0, maxIterations: 3,
-                                        onStateChange: onStateChange
+                                        onStateChange: onStateChange,
+                                        trace: trace
                                     )
                                     for r in retryResults {
                                         messages.append(ChatMessage(role: "tool", content: r.result, tool_call_id: r.callId))
@@ -616,15 +696,37 @@ class AgentLoop {
                     }
                 }
 
+                trace.finalOutcome = .success
+                trace.endTime = Date()
                 await MainActor.run {
+                    AgentSessionStore.shared.complete(
+                        result: filteredText,
+                        richResultRaw: displayMessage != filteredText ? displayMessage : nil,
+                        messages: messages,
+                        trace: trace
+                    )
                     AICursorManager.shared.stopAIControl()
-                    onComplete(displayMessage, filteredText, messages)
+                    onComplete(displayMessage, filteredText, messages, trace)
                 }
             } catch {
-                if Task.isCancelled { return }
+                if Task.isCancelled {
+                    trace.finalOutcome = .cancelled
+                    trace.endTime = Date()
+                    await MainActor.run {
+                        AgentSessionStore.shared.cancel()
+                    }
+                    return
+                }
+                trace.finalOutcome = .failure(error.localizedDescription)
+                trace.endTime = Date()
+                trace.append(TraceEntry(kind: .error(
+                    source: "AgentLoop",
+                    message: error.localizedDescription
+                )))
                 await MainActor.run {
+                    AgentSessionStore.shared.fail(error: error.localizedDescription, trace: trace)
                     AICursorManager.shared.stopAIControl()
-                    onError(error.localizedDescription)
+                    onError(error.localizedDescription, trace)
                 }
             }
         }
