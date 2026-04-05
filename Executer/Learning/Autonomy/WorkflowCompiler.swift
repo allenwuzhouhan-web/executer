@@ -79,6 +79,12 @@ enum WorkflowCompiler {
                 argumentsTemplate: "{\"element_description\": \"\(action.elementTitle)\"}",
                 description: "Switch to tab \(action.elementTitle)"
             )
+        case .textSelect:
+            step = WorkflowTemplate.TemplateStep(
+                toolName: "click_element",
+                argumentsTemplate: "{\"element_description\": \"\(action.elementTitle)\"}",
+                description: "Select text in \(action.elementTitle)"
+            )
         }
 
         return (step, param, risk)

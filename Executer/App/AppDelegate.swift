@@ -3,7 +3,7 @@ import SwiftUI
 import UserNotifications
 
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
-    let appState = AppState()
+    @MainActor let appState = AppState()
     private var launchGlow: LaunchGlowWindow?
     private var startupSound: StartupSound?
     private var onboardingWindow: OnboardingWindowController?
@@ -114,6 +114,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func applicationWillTerminate(_ notification: Notification) {
         RuntimeShield.stopPeriodicChecks()
         EnvironmentIntegrity.stopFileMonitoring()
+        // Persist running agent sessions so they can resume after restart
+        appState.persistRunningSession()
         Task { await AuditLog.shared.persistToDisk() }
         LearningManager.shared.stop()
         Task { await BrowserService.shared.shutdown() }

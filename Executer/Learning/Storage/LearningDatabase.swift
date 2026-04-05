@@ -8,7 +8,7 @@ final class LearningDatabase {
     private let queue = DispatchQueue(label: "com.executer.learningdb", qos: .utility)
 
     private init() {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent(LearningConstants.appSupportSubdirectory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dbPath = dir.appendingPathComponent(LearningConstants.databaseFilename).path
@@ -35,6 +35,10 @@ final class LearningDatabase {
             sqlite3_exec(db, "PRAGMA auto_vacuum=INCREMENTAL", nil, nil, nil)
             // Synchronous NORMAL for better write performance (safe with WAL)
             sqlite3_exec(db, "PRAGMA synchronous=NORMAL", nil, nil, nil)
+            // M-series optimizations: mmap for zero-copy reads, large page cache, temp in RAM
+            sqlite3_exec(db, "PRAGMA mmap_size=268435456", nil, nil, nil)      // 256MB
+            sqlite3_exec(db, "PRAGMA cache_size=-64000", nil, nil, nil)         // 64MB
+            sqlite3_exec(db, "PRAGMA temp_store=MEMORY", nil, nil, nil)
         }
     }
 
@@ -447,7 +451,7 @@ final class LearningDatabase {
         }
 
         let fm = FileManager.default
-        let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent(LearningConstants.appSupportSubdirectory, isDirectory: true)
         let dbPath = dir.appendingPathComponent(LearningConstants.databaseFilename)
 

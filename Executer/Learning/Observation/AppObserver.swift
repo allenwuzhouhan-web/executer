@@ -30,6 +30,12 @@ class AppObserver {
             name: NSWorkspace.didActivateApplicationNotification, object: nil
         )
 
+        // Watch for app termination — recover if observed app dies
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(appDidTerminate(_:)),
+            name: NSWorkspace.didTerminateApplicationNotification, object: nil
+        )
+
         // Start observing current frontmost app
         if let app = NSWorkspace.shared.frontmostApplication {
             startObservingApp(pid: app.processIdentifier, name: app.localizedName ?? "Unknown")
@@ -43,6 +49,26 @@ class AppObserver {
         stopObservingCurrentApp()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         print("[AppObserver] Stopped")
+    }
+
+    // MARK: - App Termination Recovery
+
+    @objc private func appDidTerminate(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        // If the terminated app is the one we're observing, clean up the dead observer
+        if app.processIdentifier == currentPID {
+            print("[AppObserver] Observed app '\(currentAppName)' terminated — cleaning up observer")
+            stopObservingCurrentApp()
+            currentPID = 0
+            currentAppName = ""
+
+            // Switch to the new frontmost app
+            if let newFront = NSWorkspace.shared.frontmostApplication,
+               newFront.bundleIdentifier != "com.allenwu.executer",
+               AppAllowlist.isAllowed(newFront.bundleIdentifier) {
+                startObservingApp(pid: newFront.processIdentifier, name: newFront.localizedName ?? "Unknown")
+            }
+        }
     }
 
     // MARK: - App Switching
@@ -91,6 +117,15 @@ class AppObserver {
         // Watch for menu item selected
         AXObserverAddNotification(newObserver, appElement, kAXMenuItemSelectedNotification as CFString, Unmanaged.passUnretained(self).toOpaque())
 
+        // Watch for title changes (browser tab switches, doc renames, saves)
+        AXObserverAddNotification(newObserver, appElement, kAXTitleChangedNotification as CFString, Unmanaged.passUnretained(self).toOpaque())
+
+        // Watch for text selection changes (copy intent)
+        AXObserverAddNotification(newObserver, appElement, kAXSelectedTextChangedNotification as CFString, Unmanaged.passUnretained(self).toOpaque())
+
+        // Watch for sheet/dialog created (save, open, print dialogs)
+        AXObserverAddNotification(newObserver, appElement, "AXSheetCreated" as CFString, Unmanaged.passUnretained(self).toOpaque())
+
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(newObserver), .defaultMode)
 
         self.observer = newObserver
@@ -135,6 +170,12 @@ class AppObserver {
             actionType = .windowOpen
         case kAXMenuItemSelectedNotification as String:
             actionType = .menuSelect
+        case kAXTitleChangedNotification as String:
+            actionType = .tabSwitch  // Fires on browser tab switch, doc rename, save
+        case kAXSelectedTextChangedNotification as String:
+            actionType = .textSelect
+        case "AXSheetCreated":
+            actionType = .windowOpen  // Sheets (save/open dialogs) are modal windows
         default:
             return
         }

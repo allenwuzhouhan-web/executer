@@ -18,6 +18,7 @@ struct UserAction: Codable, Hashable, Sendable {
         case windowOpen  // New window appeared
         case menuSelect  // Menu item selected
         case tabSwitch   // Tab changed
+        case textSelect  // Text selection changed (copy intent)
     }
 
     /// Action signature for pattern matching (ignores variable content)

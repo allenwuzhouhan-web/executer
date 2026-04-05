@@ -281,6 +281,7 @@ class ToolRegistry {
             GetLearnedPatternsTool(),
             ListLearnedAppsTool(),
             GetCurrentSessionTool(),
+            RecallWorkflowTool(),
             GetTodayContextTool(),
             RecallWorkContextTool(),
             GetDailySummaryTool(),
@@ -339,6 +340,9 @@ class ToolRegistry {
             BrowserReadElementsTool(),
             BrowserClickElementTool(),
             BrowserTypeElementTool(),
+            BrowserPageStateTool(),
+            BrowserWaitForTool(),
+            BrowserSelectTabTool(),
 
             // Vision & Screen Perception
             PerceiveScreenTool(),
@@ -486,7 +490,7 @@ class ToolRegistry {
             // Screen Reading & Learning
             "read_screen": .screenshot, "read_app_text": .screenshot,
             "get_learned_patterns": .memory, "list_learned_apps": .memory,
-            "get_current_session": .memory, "get_today_context": .memory,
+            "get_current_session": .memory, "recall_workflow": .skills, "get_today_context": .memory,
             "recall_work_context": .memory, "get_daily_summary": .memory,
             "get_user_goals": .memory,
             "get_current_intent": .memory,
@@ -520,6 +524,7 @@ class ToolRegistry {
             "browser_intercept_network": .browser, "browser_navigate": .browser,
             "browser_connect_chrome": .browser, "browser_read_elements": .browser,
             "browser_click_element": .browser, "browser_type_element": .browser,
+            "browser_page_state": .browser, "browser_wait_for": .browser, "browser_select_tab": .browser,
             // Vision & Perception
             "perceive_screen": .screenshot, "perceive_screen_visual": .screenshot, "find_element": .screenshot,
             // Fast Input
