@@ -232,7 +232,10 @@ actor GoalStack {
         for goal in active {
             let progress = Int(goal.progress * 100)
             lines.append("- **\(goal.title)** [\(goal.state.rawValue), \(progress)% done]")
-            if let next = goal.nextActionableSubGoal() {
+            let ready = goal.actionableSubGoals()
+            if ready.count > 1 {
+                lines.append("  Ready in parallel: \(ready.map(\.title).joined(separator: ", "))")
+            } else if let next = ready.first {
                 lines.append("  Next step: \(next.title)")
             }
             if let deadline = goal.deadline {

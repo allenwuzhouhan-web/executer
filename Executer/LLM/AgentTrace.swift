@@ -13,6 +13,8 @@ enum TraceEntryKind {
     case contextPrune(beforeTokens: Int, afterTokens: Int)
     case retry(toolName: String, attempt: Int, reason: String)
     case selfEvaluation(passed: Bool, feedback: String)
+    case subAgentComplete(id: String, app: String?, durationMs: Double, success: Bool)
+    case hostAgentRouting(subtaskCount: Int, apps: [String])
 }
 
 // MARK: - Trace Entry
@@ -52,6 +54,10 @@ struct TraceEntry: Identifiable {
             return "Retry #\(attempt) for \(name)"
         case .selfEvaluation(let passed, _):
             return "Self-eval: \(passed ? "passed" : "failed")"
+        case .subAgentComplete(let id, let app, let ms, let success):
+            return "\(success ? "OK" : "FAIL") AppAgent[\(app ?? id)] (\(Int(ms))ms)"
+        case .hostAgentRouting(let count, let apps):
+            return "HostAgent routing → \(count) subtasks (\(apps.joined(separator: ", ")))"
         }
     }
 
@@ -67,6 +73,8 @@ struct TraceEntry: Identifiable {
         case .contextPrune: return "gray"
         case .retry: return "yellow"
         case .selfEvaluation(let passed, _): return passed ? "green" : "red"
+        case .subAgentComplete(_, _, _, let success): return success ? "green" : "red"
+        case .hostAgentRouting: return "teal"
         }
     }
 }
@@ -193,6 +201,10 @@ final class AgentTrace {
                 kind = .retry(toolName: t, attempt: a, reason: r)
             case .selfEvaluation(let p, let f):
                 kind = .selfEvaluation(passed: p, feedback: f)
+            case .subAgentComplete(let id, let app, let d, let s):
+                kind = .subAgentComplete(id: id, app: app, durationMs: d, success: s)
+            case .hostAgentRouting(let c, let apps):
+                kind = .hostAgentRouting(subtaskCount: c, apps: apps)
             }
             return PersistedTraceEntry(id: entry.id, timestamp: entry.timestamp, durationMs: entry.durationMs, kind: kind)
         }

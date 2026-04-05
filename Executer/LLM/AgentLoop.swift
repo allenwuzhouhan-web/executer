@@ -483,14 +483,14 @@ class AgentLoop {
 
                 var finalText = "Done."
 
-                // Sub-agent decomposition for complex tasks
+                // HostAgent decomposition: route complex tasks through AppAgents
                 if complexity == .complex || complexity == .deep {
                     let coordinator = SubAgentCoordinator()
                     if let subTasks = await coordinator.decompose(command: fullCommand, manager: manager) {
-                        print("[Agent] Decomposed into \(subTasks.count) sub-agents")
+                        print("[HostAgent] Decomposed into \(subTasks.count) AppAgents: \(subTasks.map { "\($0.id):\($0.targetApp ?? "general")" }.joined(separator: ", "))")
                         trace.append(TraceEntry(kind: .subAgentDecomposition(taskCount: subTasks.count)))
                         await MainActor.run {
-                            onStateChange(.executing(toolName: "Coordinating \(subTasks.count) sub-agents", step: 0, total: subTasks.count))
+                            onStateChange(.executing(toolName: "Routing \(subTasks.count) sub-agents", step: 0, total: subTasks.count))
                         }
 
                         if let mergedResult = try? await coordinator.executeSubAgents(
@@ -498,6 +498,7 @@ class AgentLoop {
                             systemPrompt: manager.fullSystemPrompt(context: context, query: fullCommand),
                             manager: manager,
                             registry: registry,
+                            trace: trace,
                             onProgress: { desc, step, total in
                                 onStateChange(.executing(toolName: String(desc.prefix(40)), step: step, total: total))
                             }

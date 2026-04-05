@@ -47,10 +47,42 @@ struct ManagedGoal: Codable, Identifiable {
 
     /// Returns the next sub-goal that is ready to execute (dependencies met, state is pending).
     func nextActionableSubGoal() -> SubGoal? {
+        actionableSubGoals().first
+    }
+
+    /// Returns ALL sub-goals ready to execute in parallel (dependencies met, state is pending).
+    func actionableSubGoals() -> [SubGoal] {
         let completedIds = Set(subGoals.filter { $0.state == .completed }.map(\.id))
-        return subGoals.first { sub in
+        return subGoals.filter { sub in
             sub.state == .pending && sub.dependencies.allSatisfy { completedIds.contains($0) }
         }
+    }
+
+    /// Validates the dependency graph has no cycles. Returns true if valid.
+    func validateDependencies() -> Bool {
+        // Topological sort via Kahn's algorithm
+        let ids = Set(subGoals.map(\.id))
+        var inDegree: [UUID: Int] = [:]
+        var adjacency: [UUID: [UUID]] = [:]
+        for sub in subGoals {
+            inDegree[sub.id] = sub.dependencies.count
+            for dep in sub.dependencies {
+                adjacency[dep, default: []].append(sub.id)
+            }
+        }
+        var queue = subGoals.filter { $0.dependencies.isEmpty }.map(\.id)
+        var visited = 0
+        while !queue.isEmpty {
+            let current = queue.removeFirst()
+            visited += 1
+            for neighbor in adjacency[current] ?? [] {
+                inDegree[neighbor, default: 0] -= 1
+                if inDegree[neighbor] == 0 {
+                    queue.append(neighbor)
+                }
+            }
+        }
+        return visited == ids.count
     }
 
     /// Overall progress percentage.

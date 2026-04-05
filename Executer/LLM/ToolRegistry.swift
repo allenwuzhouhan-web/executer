@@ -565,6 +565,25 @@ class ToolRegistry {
         return schemas
     }
 
+    /// Returns tool schemas filtered by explicit category set.
+    /// Used by AppAgent for per-app tool scoping.
+    func filteredToolDefinitions(categories: Set<ToolCategory>) -> [[String: AnyCodable]] {
+        var schemas: [[String: AnyCodable]] = []
+        for cat in categories {
+            if let catSchemas = schemasByCategory[cat] {
+                schemas.append(contentsOf: catSchemas)
+            }
+        }
+        // Deduplicate by tool name
+        var seen = Set<String>()
+        schemas = schemas.filter { schema in
+            guard let fn = schema["function"]?.value as? [String: AnyCodable],
+                  let name = fn["name"]?.value as? String else { return true }
+            return seen.insert(name).inserted
+        }
+        return schemas
+    }
+
     /// Returns only the tool schemas relevant to the given query.
     /// Reduces from 220+ tools to ~30-40, saving ~15K tokens per API call.
     func filteredToolDefinitions(for query: String) -> [[String: AnyCodable]] {

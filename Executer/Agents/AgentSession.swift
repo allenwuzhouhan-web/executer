@@ -109,6 +109,8 @@ enum PersistedTraceEntryKind: Codable {
     case contextPrune(beforeTokens: Int, afterTokens: Int)
     case retry(toolName: String, attempt: Int, reason: String)
     case selfEvaluation(passed: Bool, feedback: String)
+    case subAgentComplete(id: String, app: String?, durationMs: Double, success: Bool)
+    case hostAgentRouting(subtaskCount: Int, apps: [String])
 
     func restore() -> TraceEntryKind {
         switch self {
@@ -130,6 +132,10 @@ enum PersistedTraceEntryKind: Codable {
             return .retry(toolName: t, attempt: a, reason: r)
         case .selfEvaluation(let p, let f):
             return .selfEvaluation(passed: p, feedback: f)
+        case .subAgentComplete(let id, let app, let d, let s):
+            return .subAgentComplete(id: id, app: app, durationMs: d, success: s)
+        case .hostAgentRouting(let c, let apps):
+            return .hostAgentRouting(subtaskCount: c, apps: apps)
         }
     }
 }

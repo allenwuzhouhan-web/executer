@@ -1,7 +1,12 @@
 import Foundation
 
-/// Coordinates decomposition of complex tasks into parallel sub-agents.
-/// Each sub-agent runs its own mini agent loop with isolated message history.
+/// HostAgent-style coordinator inspired by Microsoft UFO.
+/// Decomposes complex tasks into subtasks, routes each to an AppAgent
+/// with scoped tools, and uses a TaskBlackboard for cross-agent data sharing.
+///
+/// For sequential tasks (most common): runs subtasks one-by-one so each AppAgent
+/// can use results from prior steps via the blackboard.
+/// For independent tasks: runs subtasks in parallel.
 class SubAgentCoordinator {
 
     // MARK: - Types
@@ -9,33 +14,45 @@ class SubAgentCoordinator {
     struct SubTask {
         let id: String
         let description: String
+        let targetApp: String?       // which app this subtask targets
+        let toolHints: [String]      // tool categories to prioritize
+        let dependsOn: [String]      // IDs of subtasks that must complete first
+        let hostMessage: String?     // tips from the HostAgent for this subtask
     }
 
     struct SubAgentResult {
         let taskId: String
         let description: String
         let result: String
+        let success: Bool
     }
 
-    // MARK: - Decomposition
+    let blackboard = TaskBlackboard()
+
+    // MARK: - Decomposition (HostAgent Planning)
 
     private static let decompositionPrompt = """
-    Analyze this task and determine if it can be split into independent sub-tasks that can run in parallel.
+    You are a HostAgent that plans multi-step tasks. Analyze this task and decompose it into subtasks.
+
+    For EACH subtask, specify:
+    - "id": unique string ID (e.g., "1", "2", "3")
+    - "description": what to do (be specific and actionable)
+    - "target_app": which macOS app this subtask needs (null if no specific app)
+    - "tool_hints": relevant tool categories (e.g., "files", "web", "browser", "documents", "messaging", "terminal")
+    - "depends_on": array of subtask IDs that must complete first (empty if independent)
+    - "host_message": tips or context for the sub-agent executing this
 
     Rules:
-    - Only split into TRULY independent sub-tasks (no step depends on another's result)
-    - Each sub-task must be self-contained and completable on its own
-    - 2-4 sub-tasks maximum
-    - If the task is inherently sequential (each step needs the previous result), output: null
+    - 2-6 subtasks maximum
+    - If steps need results from earlier steps, use depends_on to create a chain
+    - If steps are independent, leave depends_on empty (they'll run in parallel)
+    - Be specific about which app each step targets
+    - If the task is too simple to decompose, output: null
 
-    If decomposable, output ONLY a JSON array like:
-    [{"id": "1", "description": "..."}, {"id": "2", "description": "..."}]
-
-    If NOT decomposable, output ONLY: null
+    Output ONLY a JSON array or null.
     """
 
-    /// Ask the LLM if the task can be decomposed into parallel sub-tasks.
-    /// Returns nil if the task is sequential or decomposition isn't worthwhile.
+    /// Ask the LLM to decompose the task into routed subtasks.
     func decompose(
         command: String,
         manager: LLMServiceManager
@@ -48,74 +65,184 @@ class SubAgentCoordinator {
         guard let response = try? await manager.currentService.sendChatRequest(
             messages: messages,
             tools: nil,
-            maxTokens: 256
+            maxTokens: 512
         ), let text = response.text else {
             return nil
         }
 
         // Parse JSON response
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed != "null", trimmed.hasPrefix("[") else { return nil }
+        guard trimmed != "null", trimmed.contains("[") else { return nil }
 
-        guard let data = trimmed.data(using: .utf8),
-              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else {
+        // Extract JSON array
+        guard let start = trimmed.firstIndex(of: "["),
+              let end = trimmed.lastIndex(of: "]") else { return nil }
+        let jsonStr = String(trimmed[start...end])
+
+        guard let data = jsonStr.data(using: .utf8),
+              let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return nil
         }
 
         let subTasks = array.compactMap { dict -> SubTask? in
-            guard let id = dict["id"], let desc = dict["description"] else { return nil }
-            return SubTask(id: id, description: desc)
+            guard let id = dict["id"] as? String,
+                  let desc = dict["description"] as? String else { return nil }
+            return SubTask(
+                id: id,
+                description: desc,
+                targetApp: dict["target_app"] as? String,
+                toolHints: (dict["tool_hints"] as? [String]) ?? [],
+                dependsOn: (dict["depends_on"] as? [String]) ?? [],
+                hostMessage: dict["host_message"] as? String
+            )
         }
 
-        // Only decompose if we got 2+ sub-tasks
         return subTasks.count >= 2 ? subTasks : nil
     }
 
-    // MARK: - Parallel Execution
+    // MARK: - Execution (HostAgent Orchestration)
 
-    /// Run sub-agents in parallel, each with their own mini agent loop.
+    /// Execute subtasks respecting dependency ordering.
+    /// Independent subtasks run in parallel; dependent ones run sequentially.
     func executeSubAgents(
         subTasks: [SubTask],
         systemPrompt: String,
         manager: LLMServiceManager,
         registry: ToolRegistry,
+        trace: AgentTrace? = nil,
         onProgress: @MainActor @escaping (String, Int, Int) -> Void
     ) async throws -> String {
-        let results = await withTaskGroup(of: SubAgentResult.self) { group in
-            for (index, task) in subTasks.enumerated() {
-                group.addTask {
-                    let result = await self.runSubAgent(
-                        task: task,
-                        systemPrompt: systemPrompt,
-                        manager: manager,
-                        registry: registry
-                    )
+        // Initialize blackboard with the plan
+        let planEntries = subTasks.map { st in
+            (id: st.id, description: st.description, targetApp: st.targetApp, toolHints: st.toolHints)
+        }
+        await blackboard.setPlan(
+            goal: subTasks.map(\.description).joined(separator: "; "),
+            subtasks: planEntries
+        )
 
-                    await MainActor.run {
-                        onProgress(task.description, index + 1, subTasks.count)
-                    }
+        trace?.append(TraceEntry(kind: .hostAgentRouting(
+            subtaskCount: subTasks.count,
+            apps: subTasks.compactMap(\.targetApp)
+        )))
 
-                    return result
+        // Build dependency graph
+        let taskMap = Dictionary(uniqueKeysWithValues: subTasks.map { ($0.id, $0) })
+        var completed = Set<String>()
+        var results: [SubAgentResult] = []
+        var stepIndex = 0
+
+        // Execute in topological order
+        while completed.count < subTasks.count {
+            // Find all tasks whose dependencies are satisfied
+            let ready = subTasks.filter { task in
+                !completed.contains(task.id) &&
+                task.dependsOn.allSatisfy { completed.contains($0) }
+            }
+
+            guard !ready.isEmpty else {
+                // Cycle or all remaining tasks have unsatisfied dependencies
+                print("[HostAgent] No ready tasks — possible dependency cycle")
+                break
+            }
+
+            if ready.count == 1 {
+                // Sequential execution
+                let task = ready[0]
+                stepIndex += 1
+                await MainActor.run {
+                    onProgress(task.targetApp ?? task.description, stepIndex, subTasks.count)
                 }
-            }
 
-            var collected: [SubAgentResult] = []
-            collected.reserveCapacity(subTasks.count)
-            for await result in group {
-                collected.append(result)
+                let result = await runAppAgent(
+                    task: task,
+                    service: manager.currentService,
+                    registry: registry,
+                    trace: trace
+                )
+                results.append(result)
+                completed.insert(task.id)
+            } else {
+                // Parallel execution for independent tasks
+                let batchResults = await withTaskGroup(of: SubAgentResult.self) { group in
+                    for task in ready {
+                        group.addTask {
+                            await self.runAppAgent(
+                                task: task,
+                                service: manager.currentService,
+                                registry: registry,
+                                trace: trace
+                            )
+                        }
+                    }
+                    var collected: [SubAgentResult] = []
+                    for await result in group {
+                        stepIndex += 1
+                        await MainActor.run {
+                            onProgress(result.description, stepIndex, subTasks.count)
+                        }
+                        collected.append(result)
+                    }
+                    return collected
+                }
+                results.append(contentsOf: batchResults)
+                for r in batchResults { completed.insert(r.taskId) }
             }
-            return collected.sorted { $0.taskId < $1.taskId }
         }
 
-        // If only one sub-agent had meaningful output, return it directly
-        let nonEmpty = results.filter { !$0.result.isEmpty }
+        // Merge results
+        return await mergeResults(results, manager: manager)
+    }
+
+    // MARK: - AppAgent Dispatch
+
+    private func runAppAgent(
+        task: SubTask,
+        service: LLMServiceProtocol,
+        registry: ToolRegistry,
+        trace: AgentTrace?
+    ) async -> SubAgentResult {
+        let config = AppAgent.Config(
+            subtaskId: task.id,
+            subtaskDescription: task.description,
+            targetApp: task.targetApp,
+            toolHints: task.toolHints,
+            maxIterations: 8,
+            maxTokens: 2048,
+            hostMessage: task.hostMessage
+        )
+
+        let result = await AppAgent.execute(
+            config: config,
+            blackboard: blackboard,
+            service: service,
+            registry: registry,
+            onStateChange: { _ in },  // Sub-agents use trace, not main UI state
+            trace: trace
+        )
+
+        return SubAgentResult(
+            taskId: result.subtaskId,
+            description: task.description,
+            result: result.output,
+            success: result.success
+        )
+    }
+
+    // MARK: - Result Merging
+
+    private func mergeResults(_ results: [SubAgentResult], manager: LLMServiceManager) async -> String {
+        let sorted = results.sorted { $0.taskId < $1.taskId }
+
+        // If only one meaningful result, return it directly
+        let nonEmpty = sorted.filter { !$0.result.isEmpty && $0.result != "Done." }
         if nonEmpty.count == 1 {
             return nonEmpty[0].result
         }
 
-        // Merge results with a synthesis LLM call
-        let mergeContent = results
-            .map { "## Sub-task: \($0.description)\n\($0.result)" }
+        // For multiple results, synthesize
+        let mergeContent = sorted
+            .map { "## \($0.description)\n\($0.result)" }
             .joined(separator: "\n\n")
 
         let mergeMessages = [
@@ -131,66 +258,8 @@ class SubAgentCoordinator {
             return merged
         }
 
-        // Fallback: concatenate results
-        return results.map { "**\($0.description):**\n\($0.result)" }.joined(separator: "\n\n")
-    }
-
-    // MARK: - Mini Agent Loop
-
-    /// Run a single sub-agent with a focused mini agent loop (max 5 iterations).
-    private func runSubAgent(
-        task: SubTask,
-        systemPrompt: String,
-        manager: LLMServiceManager,
-        registry: ToolRegistry
-    ) async -> SubAgentResult {
-        var messages: [ChatMessage] = [
-            ChatMessage(role: "system", content: systemPrompt),
-            ChatMessage(role: "user", content: task.description)
-        ]
-
-        let tools = registry.toolDefinitions()
-        var finalText = ""
-
-        for iteration in 0..<5 {
-            if Task.isCancelled { break }
-
-            guard let response = try? await manager.currentService.sendChatRequest(
-                messages: messages,
-                tools: tools,
-                maxTokens: 2048
-            ) else { break }
-
-            guard let toolCalls = response.toolCalls, !toolCalls.isEmpty else {
-                finalText = response.text ?? ""
-                break
-            }
-
-            messages.append(response.rawMessage)
-
-            // Execute tools (parallel for independent, sequential for UI)
-            let results = await AgentLoop.executeToolCalls(
-                toolCalls,
-                registry: registry,
-                iteration: iteration,
-                maxIterations: 5,
-                onStateChange: { _ in } // Sub-agents don't update main UI state
-            )
-
-            for r in results {
-                messages.append(ChatMessage(
-                    role: "tool",
-                    content: r.result,
-                    tool_call_id: r.callId
-                ))
-            }
-        }
-
-        return SubAgentResult(
-            taskId: task.taskId,
-            description: task.description,
-            result: finalText
-        )
+        // Fallback
+        return sorted.map { "**\($0.description):**\n\($0.result)" }.joined(separator: "\n\n")
     }
 }
 
