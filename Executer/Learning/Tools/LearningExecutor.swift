@@ -95,7 +95,7 @@ struct GetCurrentSessionTool: ToolDefinition {
 
         // 1. What app is the user actually in? (captured before input bar opened)
         let delegate = NSApplication.shared.delegate as? AppDelegate
-        let userApp = delegate?.appState.lastFrontmostAppName ?? "Unknown"
+        let userApp = await delegate?.appState.lastFrontmostAppName ?? "Unknown"
         parts.append("**Frontmost app:** \(userApp)")
 
         // 2. Read visible text from that app (actual screen content)
@@ -113,16 +113,34 @@ struct GetCurrentSessionTool: ToolDefinition {
             .map { $0.localizedName! }
         parts.append("**Running apps:** \(running.joined(separator: ", "))")
 
-        // 4. Session data (if available)
-        if let session = SessionDetector.shared.currentSession() {
-            parts.append("\n**Active session:** \(session.title) (\(session.durationFormatted))")
-            parts.append("**Session apps:** \(session.apps.joined(separator: " → "))")
-            if !session.topics.isEmpty {
-                parts.append("**Topics:** \(session.topics.sorted().prefix(5).joined(separator: ", "))")
+        // 4. Active workflow journal (from Workflow Recorder — live task tracking)
+        let activeJournal = await JournalManager.shared.activeJournal
+        if let journal = activeJournal {
+            parts.append("\n**Current task:** \(journal.taskDescription.isEmpty ? "Active task" : journal.taskDescription) (\(journal.durationFormatted))")
+            parts.append("**Task apps:** \(journal.apps.joined(separator: " → "))")
+            if !journal.topicTerms.isEmpty {
+                parts.append("**Topics:** \(journal.topicTerms.prefix(8).joined(separator: ", "))")
+            }
+            // Show last few actions for context
+            let recentEntries = journal.entries.suffix(5)
+            if !recentEntries.isEmpty {
+                parts.append("**Recent actions:**")
+                for entry in recentEntries {
+                    parts.append("  - \(entry.semanticAction) [\(entry.appContext)]")
+                }
             }
         }
 
-        // 5. Explicit instruction to prevent hallucination
+        // 5. Recent closed journals (what user did before current task)
+        let recentJournals = JournalStore.shared.recentJournals(limit: 3, status: .closed)
+        if !recentJournals.isEmpty {
+            parts.append("\n**Previous tasks:**")
+            for j in recentJournals {
+                parts.append("  - \(j.taskDescription.isEmpty ? "Untitled" : j.taskDescription) (\(j.durationFormatted), \(j.apps.joined(separator: "→")))")
+            }
+        }
+
+        // 6. Explicit instruction to prevent hallucination
         parts.append("\nIMPORTANT: Only report what is shown above. Do NOT invent app usage times, hours invested, or project details that aren't in this data.")
 
         return parts.joined(separator: "\n")
@@ -139,23 +157,47 @@ struct GetTodayContextTool: ToolDefinition {
     }
 
     func execute(arguments: String) async throws -> String {
-        let sessions = SessionDetector.shared.todaysSessions()
-        guard !sessions.isEmpty else {
-            return "No work sessions recorded today yet."
+        // Use Workflow Recorder journals for accurate today context
+        let allJournals = JournalStore.shared.recentJournals(limit: 50)
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let todayJournals = allJournals.filter { $0.startTime >= todayStart }
+
+        // Also include the active journal
+        let activeJournal = await JournalManager.shared.activeJournal
+
+        let totalJournals = todayJournals.count + (activeJournal != nil ? 1 : 0)
+        guard totalJournals > 0 else {
+            return "No work sessions recorded today yet. The workflow recorder is active and will capture your tasks as you work."
         }
 
-        var lines = ["## Today's Work Sessions (\(sessions.count)):"]
-        for (i, session) in sessions.enumerated() {
-            lines.append("\n\(i + 1). **\(session.title)** (\(session.durationFormatted))")
-            lines.append("   Apps: \(session.apps.joined(separator: " → "))")
-            if !session.topics.isEmpty {
-                lines.append("   Topics: \(session.topics.sorted().prefix(5).joined(separator: ", "))")
+        var lines = ["## Today's Tasks (\(totalJournals)):"]
+
+        // Show active journal first
+        if let active = activeJournal {
+            lines.append("\n**[ACTIVE]** \(active.taskDescription.isEmpty ? "Current task" : active.taskDescription) (\(active.durationFormatted))")
+            lines.append("   Apps: \(active.apps.joined(separator: " → "))")
+            if !active.topicTerms.isEmpty {
+                lines.append("   Topics: \(active.topicTerms.prefix(5).joined(separator: ", "))")
             }
         }
 
-        let topTopics = AttentionTracker.shared.topTopicsToday()
-        if !topTopics.isEmpty {
-            lines.append("\n## Top Topics Today: \(topTopics.joined(separator: ", "))")
+        // Show completed today journals
+        for (i, journal) in todayJournals.prefix(10).enumerated() {
+            let desc = journal.taskDescription.isEmpty ? "Task \(i + 1)" : journal.taskDescription
+            lines.append("\n\(i + 1). **\(desc)** (\(journal.durationFormatted))")
+            lines.append("   Apps: \(journal.apps.joined(separator: " → "))")
+            if !journal.topicTerms.isEmpty {
+                lines.append("   Topics: \(journal.topicTerms.prefix(5).joined(separator: ", "))")
+            }
+        }
+
+        // Aggregate stats
+        let allApps = Set((todayJournals.flatMap(\.apps)) + (activeJournal?.apps ?? []))
+        let allTopics = Set((todayJournals.flatMap(\.topicTerms)) + (activeJournal?.topicTerms ?? []))
+        lines.append("\n## Summary")
+        lines.append("Apps used today: \(allApps.sorted().joined(separator: ", "))")
+        if !allTopics.isEmpty {
+            lines.append("Topics: \(allTopics.sorted().prefix(10).joined(separator: ", "))")
         }
 
         return lines.joined(separator: "\n")
@@ -208,7 +250,7 @@ struct GetDailySummaryTool: ToolDefinition {
         let date = try requiredString("date", from: args)
 
         let fm = FileManager.default
-        let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer/daily_summaries", isDirectory: true)
         let file = dir.appendingPathComponent("\(date).md")
 
