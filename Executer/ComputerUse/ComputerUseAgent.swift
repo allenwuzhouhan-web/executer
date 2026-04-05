@@ -1,4 +1,5 @@
 import Foundation
+import ComputerLib
 
 /// The core see-think-act agent loop for autonomous computer control.
 /// Two modes:
@@ -35,6 +36,7 @@ class ComputerUseAgent {
     private struct WorkingMemory {
         var actionsPerformed: [(action: String, result: String)] = []
         var lastPerception: VisionEngine.ScreenPerception?
+        var lastScreenMap: ScreenMap?
         var stuckCount: Int = 0
         var lastActionDescription: String = ""
 
@@ -57,12 +59,16 @@ class ComputerUseAgent {
     private static let screenModePrompt = """
     You are Executer in Computer Use mode. You can see the screen and control mouse/keyboard.
 
-    Each turn you get the current screen state. WORKFLOW:
+    Each turn you get the current screen state with @e references. WORKFLOW:
     1. Read screen state. 2. Decide action. 3. Call tool(s). 4. Observe next screen.
 
     RULES:
-    - click_element for labeled targets, click with x,y for unlabeled.
+    - click_ref @eN for precise element targeting (preferred). Example: click_ref @e5
+    - click_element for fallback text search, click with x,y for unlabeled targets.
+    - Prefer keyboard shortcuts over clicking when available.
     - Click field before typing. paste_text for text >2 chars.
+    - Elements marked DANGER require user confirmation — do not interact.
+    - Elements marked SENSITIVE have redacted values — do not read.
     - 3 failed attempts → try alternative. When done → text response, no tools.
     """
 
@@ -352,7 +358,7 @@ class ComputerUseAgent {
             tools = registry.filteredToolDefinitions(allowlist: allowlist)
         } else {
             tools = registry.filteredToolDefinitions(allowlist: [
-                "move_cursor", "click", "click_element", "scroll", "drag", "get_cursor_position",
+                "move_cursor", "click", "click_element", "click_ref", "scroll", "drag", "get_cursor_position",
                 "type_text", "press_key", "hotkey", "select_all_text", "paste_text",
                 "capture_screen", "ocr_image", "perceive_screen", "perceive_screen_visual", "find_element",
                 "launch_app", "switch_to_app",
@@ -368,11 +374,31 @@ class ComputerUseAgent {
             ChatMessage(role: "user", content: "Goal: \(goal)")
         ]
 
-        let initialPerception = await VisionEngine.shared.perceive(forceScreenshot: config.perceptionMode == .screenshotOnly || config.perceptionMode == .axPlusScreenshot)
-        messages.append(config.useVisionLLM
-            ? VisionMessageBuilder.visionMessage(from: initialPerception)
-            : VisionMessageBuilder.textMessage(from: initialPerception))
-        workingMemory.lastPerception = initialPerception
+        // ComputerLib-powered perception (30x fewer tokens, safety, learning)
+        let bridge = ComputerLibBridge.shared
+        let forceScreenshot = config.perceptionMode == .screenshotOnly || config.perceptionMode == .axPlusScreenshot
+        let initialMap = await bridge.capture(forceOCR: forceScreenshot)
+        let screenText = bridge.formatForLLM(initialMap)
+
+        // Inject keyboard shortcuts into system prompt
+        let shortcuts = bridge.discoverShortcuts()
+        if !shortcuts.isEmpty {
+            messages[0] = ChatMessage(role: "system", content: (messages[0].content ?? "") + "\n\n" + ShortcutAdvisor.formatForLLM(shortcuts))
+        }
+
+        // Inject confusion patterns from learning database
+        if let confusions = bridge.confusionSummary() {
+            messages[0] = ChatMessage(role: "system", content: (messages[0].content ?? "") + "\n\n" + confusions)
+        }
+
+        // Undo state
+        let undo = bridge.undoState()
+        let undoText = undo.canUndo ? "\nUndo: \(undo.summary)" : ""
+
+        messages.append(ChatMessage(role: "user", content: "[Screen State]\n\(screenText)\(undoText)"))
+        workingMemory.lastScreenMap = initialMap
+        // Keep legacy in sync for backward compat
+        workingMemory.lastPerception = await VisionEngine.shared.perceive(forceScreenshot: forceScreenshot)
 
         var finalText = "Completed."
 
@@ -416,34 +442,44 @@ class ComputerUseAgent {
                 messages.append(ChatMessage(role: "tool", content: r.result, tool_call_id: r.callId))
                 workingMemory.addAction(action: r.toolName, result: String(r.result.prefix(200)))
                 workingMemory.lastActionDescription = AgentLoop.friendlyName(for: r.toolName)
+
+                // Record failures for learning
+                let lower = r.result.lowercased()
+                if (lower.contains("error") || lower.contains("not found") || lower.contains("blocked"))
+                   && (r.toolName == "click_ref" || r.toolName == "click_element") {
+                    bridge.recordFailure(refString: "", action: r.toolName, error: String(r.result.prefix(200)))
+                }
             }
 
-            // Verify action effect and get fresh perception
-            let forceScreenshot = config.perceptionMode == .screenshotOnly || config.perceptionMode == .axPlusScreenshot
-            VisionEngine.shared.invalidateCache() // Ensure fresh read after actions
-            let newPerception = await VisionEngine.shared.perceive(forceScreenshot: forceScreenshot)
+            // ComputerLib-powered change detection (rich diffs, not just changed/unchanged)
+            bridge.invalidateCache()
+            let newMap = await bridge.capture(forceOCR: forceScreenshot)
 
-            if let last = workingMemory.lastPerception {
-                // Detect app switch — critical context for the LLM
-                if let lastPID = last.focusedPID, let newPID = newPerception.focusedPID, lastPID != newPID {
-                    messages.append(ChatMessage(role: "user", content: "[App switched: \(last.appName) → \(newPerception.appName)]"))
+            if let lastMap = workingMemory.lastScreenMap {
+                let diff = bridge.diff(previous: lastMap, current: newMap)
+
+                if diff.appSwitched {
+                    messages.append(ChatMessage(role: "user", content: "[App switched: \(diff.previousApp ?? "?") → \(diff.currentApp ?? "?")]"))
                 }
 
-                if !VisionEngine.shared.detectChanges(from: last) {
+                if diff.isEmpty {
                     messages.append(ChatMessage(role: "user", content: "[Screen unchanged]"))
                     workingMemory.stuckCount += 1
+                } else if diff.hasMajorChange {
+                    // Full re-render on major changes (dialog open, app switch)
+                    let fullText = bridge.formatForLLM(newMap)
+                    messages.append(ChatMessage(role: "user", content: "[Screen State]\n\(fullText)"))
+                    workingMemory.stuckCount = 0
                 } else {
-                    messages.append(config.useVisionLLM
-                        ? VisionMessageBuilder.visionMessage(from: newPerception)
-                        : VisionMessageBuilder.textMessage(from: newPerception))
+                    // Incremental diff (20-40 tokens vs 120+ for full)
+                    messages.append(ChatMessage(role: "user", content: bridge.buildDiffMessage(diff)))
                     workingMemory.stuckCount = 0
                 }
             } else {
-                messages.append(config.useVisionLLM
-                    ? VisionMessageBuilder.visionMessage(from: newPerception)
-                    : VisionMessageBuilder.textMessage(from: newPerception))
+                let fullText = bridge.formatForLLM(newMap)
+                messages.append(ChatMessage(role: "user", content: "[Screen State]\n\(fullText)"))
             }
-            workingMemory.lastPerception = newPerception
+            workingMemory.lastScreenMap = newMap
 
             if workingMemory.stuckCount >= 3 {
                 messages.append(ChatMessage(role: "user", content: "[HINT: Screen unchanged 3x. Try different approach.]"))

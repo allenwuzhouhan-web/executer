@@ -43,7 +43,7 @@ class AgentLoop {
 
     private static let friendlyNames: [String: String] = [
         "launch_app": "Opening app", "quit_app": "Closing app",
-        "click": "Clicking", "click_element": "Clicking",
+        "click": "Clicking", "click_element": "Clicking", "click_ref": "Clicking",
         "type_text": "Typing", "press_key": "Pressing key",
         "hotkey": "Shortcut", "scroll": "Scrolling",
         "move_cursor": "Moving cursor", "drag": "Dragging",
@@ -57,14 +57,14 @@ class AgentLoop {
 
     // UI tools MUST execute sequentially — they depend on screen state
     private static let uiSequentialTools: Set<String> = [
-        "click", "click_element", "type_text", "press_key", "hotkey",
+        "click", "click_element", "click_ref", "type_text", "press_key", "hotkey",
         "scroll", "drag", "move_cursor", "launch_app", "select_all_text",
         "paste_text", "browser_click_element_css", "browser_type_in_element",
     ]
 
     private static let toolDelays: [String: UInt64] = [
         "launch_app": 1_000_000_000,
-        "click": 200_000_000, "click_element": 200_000_000,
+        "click": 200_000_000, "click_element": 200_000_000, "click_ref": 200_000_000,
         "type_text": 200_000_000, "press_key": 200_000_000,
         "hotkey": 200_000_000, "scroll": 200_000_000,
         "move_cursor": 200_000_000,
@@ -421,7 +421,7 @@ class AgentLoop {
                     messages = previousMessages
                     messages.append(ChatMessage(role: "user", content: effectiveCommand))
                 } else {
-                    var systemPrompt = manager.fullSystemPrompt(context: context, query: effectiveCommand)
+                    var systemPrompt = await MainActor.run { manager.fullSystemPrompt(context: context, query: effectiveCommand) }
                     if let override = agent?.systemPromptOverride {
                         systemPrompt += "\n\n" + override
                     }

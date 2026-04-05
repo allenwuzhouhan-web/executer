@@ -58,7 +58,7 @@ enum ToolSafetyClassifier {
         "show_notification": .normal, "speak_text": .normal,
         "set_clipboard_text": .normal,
         "type_text": .normal, "press_key": .normal, "hotkey": .normal, "select_all_text": .normal,
-        "move_cursor": .normal, "click": .normal, "click_element": .normal, "scroll": .normal, "drag": .normal,
+        "move_cursor": .normal, "click": .normal, "click_element": .normal, "click_ref": .normal, "scroll": .normal, "drag": .normal,
         "create_reminder": .normal, "create_calendar_event": .normal, "create_note": .normal, "set_timer": .normal, "set_alarm": .normal,
         "open_email": .normal,
         "open_system_preferences_pane": .normal,

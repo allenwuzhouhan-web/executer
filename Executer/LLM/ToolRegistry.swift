@@ -236,6 +236,7 @@ class ToolRegistry {
             MoveCursorTool(),
             ClickTool(),
             ClickElementTool(),
+            ClickRefTool(),
             ScrollTool(),
             DragTool(),
             GetCursorPositionTool(),
@@ -476,7 +477,7 @@ class ToolRegistry {
             "send_email_briefing": .productivity, "schedule_email_briefing": .productivity,
             "list_email_briefings": .productivity, "cancel_email_briefing": .productivity,
             // Cursor
-            "move_cursor": .cursor, "click": .cursor, "click_element": .cursor,
+            "move_cursor": .cursor, "click": .cursor, "click_element": .cursor, "click_ref": .cursor,
             "scroll": .cursor, "drag": .cursor, "get_cursor_position": .cursor,
             // Keyboard
             "type_text": .keyboard, "press_key": .keyboard, "hotkey": .keyboard, "select_all_text": .keyboard,

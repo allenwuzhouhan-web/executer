@@ -1,5 +1,6 @@
 import Cocoa
 import CoreGraphics
+import ComputerLib
 
 // MARK: - AI Cursor Activation Helper
 
@@ -73,6 +74,24 @@ struct ClickTool: ToolDefinition {
             position = CGPoint(x: nsPos.x, y: screenHeight - nsPos.y)
         }
 
+        // Safety gate: check if click position targets a dangerous element
+        if let map = ComputerLibBridge.shared.lastMap {
+            let windowTitle = map.windows.first(where: { $0.isFocused })?.title ?? ""
+            let context = DangerDetector.ScanContext(appBundleID: map.focusedApp.bundleID, windowTitle: windowTitle)
+            for el in map.elements {
+                guard let click = el.clickPoint, el.role.isInteractive else { continue }
+                let dx = click.x - position.x
+                let dy = click.y - position.y
+                if dx * dx + dy * dy < 400 { // 20px radius
+                    let result = DangerDetector.classify(element: el, context: context)
+                    if result.level == .dangerous {
+                        return "BLOCKED: Click at (\(Int(position.x)),\(Int(position.y))) targets \"\(el.label)\" — \(result.reason ?? "destructive action"). Use click_ref for explicit targeting."
+                    }
+                    break
+                }
+            }
+        }
+
         let source = CGEventSource(stateID: .hidSystemState)
 
         let isRight = button == "right"
@@ -124,6 +143,18 @@ struct ClickElementTool: ToolDefinition {
         ensureAICursorActive()
         let args = try parseArguments(arguments)
         let target = try requiredString("description", from: args).lowercased()
+
+        // Safety check via ComputerLib disambiguation
+        if let map = ComputerLibBridge.shared.lastMap {
+            if let matched = Disambiguator.bestMatch(label: target, in: map, preferredRole: .button, db: ElementDatabase.shared) {
+                let windowTitle = map.windows.first(where: { $0.isFocused })?.title ?? ""
+                let context = DangerDetector.ScanContext(appBundleID: map.focusedApp.bundleID, windowTitle: windowTitle)
+                let danger = DangerDetector.classify(element: matched, context: context)
+                if danger.level == .dangerous {
+                    return "BLOCKED: '\(target)' is dangerous — \(danger.reason ?? "destructive action")."
+                }
+            }
+        }
 
         // Try accessibility first — it's faster and gives exact positions
         if let pos = findElementViaAccessibility(matching: target) {

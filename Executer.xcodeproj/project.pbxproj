@@ -320,6 +320,7 @@
 		4BE53A796A07A51D5DFEF7C5 /* BrowserService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADC822B99A9972AEF34C642A /* BrowserService.swift */; };
 		F89151D9A117C8DDDD3FA551 /* BrowserTrailStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D87B4D2A5C6F61EAD7475D55 /* BrowserTrailStore.swift */; };
 		C2BF315CE2ADF5E1254D7A72 /* ChromeCDPLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC97B51F3575481150B826A9 /* ChromeCDPLauncher.swift */; };
+		FD51BCA05D87F78D998FAF0F /* ComputerLibBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70B9478988DCC516AB9386A5 /* ComputerLibBridge.swift */; };
 		DAF0003EB81D97B6E5FEFFF5 /* ComputerUseAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D88FA3ABE6A08023F1A24AB /* ComputerUseAgent.swift */; };
 		0AEC837346933C18594C11DC /* ComputerUseDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5B124D3E05C4B893A992C46 /* ComputerUseDetector.swift */; };
 		D84123EB6ED94E918FECBF82 /* SpeedBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8379EBFC2665BA001DF754F0 /* SpeedBenchmark.swift */; };
@@ -337,6 +338,7 @@
 		53EA05FA90CAE617AB5E36A4 /* FormulaDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2C403BB3BF6F0732A45AB9A /* FormulaDatabase.swift */; };
 		61B87A9AE0E06B44B7169DF4 /* SmartCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB09E3CBD2133481136AA427 /* SmartCalculator.swift */; };
 		44F4873F17D00C623512A22D /* AppExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D35FDB2888D0D8229017DC7D /* AppExecutor.swift */; };
+		4991082D1F056618261199C0 /* ClickRefTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BFE1F642718634FF9D60389 /* ClickRefTool.swift */; };
 		C6DBE2FF090F058CD336D952 /* ClipboardExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518D165CA234DDBBA00C09CA /* ClipboardExecutor.swift */; };
 		641E02146A15AA30D2FB61AD /* ClipboardHistoryExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24306D5C1AD0AE638394A65 /* ClipboardHistoryExecutor.swift */; };
 		0ACB4887278C11664843A8D6 /* CursorExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF09F6C9738EEA87C9E7B68 /* CursorExecutor.swift */; };
@@ -410,6 +412,7 @@
 		5EE8AF2DDBC5A79DD042D53F /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AD6CBD24C7158E374A454127 /* AVFoundation.framework */; };
 		049CE24D97483D4021270191 /* Vision.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F98B99473DE65D4EEFE74CA5 /* Vision.framework */; };
 		734497876902798F9C859EB9 /* Speech.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E48DA214D0744E6500ACDF70 /* Speech.framework */; };
+		67A3A8B2E014955AAE155418 /* ComputerLib in Frameworks */ = {isa = PBXBuildFile; productRef = E813EEEE2659B047FDD1ACEF /* ComputerLib */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -726,6 +729,7 @@
 		ADC822B99A9972AEF34C642A /* BrowserService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserService.swift; sourceTree = "<group>"; };
 		D87B4D2A5C6F61EAD7475D55 /* BrowserTrailStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserTrailStore.swift; sourceTree = "<group>"; };
 		FC97B51F3575481150B826A9 /* ChromeCDPLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeCDPLauncher.swift; sourceTree = "<group>"; };
+		70B9478988DCC516AB9386A5 /* ComputerLibBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputerLibBridge.swift; sourceTree = "<group>"; };
 		7D88FA3ABE6A08023F1A24AB /* ComputerUseAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputerUseAgent.swift; sourceTree = "<group>"; };
 		A5B124D3E05C4B893A992C46 /* ComputerUseDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputerUseDetector.swift; sourceTree = "<group>"; };
 		8379EBFC2665BA001DF754F0 /* SpeedBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeedBenchmark.swift; sourceTree = "<group>"; };
@@ -743,6 +747,7 @@
 		A2C403BB3BF6F0732A45AB9A /* FormulaDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormulaDatabase.swift; sourceTree = "<group>"; };
 		DB09E3CBD2133481136AA427 /* SmartCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmartCalculator.swift; sourceTree = "<group>"; };
 		D35FDB2888D0D8229017DC7D /* AppExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppExecutor.swift; sourceTree = "<group>"; };
+		5BFE1F642718634FF9D60389 /* ClickRefTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClickRefTool.swift; sourceTree = "<group>"; };
 		518D165CA234DDBBA00C09CA /* ClipboardExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardExecutor.swift; sourceTree = "<group>"; };
 		F24306D5C1AD0AE638394A65 /* ClipboardHistoryExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardHistoryExecutor.swift; sourceTree = "<group>"; };
 		AFF09F6C9738EEA87C9E7B68 /* CursorExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorExecutor.swift; sourceTree = "<group>"; };
@@ -834,6 +839,7 @@
 				5EE8AF2DDBC5A79DD042D53F /* AVFoundation.framework in Frameworks */,
 				049CE24D97483D4021270191 /* Vision.framework in Frameworks */,
 				734497876902798F9C859EB9 /* Speech.framework in Frameworks */,
+				67A3A8B2E014955AAE155418 /* ComputerLib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -996,6 +1002,7 @@
 			isa = PBXGroup;
 			children = (
 				427664DE1F0B0442CC9E6C6B /* TaskProfiles */,
+				70B9478988DCC516AB9386A5 /* ComputerLibBridge.swift */,
 				7D88FA3ABE6A08023F1A24AB /* ComputerUseAgent.swift */,
 				A5B124D3E05C4B893A992C46 /* ComputerUseDetector.swift */,
 				8379EBFC2665BA001DF754F0 /* SpeedBenchmark.swift */,
@@ -1040,6 +1047,7 @@
 			isa = PBXGroup;
 			children = (
 				D35FDB2888D0D8229017DC7D /* AppExecutor.swift */,
+				5BFE1F642718634FF9D60389 /* ClickRefTool.swift */,
 				518D165CA234DDBBA00C09CA /* ClipboardExecutor.swift */,
 				F24306D5C1AD0AE638394A65 /* ClipboardHistoryExecutor.swift */,
 				AFF09F6C9738EEA87C9E7B68 /* CursorExecutor.swift */,
@@ -1740,6 +1748,9 @@
 			dependencies = (
 			);
 			name = Executer;
+			packageProductDependencies = (
+				E813EEEE2659B047FDD1ACEF /* ComputerLib */,
+			);
 			productName = Executer;
 			productReference = 02FE442863ADE05142275DE6 /* Executer.app */;
 			productType = "com.apple.product-type.application";
@@ -1758,6 +1769,9 @@
 				Base,
 			);
 			mainGroup = 71D2E56247FE75C3DCE9B609;
+			packageReferences = (
+				7DBEB8710739027B7AA16858 /* XCLocalSwiftPackageReference "ComputerLib" */,
+			);
 			productRefGroup = 9A76A62D587AD0C58292763F /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -2106,6 +2120,7 @@
 				4BE53A796A07A51D5DFEF7C5 /* BrowserService.swift in Sources */,
 				F89151D9A117C8DDDD3FA551 /* BrowserTrailStore.swift in Sources */,
 				C2BF315CE2ADF5E1254D7A72 /* ChromeCDPLauncher.swift in Sources */,
+				FD51BCA05D87F78D998FAF0F /* ComputerLibBridge.swift in Sources */,
 				DAF0003EB81D97B6E5FEFFF5 /* ComputerUseAgent.swift in Sources */,
 				0AEC837346933C18594C11DC /* ComputerUseDetector.swift in Sources */,
 				D84123EB6ED94E918FECBF82 /* SpeedBenchmark.swift in Sources */,
@@ -2123,6 +2138,7 @@
 				53EA05FA90CAE617AB5E36A4 /* FormulaDatabase.swift in Sources */,
 				61B87A9AE0E06B44B7169DF4 /* SmartCalculator.swift in Sources */,
 				44F4873F17D00C623512A22D /* AppExecutor.swift in Sources */,
+				4991082D1F056618261199C0 /* ClickRefTool.swift in Sources */,
 				C6DBE2FF090F058CD336D952 /* ClipboardExecutor.swift in Sources */,
 				641E02146A15AA30D2FB61AD /* ClipboardHistoryExecutor.swift in Sources */,
 				0ACB4887278C11664843A8D6 /* CursorExecutor.swift in Sources */,
@@ -2294,6 +2310,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		7DBEB8710739027B7AA16858 /* XCLocalSwiftPackageReference "ComputerLib" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../computer;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E813EEEE2659B047FDD1ACEF /* ComputerLib */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ComputerLib;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 3EA85DEB39831F1A38B218D1 /* Project object */;
 }
