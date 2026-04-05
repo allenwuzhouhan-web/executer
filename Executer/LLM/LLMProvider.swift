@@ -397,9 +397,8 @@ class LLMServiceManager: ObservableObject {
         let humor = HumorMode.shared.isEnabled ? humorPromptSection : ""
         let language = LanguageManager.shared.systemPromptLanguageInstruction()
         // Use the app the user was in BEFORE opening the input bar (not Executer itself)
-        let captured = MainActor.assumeIsolated {
-            (NSApplication.shared.delegate as? AppDelegate)?.appState.lastFrontmostAppName ?? ""
-        }
+        // Access the cached value set by AppState when input bar opens (thread-safe String copy)
+        let captured = AppState.lastCapturedAppName
         let frontmostApp = captured.isEmpty ? (NSWorkspace.shared.frontmostApplication?.localizedName ?? "") : captured
         let learned = LearningContextProvider.fullContextSection(forApp: frontmostApp, query: query)
         let learnedSection = learned.isEmpty ? "" : "\n\n\(learned)"

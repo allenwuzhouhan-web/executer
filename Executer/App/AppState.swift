@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 class AppState: ObservableObject {
     @Published var inputBarVisible = false
     @Published var inputBarState: InputBarState = .idle
@@ -15,6 +16,7 @@ class AppState: ObservableObject {
     private var currentTask: Task<Void, Never>?
     private var conversationMessages: [ChatMessage] = []
     private var lastCommandTime: Date = .distantPast
+    private var pendingResumeSession: AgentSession?
 
     private var inputBarPanel: InputBarPanel?
     private var notchWindow: NotchWindow?
@@ -75,7 +77,104 @@ class AppState: ObservableObject {
         voiceIntegration.delegate = self
         voiceIntegration.setup()
 
+        // Restore conversation from last session (enables follow-ups after restart)
+        restoreLastSession()
+
         print("[AppState] setup() complete")
+    }
+
+    // MARK: - Session Persistence
+
+    /// Restore conversation state from the last persisted session.
+    private func restoreLastSession() {
+        let store = AgentSessionStore.shared
+
+        // Check for interrupted session — agent was running when app quit
+        if let interrupted = store.findInterruptedSession() {
+            pendingResumeSession = interrupted
+            print("[AppState] Found interrupted session: \(interrupted.command.prefix(60))")
+        }
+
+        // Restore conversation messages from last session for follow-up continuity
+        if let messages = store.lastSessionMessages() {
+            conversationMessages = messages
+            lastCommandTime = Date() // allow follow-up window
+            print("[AppState] Restored \(messages.count) conversation messages from previous session")
+        }
+    }
+
+    /// Resume an agent that was interrupted by app quit.
+    /// Called when the user opens the input bar and there's a pending resume.
+    func checkForInterruptedAgent() {
+        guard let session = pendingResumeSession else { return }
+        pendingResumeSession = nil
+
+        // Only resume if session is less than 10 minutes old
+        guard Date().timeIntervalSince(session.updatedAt) < 600 else {
+            AgentSessionStore.shared.dismissInterrupted(session)
+            return
+        }
+
+        // Show the interrupted session's state as a thought recall
+        let recall = ThoughtRecall(
+            thoughtId: 0,
+            appBundleId: "com.allenwu.executer",
+            appName: "Executer",
+            windowTitle: nil,
+            textPreview: String(session.command.prefix(200)),
+            summary: "This task was interrupted when the app closed. Tap to resume.",
+            timeElapsed: Date().timeIntervalSince(session.updatedAt),
+            timestamp: session.updatedAt
+        )
+        inputBarState = .thoughtRecall(recall)
+    }
+
+    /// Actually resume execution of an interrupted session.
+    func resumeInterruptedSession() {
+        let store = AgentSessionStore.shared
+        guard let interrupted = store.findInterruptedSession() else { return }
+        let resumed = store.resumeSession(interrupted)
+
+        // Restore agent profile
+        if let agent = AgentRegistry.shared.profile(for: resumed.agentId) {
+            currentAgent = agent
+        }
+
+        inputBarState = .processing
+        let agentProfile: AgentProfile? = resumed.agentId == "general" ? nil : currentAgent
+
+        currentTask = agentLoop.execute(
+            fullCommand: resumed.command,
+            resolvedCommand: resumed.command,
+            previousMessages: resumed.messages,
+            agent: agentProfile,
+            resumeFromIteration: resumed.lastIteration,
+            onStateChange: { [weak self] state in
+                self?.inputBarState = state
+            },
+            onComplete: { [weak self] displayMessage, filteredText, messages, trace in
+                let parsed = ResponseParser.parse(displayMessage)
+                switch parsed {
+                case .text:
+                    self?.inputBarState = .result(message: displayMessage, trace: trace)
+                default:
+                    self?.inputBarState = .richResult(result: parsed, rawMessage: displayMessage, trace: trace)
+                }
+                self?.resultText = filteredText
+                self?.conversationMessages = messages
+                self?.lastCommandTime = Date()
+                CommandHistory.shared.add(command: resumed.command, result: filteredText)
+            },
+            onError: { [weak self] errorMessage, trace in
+                self?.inputBarState = .error(message: errorMessage, trace: trace)
+                self?.resultText = errorMessage
+            }
+        )
+    }
+
+    /// Mark any running session as interrupted (called on app termination).
+    func persistRunningSession() {
+        AgentSessionStore.shared.markRunningAsInterrupted()
     }
 
     // MARK: - Voice
@@ -148,7 +247,12 @@ class AppState: ObservableObject {
 
     /// The app the user was in BEFORE opening the input bar.
     /// Captured here because once the bar opens, Executer becomes frontmost.
-    var lastFrontmostAppName: String = ""
+    var lastFrontmostAppName: String = "" {
+        didSet { AppState.lastCapturedAppName = lastFrontmostAppName }
+    }
+
+    /// Thread-safe static copy for cross-thread access (read by LLMProvider from background).
+    nonisolated(unsafe) static var lastCapturedAppName: String = ""
 
     func showInputBar() {
         guard !inputBarVisible else { return }
@@ -162,6 +266,12 @@ class AppState: ObservableObject {
         contextualNudge = nil
         inputBarPanel?.showBar()
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+
+        // Check for interrupted agent session (takes priority over thought recall)
+        if pendingResumeSession != nil {
+            checkForInterruptedAgent()
+            return  // Don't check thoughts/nudges — interrupted session is showing
+        }
 
         // Check for abandoned thoughts (async — only shows if user hasn't started typing)
         Task {
@@ -516,22 +626,22 @@ class AppState: ObservableObject {
             onStateChange: { [weak self] state in
                 self?.inputBarState = state
             },
-            onComplete: { [weak self] displayMessage, filteredText, messages in
+            onComplete: { [weak self] displayMessage, filteredText, messages, trace in
                 // Parse for structured display (dates, events, news, lists)
                 let parsed = ResponseParser.parse(displayMessage)
                 switch parsed {
                 case .text:
-                    self?.inputBarState = .result(message: displayMessage)
+                    self?.inputBarState = .result(message: displayMessage, trace: trace)
                 default:
-                    self?.inputBarState = .richResult(result: parsed, rawMessage: displayMessage)
+                    self?.inputBarState = .richResult(result: parsed, rawMessage: displayMessage, trace: trace)
                 }
                 self?.resultText = filteredText
                 self?.conversationMessages = messages
                 self?.lastCommandTime = Date()
                 CommandHistory.shared.add(command: resolvedCommand, result: filteredText)
             },
-            onError: { [weak self] errorMessage in
-                self?.inputBarState = .error(message: errorMessage)
+            onError: { [weak self] errorMessage, trace in
+                self?.inputBarState = .error(message: errorMessage, trace: trace)
                 self?.resultText = errorMessage
             }
         )
