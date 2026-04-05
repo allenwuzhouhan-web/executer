@@ -288,6 +288,11 @@ class ToolRegistry {
             GetUserGoalsTool(),
             GetCurrentIntentTool(),
 
+            // Overnight Agent
+            StartOvernightAgentTool(),
+            OvernightAgentStatusTool(),
+            AddOvernightTaskTool(),
+
             // Phase 4-10: Prediction, Templates, Autonomy
             GetPredictionsTool(),
             GetRoutinesTool(),
@@ -490,7 +495,7 @@ class ToolRegistry {
             // Screen Reading & Learning
             "read_screen": .screenshot, "read_app_text": .screenshot,
             "get_learned_patterns": .memory, "list_learned_apps": .memory,
-            "get_current_session": .memory, "recall_workflow": .skills, "get_today_context": .memory,
+            "get_current_session": .memory, "recall_workflow": .skills, "get_today_context": .memory, "start_overnight_agent": .automation, "overnight_agent_status": .automation, "add_overnight_task": .automation,
             "recall_work_context": .memory, "get_daily_summary": .memory,
             "get_user_goals": .memory,
             "get_current_intent": .memory,

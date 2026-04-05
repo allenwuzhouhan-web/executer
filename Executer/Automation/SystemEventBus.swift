@@ -176,6 +176,8 @@ class SystemEventBus {
                                 delegate.appState.submitCommand(command)
                             }
                         }
+                    case .startOvernightAgent:
+                        await OvernightAgent.shared.activate()
                     }
                     print("[EventBus] Action executed: \(action.displayDescription)")
                 } catch {

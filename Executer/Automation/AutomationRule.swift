@@ -70,6 +70,7 @@ enum RuleAction: Codable {
     case toggleDarkMode
     case showNotification(title: String, body: String)
     case naturalLanguage(command: String)
+    case startOvernightAgent
 
     var displayDescription: String {
         switch self {
@@ -80,6 +81,7 @@ enum RuleAction: Codable {
         case .toggleDarkMode: return "Toggle dark mode"
         case .showNotification(let title, _): return "Notify: \(title)"
         case .naturalLanguage(let cmd): return cmd.prefix(50).description
+        case .startOvernightAgent: return "Start overnight agent"
         }
     }
 }
