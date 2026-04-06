@@ -155,8 +155,8 @@ extension LocalCommandRouter {
     // MARK: - URL Resolution
 
     /// Resolves a spoken/typed target into a valid URL.
-    /// Handles: full URLs, domains with dots, and common single-word site names.
-    /// For unknown single words, tries {word}.com as a dynamic fallback.
+    /// Only resolves: full URLs, explicit domains (with dots), and known site shortcuts.
+    /// Never guesses — if the user doesn't provide a recognizable URL/domain, returns nil.
     func resolveURL(_ target: String) -> String? {
         let clean = target.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, !clean.contains(" ") else { return nil }
@@ -176,35 +176,8 @@ extension LocalCommandRouter {
             return url
         }
 
-        // Dynamic fallback: try {name}.com for single words that look like site names
-        // Only for lowercase alphabetic words (avoid matching "42", "and", etc.)
-        let lower = clean.lowercased()
-        if lower.count >= 3 && lower.allSatisfy({ $0.isLetter }) && !Self.nonSiteWords.contains(lower) {
-            return "https://www.\(lower).com"
-        }
-
         return nil
     }
-
-    // Words that shouldn't be resolved as {word}.com — common English words that aren't websites
-    private static let nonSiteWords: Set<String> = [
-        // Prepositions & conjunctions
-        "the", "and", "for", "but", "not", "with", "from", "that", "this", "what",
-        "where", "when", "how", "why", "who", "which", "into", "onto", "upon",
-        // Common verbs
-        "open", "close", "find", "search", "play", "stop", "start", "move", "show",
-        "hide", "set", "get", "run", "make", "take", "give", "tell", "send", "read",
-        "write", "copy", "paste", "delete", "save", "quit", "exit", "launch", "click",
-        "type", "press", "scroll", "drag", "watch", "look", "turn", "switch", "toggle",
-        "create", "edit", "download", "install", "build", "remove", "update", "check",
-        "change", "add", "help", "fix", "convert", "record", "design", "generate",
-        "upload", "share", "connect", "trim", "merge", "resize", "export", "import",
-        "analyze", "compare", "organize", "sort", "clean", "reset", "configure", "setup",
-        // Common nouns/adjectives
-        "file", "folder", "window", "tab", "page", "screen", "volume", "brightness",
-        "music", "song", "timer", "alarm", "note", "reminder", "dark", "light", "mode",
-        "all", "new", "current", "last", "next", "my", "the", "app", "apps",
-    ]
 
     // Only sites where the URL is non-obvious (not just {name}.com)
     private static let siteShortcuts: [String: String] = [
