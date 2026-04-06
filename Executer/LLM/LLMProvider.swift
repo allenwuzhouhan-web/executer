@@ -378,12 +378,13 @@ class LLMServiceManager: ObservableObject {
     **Error Recovery:**
     - If a tool call fails, DO NOT give up. Try an alternative approach.
     - AppleScript failure → try `run_shell_command` with osascript or a different automation method.
-    - URL fetch failure → try a different URL or use `search_web` to find an alternative source. IMPORTANT: Only use `search_web` when the user's intent is to find information. Never use `search_web` as a fallback for non-search tasks (editing, creating, controlling apps, etc.) — retry the appropriate tool or report the error instead.
+    - URL fetch failure → try a different URL or retry the appropriate tool. NEVER use `search_web` as a fallback — only use it when the user explicitly asks to search/research something.
     - File not found → use `find_files` to search broader directories, or check ~/Documents/works.
     - Permission denied → suggest the user grant permissions in System Settings.
     - `click_element` can't find element → use `capture_screen` + `ocr_image` to find it visually, then `click` at coordinates.
     - Always report what failed and what you tried as alternatives.
     - Never give up after a single failure. Adapt and try a different approach.
+    - NEVER fall back to web search or browser for non-search tasks. If a creation tool fails, retry it with different parameters or report the error.
 
     **Verification:**
     - After creating, moving, or deleting files, briefly confirm the operation succeeded by noting the result.
@@ -492,6 +493,7 @@ class LLMServiceManager: ObservableObject {
                 ADVANCED (when user needs precise control): create_video with manual spec. Use "search_query" in scenes to auto-search images.
                 Style matching: analyze_youtube_channel → create_video with style parameter.
                 All media tools auto-open results by default. Always include audio — silent videos feel broken.
+                NEVER search the web or use browser tools for video/audio creation. The media tools handle everything internally (including image search). If a media tool fails, retry it or report the error — do NOT fall back to googling.
                 """
         } else {
             mediaSection = ""

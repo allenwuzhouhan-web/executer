@@ -48,6 +48,7 @@ class SubAgentCoordinator {
     - If steps are independent, leave depends_on empty (they'll run in parallel)
     - Be specific about which app each step targets
     - If the task is too simple to decompose, output: null
+    - NEVER add "web" or "browser" tool_hints for creation tasks (video, audio, documents, 3D models). These tools handle everything internally — no web search needed.
 
     Output ONLY a JSON array or null.
     """
@@ -102,8 +103,40 @@ class SubAgentCoordinator {
 
     // MARK: - Execution (HostAgent Orchestration)
 
+    /// Producer-consumer prefetch queue for pipelining tool inputs.
+    /// Inspired by Flash Attention 3's warp-specialized producer-consumer pipelining:
+    /// producers load data while consumers compute, fully overlapping data movement with execution.
+    private actor PrefetchPipeline {
+        private var prefetchedConfigs: [String: AppAgent.Config] = [:]
+
+        /// Producer: pre-build the AppAgent config for an upcoming subtask.
+        func prefetch(task: SubAgentCoordinator.SubTask) {
+            let config = AppAgent.Config(
+                subtaskId: task.id,
+                subtaskDescription: task.description,
+                targetApp: task.targetApp,
+                toolHints: task.toolHints,
+                maxIterations: 8,
+                maxTokens: 2048,
+                hostMessage: task.hostMessage
+            )
+            prefetchedConfigs[task.id] = config
+        }
+
+        /// Consumer: retrieve a pre-built config, or nil if not yet prefetched.
+        func consume(taskId: String) -> AppAgent.Config? {
+            return prefetchedConfigs.removeValue(forKey: taskId)
+        }
+    }
+
+    private let prefetchPipeline = PrefetchPipeline()
+
     /// Execute subtasks respecting dependency ordering.
     /// Independent subtasks run in parallel; dependent ones run sequentially.
+    ///
+    /// Flash Attention 3-inspired producer-consumer pipelining:
+    /// While current tasks execute (consumer), we prefetch configs for the next
+    /// wave of ready tasks (producer), reducing inter-task setup latency.
     func executeSubAgents(
         subTasks: [SubTask],
         systemPrompt: String,
@@ -132,7 +165,13 @@ class SubAgentCoordinator {
         var results: [SubAgentResult] = []
         var stepIndex = 0
 
-        // Execute in topological order
+        // Producer: prefetch configs for initially ready tasks
+        let initialReady = subTasks.filter { $0.dependsOn.isEmpty }
+        for task in initialReady {
+            await prefetchPipeline.prefetch(task: task)
+        }
+
+        // Execute in topological order with producer-consumer pipelining
         while completed.count < subTasks.count {
             // Find all tasks whose dependencies are satisfied
             let ready = subTasks.filter { task in
@@ -144,6 +183,19 @@ class SubAgentCoordinator {
                 // Cycle or all remaining tasks have unsatisfied dependencies
                 print("[HostAgent] No ready tasks — possible dependency cycle")
                 break
+            }
+
+            // Producer: look ahead and prefetch configs for the NEXT wave of tasks
+            // while the current wave executes (overlapping data prep with computation)
+            let nextWaveCandidates = subTasks.filter { task in
+                !completed.contains(task.id) &&
+                !ready.contains(where: { $0.id == task.id }) &&
+                task.dependsOn.allSatisfy { dep in
+                    completed.contains(dep) || ready.contains(where: { $0.id == dep })
+                }
+            }
+            for task in nextWaveCandidates {
+                await prefetchPipeline.prefetch(task: task)
             }
 
             if ready.count == 1 {
@@ -202,7 +254,8 @@ class SubAgentCoordinator {
         registry: ToolRegistry,
         trace: AgentTrace?
     ) async -> SubAgentResult {
-        let config = AppAgent.Config(
+        // Consumer: try to use pre-fetched config from the pipeline
+        let config = await prefetchPipeline.consume(taskId: task.id) ?? AppAgent.Config(
             subtaskId: task.id,
             subtaskDescription: task.description,
             targetApp: task.targetApp,

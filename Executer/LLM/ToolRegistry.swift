@@ -868,6 +868,13 @@ class ToolRegistry {
             }
         }
 
+        // Media tasks should NOT get web/browser — their tools handle everything internally
+        if cats.contains(.media) {
+            cats.remove(.web)
+            cats.remove(.webContent)
+            cats.remove(.browser)
+        }
+
         // Web tasks often need browser interaction
         if cats.contains(.web) || cats.contains(.webContent) {
             cats.insert(.cursor)
