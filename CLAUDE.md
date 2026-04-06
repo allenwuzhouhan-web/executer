@@ -35,6 +35,17 @@ The document pipeline uses **Python engines invoked as subprocesses** from Swift
   - `xlsx_engine.py` — Builds .xlsx from JSON spec. Uses `openpyxl`.
   - `ppt_design_extractor.py` — Extracts design language from existing .pptx files (colors, fonts, spatial layout, visual effects, design philosophy)
   - `image_utils.py` — Shared image download/validation (URL→local file, retry, WebP→PNG conversion, caching)
+  - `blender_engine.py` — Creates 3D models from JSON spec with embedded bpy code. Runs inside Blender headless (`blender -b -P`). Handles scene setup, materials, validation (manifold/normals/loose geometry), and export (GLB/OBJ/FBX/STL).
+
+### 3D Model Creation
+- **Swift orchestrator** (`Executer/Executors/BlenderExecutor.swift`):
+  - `CreateBlenderModelTool` — writes JSON spec to temp file, runs `blender_engine.py` via headless Blender
+  - `BlenderExecutor.findBlender()` — searches known paths for Blender executable, caches result
+  - `BlenderExecutor.runBlender()` — subprocess execution with pipe deadlock prevention and 120s timeout
+  - Requires Blender installed on the system (not a pip dependency — bpy is built into Blender's Python)
+- **Hybrid approach**: LLM generates `bpy_code` (geometry creation), engine handles scene setup, material helpers, validation, and export
+- **Validation**: mesh.validate(), manifold edges, consistent normals, no loose vertices/edges, no zero-area faces, material assignment, export file integrity (GLB magic bytes)
+- **Security**: `bpy_code` is checked for dangerous imports (os, subprocess, sys, etc.) before execution
 
 - **PPT Engine Design System** (`ppt_engine.py`):
   - `DesignLanguage` class loads `design_language.json` and applies: semantic colors, fonts, text hierarchy, spatial layout patterns, global spacing, visual effects flags, design philosophy
@@ -49,6 +60,36 @@ The document pipeline uses **Python engines invoked as subprocesses** from Swift
   - `DocumentStudyProfile.swift` — Stores training results. `promptSection()` injects design rules + philosophy into LLM context.
   - Design language files: `~/Library/Application Support/Executer/design_language_<safename>.json` (per-file) and `design_language.json` (global)
   - **File naming**: safe name = `URL.deletingPathExtension().lastPathComponent.replacingOccurrences(of: " ", with: "_")` + `.json`
+
+### Media Production (FFmpeg + Audio)
+- **Swift orchestrator** (`Executer/Executors/FFmpegExecutor.swift`):
+  - `FFmpegExecutor` enum — helper methods: `findFFmpeg()`, `findFFprobe()` (cached path discovery), `ensureResource()`, `runEngine()` (spec → Python → FFmpeg subprocess with timeout), `probe()` (direct ffprobe call)
+  - 8 tools: `setup_ffmpeg`, `ffmpeg_probe`, `ffmpeg_edit_video`, `create_video`, `create_audio`, `plan_video`, `quick_video`, `create_podcast`
+  - `QuickVideoTool` — one-shot video creation: topic + narration → auto-searches images in parallel → generates scenes → TTS → subtitles → auto-opens result
+  - `CreatePodcastTool` — one-shot podcast creation: narration text → TTS → optional background music with ducking → auto-opens result
+  - `FFmpegEditVideoTool` — operations pipeline (trim, merge, overlay_text, overlay_image, add_audio, speed, resize, crop, rotate, extract_audio, add_subtitles, fade, color_adjust, stabilize). `pipeline: true` chains ops sequentially.
+  - `CreateVideoTool` — scene-based composer (image/title_card/video/color_card scenes, Ken Burns animations, xfade transitions, integrated TTS via macOS `say`, background music with ducking, auto-subtitles)
+  - `CreateAudioTool` — track-based audio (tts/file/silence/tone tracks, layer or sequence mixing, sidechaincompress ducking)
+  - `PlanVideoTool` — pure Swift template generator for video types (explainer, tutorial, montage, podcast, vlog, promo, slideshow)
+- **Python engines** (`Executer/Resources/`):
+  - `ffmpeg_engine.py` — mode "edit" (operations pipeline) and mode "create" (scene composer). Zero pip deps.
+  - `audio_engine.py` — TTS via macOS `say -o`, tone gen via FFmpeg lavfi, mixing with sidechaincompress. Zero pip deps.
+- **Video Style Learning** (`Executer/Learning/VideoStyleLearner.swift`):
+  - `AnalyzeYouTubeChannelTool` — yt-dlp download → ffprobe metadata → scene detection → audio analysis → style synthesis → saves `video_style_<name>.json`
+  - `ListVideoStylesTool` — reads video_styles/ directory
+  - Style profiles stored at `~/Library/Application Support/Executer/video_styles/`
+- **Discovery pattern**: Same as BlenderExecutor — search `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `which` fallback, cache in static var
+- **Adding new edit operations**: Add `build_<name>` function in `ffmpeg_engine.py`, register in `EDIT_BUILDERS` dict
+- **Auto-search**: `create_video` scenes support `search_query` instead of `source` — auto-searches for images via `ImageSearchService`
+- **Auto-open**: `create_video`, `ffmpeg_edit_video`, `create_audio`, `quick_video`, `create_podcast`, `download_youtube` all auto-open results by default
+
+### YouTube / Media Download (yt-dlp)
+- **Swift executor** (`Executer/Executors/YouTubeExecutor.swift`):
+  - `YouTubeExecutor` enum — `findYTDLP()` (cached path discovery), `runYTDLP()` (subprocess with timeout)
+  - `DownloadYouTubeTool` — download videos/audio from YouTube, TikTok, Instagram, Vimeo, etc. Format selection (best/720p/480p/audio_only/mp3), subtitle embedding, playlist support
+  - `SetupYTDLPTool` — check/install yt-dlp via Homebrew
+- Requires yt-dlp CLI installed on the system (not a pip dependency from within the app)
+- Uses FFmpeg for format merging when available
 
 ### Image Search
 - `Executer/Executors/ImageSearchExecutor.swift` — `search_images` tool with multi-provider fallback (DuckDuckGo → Unsplash)
@@ -91,6 +132,14 @@ Warnings are returned in the JSON result as `advisor_notes` and surfaced to the 
 - `Executer/LLM/MCPServerManager.swift` — Manages multiple server connections. Config at `~/Library/Application Support/Executer/mcp_servers.json`.
 - MCP tools auto-register in `ToolRegistry.init()` and default to Tier 2 (elevated) safety.
 - Servers connect on app launch in background (`AppDelegate`).
+
+### Notion Integration
+- `Executer/Executors/NotionService.swift` — API client (`NotionAPI` actor), Keychain token storage (`NotionKeyStore`), markdown↔blocks conversion (`NotionBlockBuilder`, `NotionBlockReader`), property formatting (`NotionPropertyFormatter`).
+- `Executer/Executors/NotionExecutor.swift` — 11 tools: `notion_setup`, `notion_search`, `notion_read_page`, `notion_create_page`, `notion_update_page`, `notion_append_blocks`, `notion_query_database`, `notion_get_database`, `notion_add_to_database`, `notion_create_database`, `notion_add_comment`.
+- Calls Notion REST API directly via `PinnedURLSession` (no external MCP server process needed).
+- Token stored in Keychain via `NotionKeyStore`. User sets up via `notion_setup` tool with their integration token from https://www.notion.so/profile/integrations.
+- Markdown → Notion blocks supports: headings, bullets, numbered lists, code blocks, quotes, tables, to-dos, dividers, images, inline bold/italic/strikethrough/code/links.
+- Database operations auto-detect property types from schema — user provides simple key-value pairs, the tools build proper Notion property objects.
 
 ### Smart Tool Approval
 - `SecurityGateway.swift` now has `assessToolRisk()` — sends Tier 2-3 tool calls to a fast LLM for risk classification (SAFE/CAUTION/DANGEROUS).

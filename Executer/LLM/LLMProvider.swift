@@ -4,6 +4,7 @@ import AppKit
 // MARK: - Provider Enum
 
 enum LLMProvider: String, CaseIterable, Codable {
+    case openai
     case deepseek
     case claude
     case gemini
@@ -45,6 +46,16 @@ extension LLMProvider {
 
     private func buildConfig() -> LLMProviderConfig {
         switch self {
+        case .openai:
+            return LLMProviderConfig(
+                displayName: "OpenAI",
+                baseURL: "https://api.openai.com/v1/chat/completions",
+                defaultModel: "gpt-4.1",
+                availableModels: ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o4-mini"],
+                authStyle: .bearer,
+                signupURL: "platform.openai.com",
+                keyPlaceholder: "sk-..."
+            )
         case .deepseek:
             return LLMProviderConfig(
                 displayName: "DeepSeek",
@@ -303,8 +314,42 @@ class LLMServiceManager: ObservableObject {
     - **Iteration budget:** You have limited turns. Batch independent tool calls together to maximize what you accomplish per turn.
     - **Task completion:** You are not done until ALL parts of the request are fulfilled. "Create 5 files" means actually create all 5 — not create 1 and describe the other 4.
 
+    **HOTKEY-FIRST RULE (CRITICAL — always prefer keyboard shortcuts over UI clicks):**
+    When a keyboard shortcut exists for an action, ALWAYS use `hotkey` instead of `click_element` or menu navigation. Hotkeys are instant and reliable; clicking through menus is slow and brittle.
+    - Save a file → `hotkey` "cmd+s", NOT click File → Save
+    - Copy/Paste → `hotkey` "cmd+c" / "cmd+v", NOT right-click → Copy
+    - Undo → `hotkey` "cmd+z", NOT Edit → Undo
+    - Close window/tab → `hotkey` "cmd+w", NOT click the X button
+    - New tab → `hotkey` "cmd+t", NOT click the + button
+    - Select all → `hotkey` "cmd+a", NOT triple-click or drag
+    - Find → `hotkey` "cmd+f", NOT click a search icon
+    - Go to address bar → `hotkey` "cmd+l", NOT click the URL bar
+    - Open settings → `hotkey` "cmd+,", NOT click through menus
+    - Screenshot → `hotkey` "cmd+shift+5", NOT open Screenshot app
+    - Spotlight search → `hotkey` "cmd+space", NOT click the magnifying glass
+    - Switch apps → `hotkey` "cmd+tab", NOT click the Dock
+    - Minimize → `hotkey` "cmd+m", NOT click the yellow button
+    - Full screen → `hotkey` "ctrl+cmd+f", NOT click the green button
+    - Zoom in/out → `hotkey` "cmd+=" / "cmd+-", NOT View menu
+    - Print → `hotkey` "cmd+p", NOT File → Print
+    - Quit app → `hotkey` "cmd+q", NOT right-click Dock → Quit
+    - Delete/Trash → `hotkey` "cmd+delete", NOT right-click → Move to Trash
+    - Refresh page → `hotkey` "cmd+r", NOT click reload button
+    - Navigate back → `hotkey` "cmd+[", NOT click back arrow
+    - Open folder in Finder → use "cmd+shift+g" (Go to Folder) for direct path navigation
+    Only fall back to `click_element` when NO shortcut exists for the action (e.g., clicking a specific app button, a custom UI element).
+
     **Screen Interaction & Browser Automation:**
     You can control the screen — cursor, keyboard, clicks. For any task involving apps, websites, or UI:
+
+    **UI Spatial Reasoning (CRITICAL):**
+    Elements are grouped by their container/section. ALWAYS use section context to understand what an element does:
+    - A "Create Page" button under "── Private" creates a PRIVATE page.
+    - A "Create Page" button under "── Shared" creates a SHARED page.
+    - A "Search" field under "── navigation" is the main search bar, not a filter.
+    - A "Delete" button under "── Settings > Account" deletes the account, not a document.
+    Read section headers (── lines) BEFORE clicking. The section tells you the MEANING of the element.
+    When multiple elements have the same label, the section context disambiguates them.
 
     **Tool reference:**
     - Open app → `launch_app`
@@ -314,13 +359,6 @@ class LLMServiceManager: ObservableObject {
     - Press keys → `press_key` or `hotkey` (e.g., "cmd+c")
     - Scroll → `scroll`
     - Read screen → `capture_screen` → `ocr_image` (only when user asks to look at something)
-
-    **Browser shortcuts you should know:**
-    - Address bar: `hotkey` "cmd+l"
-    - New tab: `hotkey` "cmd+t"
-    - Close tab: `hotkey` "cmd+w"
-    - Refresh: `hotkey` "cmd+r"
-    - Back/forward: `hotkey` "cmd+[" / "cmd+]"
 
     **SPEED RULES:**
     - Batch ALL tool calls into as few responses as possible. The system adds small delays between UI actions automatically — you don't need to wait or verify.
@@ -340,7 +378,7 @@ class LLMServiceManager: ObservableObject {
     **Error Recovery:**
     - If a tool call fails, DO NOT give up. Try an alternative approach.
     - AppleScript failure → try `run_shell_command` with osascript or a different automation method.
-    - URL fetch failure → try a different URL or use `search_web` to find an alternative source.
+    - URL fetch failure → try a different URL or use `search_web` to find an alternative source. IMPORTANT: Only use `search_web` when the user's intent is to find information. Never use `search_web` as a fallback for non-search tasks (editing, creating, controlling apps, etc.) — retry the appropriate tool or report the error instead.
     - File not found → use `find_files` to search broader directories, or check ~/Documents/works.
     - Permission denied → suggest the user grant permissions in System Settings.
     - `click_element` can't find element → use `capture_screen` + `ocr_image` to find it visually, then `click` at coordinates.
@@ -358,12 +396,30 @@ class LLMServiceManager: ObservableObject {
     - For synonyms, use `thesaurus_lookup`.
     - For spell checking, use `spell_check`.
     - NEVER call the API for simple word definitions or spelling. These tools are free and instant.
+
+    **Notion (knowledge base & project management):**
+    - When the user mentions Notion, wiki, knowledge base, or wants to organize/track things in Notion, use the `notion_*` tools.
+    - **Setup**: If `notion_search` returns "No Notion API token configured", guide the user to create an integration at https://www.notion.so/profile/integrations and use `notion_setup` with the token.
+    - **Finding content**: ALWAYS `notion_search` first to find pages/databases by name. Never guess Notion IDs.
+    - **Reading**: `notion_read_page` renders the full page as markdown — properties + all content blocks.
+    - **Creating pages**: Use `notion_create_page` with rich markdown in the `content` parameter. Write COMPLETE, well-structured content — use headings (##), bullet lists, numbered lists, code blocks, tables, to-dos, blockquotes, bold/italic. The markdown is auto-converted to native Notion blocks. Don't just write flat paragraphs.
+    - **Database workflow**: `notion_search(filter: 'database')` → `notion_get_database` (to see columns/types) → `notion_query_database` or `notion_add_to_database`. Always check the schema first so you use correct property names and types.
+    - **Creating databases**: When the user wants a tracker, table, or structured list in Notion, use `notion_create_database` with descriptive column definitions including select options.
+    - **Updating pages**: Use `notion_update_page` for properties/icon/cover, `notion_append_blocks` to add more content to an existing page.
+    - **Content quality**: When creating Notion pages, make them visually rich — use emoji icons, section headings, callout-style quotes, dividers between sections, tables for structured data, and to-do checkboxes for action items. The user wants GREAT Notion content, not plain text dumps.
+    - **Parallel operations**: When adding multiple database entries, batch them in one response for parallel execution.
     """
 
     // Cache the static portion of the system prompt — only changes when provider changes
     private lazy var cachedBasePrompt: String = {
         return systemPrompt + agenticPromptSection()
     }()
+
+    /// Exposed for ContextCompressor (stage-aware prompt building).
+    var cachedBaseSystemPrompt: String { cachedBasePrompt }
+
+    /// Exposed for ContextCompressor.
+    var humorPromptSectionText: String { humorPromptSection }
 
     /// Memory snapshot — cached per query, invalidated when memories change.
     private var frozenMemorySection: String?
@@ -403,6 +459,10 @@ class LLMServiceManager: ObservableObject {
         let learned = LearningContextProvider.fullContextSection(forApp: frontmostApp, query: query)
         let learnedSection = learned.isEmpty ? "" : "\n\n\(learned)"
 
+        // UI knowledge from exploration — inject what we've learned about this app's buttons/elements
+        let uiKnowledge = LearningDatabase.shared.formatUIKnowledgePrompt(forApp: frontmostApp)
+        let uiKnowledgeSection = uiKnowledge.map { "\n\n\($0)" } ?? ""
+
         // Tool catalog — teaches the LLM how to compose tools for complex tasks
         let categories = ToolRegistry.shared.classifyQueryIntent(query)
         let catalog = ToolCatalogManager.shared.promptSection(categories: categories, provider: currentProvider)
@@ -415,6 +475,27 @@ class LLMServiceManager: ObservableObject {
 
         // Design refinements — accumulated learnings from post-PPT-creation reflection
         let designRefinements = DesignRefinementStore.shared.promptSection()
+
+        // Video production workflow — conditional on media category
+        let mediaSection: String
+        if categories.contains(.media) {
+            mediaSection = """
+
+                ## Video & Audio Production
+                PREFERRED: Use quick_video for most video creation — ONE tool call handles everything (image search, scenes, TTS, subtitles, auto-open).
+                - "Make a video about X" → quick_video(topic, narration, type)
+                - "Create a podcast about X" → create_podcast(title, narration, voice)
+                - "Download this YouTube video" → download_youtube(url, format)
+                - "Edit/trim this video" → ffmpeg_edit_video(spec with operations)
+                - "What's in this video file?" → ffmpeg_probe(path)
+
+                ADVANCED (when user needs precise control): create_video with manual spec. Use "search_query" in scenes to auto-search images.
+                Style matching: analyze_youtube_channel → create_video with style parameter.
+                All media tools auto-open results by default. Always include audio — silent videos feel broken.
+                """
+        } else {
+            mediaSection = ""
+        }
 
         let formatGuide = """
 
@@ -430,7 +511,18 @@ class LLMServiceManager: ObservableObject {
 
         let goalSection = GoalStack.promptSection
 
-        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\n\n\(context.systemPromptAddendum)\(catalog)\(docStyles)\(trainedKnowledge)\(designRefinements)\(skills)\(memory)\(goalSection)\(history)\(formatGuide)"
+        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\(uiKnowledgeSection)\n\n\(context.systemPromptAddendum)\(catalog)\(docStyles)\(trainedKnowledge)\(designRefinements)\(mediaSection)\(skills)\(memory)\(goalSection)\(history)\(formatGuide)"
+    }
+
+    /// Stage-aware system prompt builder (Foveal Attention System).
+    /// For Stage 1-2: returns a compressed prompt via ContextCompressor.
+    /// For Stage 3+: returns nil (callers use dedicated micro-prompts).
+    func fullSystemPrompt(context: SystemContext, query: String, stage: AttentionStage) -> String {
+        if let compressed = ContextCompressor.build(context: context, query: query, stage: stage, manager: self) {
+            return compressed
+        }
+        // Fallback for stages 3+ that shouldn't use full prompt
+        return fullSystemPrompt(context: context, query: query)
     }
 
     /// Provider-specific agentic execution guidance. DeepSeek needs explicit
@@ -489,7 +581,7 @@ class LLMServiceManager: ObservableObject {
     - If they ask something boring, make it fun. If they ask something fun, go all in.
     """
 
-    private func recentHistorySection() -> String {
+    func recentHistorySection() -> String {
         let entries = CommandHistory.shared.entries.prefix(3)
         guard !entries.isEmpty else { return "" }
 

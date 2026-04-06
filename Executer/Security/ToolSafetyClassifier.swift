@@ -40,6 +40,31 @@ enum ToolSafetyClassifier {
         "semantic_scholar_search": .safe, "get_paper_details": .safe,
         "browser_screenshot": .safe,
 
+        // TIER 0: SAFE — System Bash (read-only scoped shell tools)
+        "get_network_info": .safe, "get_disk_usage": .safe,
+        "list_processes": .safe, "check_port": .safe,
+        "git_status": .safe, "count_lines": .safe,
+        "get_env_info": .safe, "ping_host": .safe,
+        "whats_using": .safe, "quick_speed_test": .safe,
+        "diff_files": .safe, "hash_file": .safe,
+        "json_process": .safe, "base64_convert": .safe,
+        "text_process": .safe, "sqlite_query": .safe,
+        "system_profiler": .safe, "file_watcher": .safe,
+        // TIER 1: NORMAL — System Bash (benign side effects)
+        "http_request": .normal, "watch_command": .normal,
+        "clipboard_pipe": .normal, "docker_command": .normal,
+        "image_convert": .normal, "rename_file": .normal,
+        // TIER 2: ELEVATED — System Bash (modifies files/system)
+        "compress_files": .elevated, "download_file": .elevated,
+        "extract_archive": .elevated, "run_script": .elevated,
+        "install_package": .elevated, "create_symlink": .elevated,
+        "chmod_file": .elevated, "serve_directory": .elevated,
+        "git_command": .elevated, "find_replace_in_files": .elevated,
+        "cron_manage": .elevated, "ssh_command": .elevated,
+        "create_venv": .elevated,
+        // TIER 3: CRITICAL — System Bash (process control)
+        "kill_process": .critical,
+
         // TIER 1: NORMAL — benign side effects, routine usage
         "launch_app": .normal, "switch_to_app": .normal, "hide_app": .normal,
         "open_file": .normal, "reveal_in_finder": .normal,
@@ -58,8 +83,11 @@ enum ToolSafetyClassifier {
         "show_notification": .normal, "speak_text": .normal,
         "set_clipboard_text": .normal,
         "type_text": .normal, "press_key": .normal, "hotkey": .normal, "select_all_text": .normal,
-        "move_cursor": .normal, "click": .normal, "click_element": .normal, "click_ref": .normal, "scroll": .normal, "drag": .normal,
+        "move_cursor": .normal, "click": .normal, "click_element": .normal, "click_ref": .normal, "scroll": .normal, "drag": .normal, "explore_ui": .normal,
         "create_reminder": .normal, "create_calendar_event": .normal, "create_note": .normal, "set_timer": .normal, "set_alarm": .normal,
+        "list_calendars": .safe, "query_calendar_events": .safe, "update_calendar_event": .normal, "delete_calendar_event": .elevated,
+        "list_reminder_lists": .safe, "query_reminders": .safe, "complete_reminder": .normal, "delete_reminder": .elevated,
+        "query_notes": .safe, "read_note": .safe, "update_note": .normal, "delete_note": .elevated, "list_note_folders": .safe,
         "open_email": .normal,
         "open_system_preferences_pane": .normal,
         "save_memory": .normal, "forget_memory": .normal,
@@ -121,8 +149,27 @@ enum ToolSafetyClassifier {
         "train_document": .elevated, "list_trained_documents": .safe, "recall_trained_knowledge": .safe,
         "create_presentation": .elevated, "extract_ppt_design": .safe,
         "create_word_document": .elevated, "create_spreadsheet": .elevated,
+        "create_3d_model": .elevated,
+        // RAG (ingest runs Python + reads files = elevated; search/list/info = safe; delete = elevated)
+        "rag_ingest": .elevated, "rag_search": .safe,
+        "rag_list_collections": .safe, "rag_collection_info": .safe,
+        "rag_delete_collection": .elevated,
         // Skill Import (search = safe, import = elevated since it fetches external content)
         "search_github_skills": .normal, "import_skill": .elevated, "list_skill_sources": .safe,
+        // Notion (read = safe, write = elevated, setup = normal)
+        "notion_setup": .normal,
+        "notion_search": .safe, "notion_read_page": .safe, "notion_get_database": .safe,
+        "notion_create_page": .elevated, "notion_update_page": .elevated,
+        "notion_append_blocks": .elevated, "notion_query_database": .safe,
+        "notion_add_to_database": .elevated, "notion_create_database": .elevated,
+        "notion_add_comment": .elevated,
+        // Media Production (FFmpeg + Audio)
+        "ffmpeg_edit_video": .elevated, "create_video": .elevated,
+        "ffmpeg_probe": .safe, "create_audio": .elevated,
+        "plan_video": .safe, "setup_ffmpeg": .elevated,
+        "analyze_youtube_channel": .elevated, "list_video_styles": .safe,
+        "quick_video": .elevated, "create_podcast": .elevated,
+        "download_youtube": .elevated, "setup_ytdlp": .elevated,
     ]
 
     /// Returns the risk tier for a tool. Unknown tools default to `.elevated`.

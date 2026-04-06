@@ -53,6 +53,19 @@ class AgentLoop {
         "music_play_song": "Playing", "music_pause": "Pausing",
         "browser_task": "Browsing web", "browser_extract": "Extracting web data",
         "browser_session": "Managing browser", "browser_screenshot": "Browser screenshot",
+        "notion_search": "Searching Notion", "notion_read_page": "Reading Notion page",
+        "notion_create_page": "Creating Notion page", "notion_update_page": "Updating Notion page",
+        "notion_append_blocks": "Writing to Notion", "notion_query_database": "Querying Notion DB",
+        "notion_get_database": "Reading Notion DB", "notion_add_to_database": "Adding to Notion DB",
+        "notion_create_database": "Creating Notion DB", "notion_add_comment": "Commenting in Notion",
+        "notion_setup": "Setting up Notion",
+        "ffmpeg_edit_video": "Editing video", "create_video": "Creating video",
+        "ffmpeg_probe": "Inspecting media", "create_audio": "Creating audio",
+        "plan_video": "Planning video", "setup_ffmpeg": "Setting up FFmpeg",
+        "analyze_youtube_channel": "Analyzing YouTube channel",
+        "list_video_styles": "Listing video styles",
+        "quick_video": "Creating video", "create_podcast": "Creating podcast",
+        "download_youtube": "Downloading video", "setup_ytdlp": "Setting up yt-dlp",
     ]
 
     // UI tools MUST execute sequentially — they depend on screen state
@@ -134,6 +147,12 @@ class AgentLoop {
             try? data.write(to: skillFile)
             print("[Agent] Auto-skill recorded: \(skill["name"] ?? "?")")
         }
+
+        // Record in ToolComposer's composition cache for reuse (WIP — Composer excluded from build)
+        // let toolChain = steps.compactMap { $0["tool"] }
+        // if toolChain.count >= 2 {
+        //     CompositionCache.shared.record(goal: String(command.prefix(200)), toolChain: toolChain, argumentTemplates: toolChain.map { _ in "{}" })
+        // }
     }
 
     // MARK: - Document Task Detection
@@ -154,11 +173,19 @@ class AgentLoop {
         let lower = command.lowercased()
 
         if lower.hasPrefix("[deep research]") { return .deep }
-        if lower.hasPrefix("[browser visible]") || lower.hasPrefix("[browser background]") { return .complex }
+
+        // Browser tasks: classify based on actual task content, not the prefix.
+        // The browser_task tool handles its own multi-step automation internally —
+        // the outer agent just needs to call it once. Don't over-escalate.
+        if lower.hasPrefix("[browser visible]") || lower.hasPrefix("[browser background]") {
+            return .medium
+        }
 
         let complexIndicators = ["and then", "after that", "organize", "clean up",
                                  "research", "investigate", "compare", "analyze",
-                                 "set up", "configure", "build", "create a"]
+                                 "set up", "configure", "build", "create a",
+                                 "notion database", "notion tracker", "notion wiki",
+                                 "populate", "add entries", "fill in"]
         let matchCount = complexIndicators.filter { lower.contains($0) }.count
         if matchCount >= 2 { return .complex }
         if matchCount == 1 && lower.count > 60 { return .complex }
@@ -239,6 +266,7 @@ class AgentLoop {
         registry: ToolRegistry,
         iteration: Int,
         maxIterations: Int,
+        stage: AttentionStage = .fovea,
         onStateChange: @MainActor @escaping (InputBarState) -> Void,
         trace: AgentTrace? = nil
     ) async -> [ToolResult] {
@@ -256,7 +284,7 @@ class AgentLoop {
             if isUITool {
                 // Flush any pending parallel batch first
                 if !pendingBatch.isEmpty {
-                    let batchResults = await executeParallelBatch(pendingBatch, registry: registry, trace: trace)
+                    let batchResults = await executeParallelBatch(pendingBatch, registry: registry, stage: stage, trace: trace)
                     allResults.append(contentsOf: batchResults)
                     pendingBatch.removeAll()
                 }
@@ -272,7 +300,8 @@ class AgentLoop {
                 let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments, trace: trace)
                 let toolMs = (CFAbsoluteTimeGetCurrent() - toolStart) * 1000
                 print("[Agent] Result: \(result)")
-                let sanitized = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+                let framed = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+                let sanitized = InputSanitizer.truncateForStage(toolName: call.function.name, result: framed, stage: stage)
 
                 trace?.append(TraceEntry(kind: .toolCall(
                     name: call.function.name,
@@ -302,7 +331,7 @@ class AgentLoop {
             await MainActor.run {
                 onStateChange(.executing(toolName: batchDisplay, step: iteration + 1, total: maxIterations))
             }
-            let batchResults = await executeParallelBatch(pendingBatch, registry: registry, trace: trace)
+            let batchResults = await executeParallelBatch(pendingBatch, registry: registry, stage: stage, trace: trace)
             allResults.append(contentsOf: batchResults)
         }
 
@@ -313,6 +342,7 @@ class AgentLoop {
     static func executeParallelBatch(
         _ calls: [ToolCall],
         registry: ToolRegistry,
+        stage: AttentionStage = .fovea,
         trace: AgentTrace? = nil
     ) async -> [ToolResult] {
         if calls.count == 1 {
@@ -323,7 +353,8 @@ class AgentLoop {
             let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments, trace: trace)
             let toolMs = (CFAbsoluteTimeGetCurrent() - toolStart) * 1000
             print("[Agent] Result: \(result)")
-            let sanitized = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+            let framed = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+            let sanitized = InputSanitizer.truncateForStage(toolName: call.function.name, result: framed, stage: stage)
             trace?.append(TraceEntry(kind: .toolCall(
                 name: call.function.name,
                 arguments: call.function.arguments,
@@ -342,7 +373,8 @@ class AgentLoop {
                     let toolStart = CFAbsoluteTimeGetCurrent()
                     let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments, trace: trace)
                     let toolMs = (CFAbsoluteTimeGetCurrent() - toolStart) * 1000
-                    let sanitized = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+                    let framed = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+                    let sanitized = InputSanitizer.truncateForStage(toolName: call.function.name, result: framed, stage: stage)
                     trace?.append(TraceEntry(kind: .toolCall(
                         name: call.function.name,
                         arguments: call.function.arguments,
@@ -371,6 +403,7 @@ class AgentLoop {
         resolvedCommand: String,
         previousMessages: [ChatMessage],
         agent: AgentProfile? = nil,
+        stage: AttentionStage = .fovea,
         resumeFromIteration: Int = 0,
         onStateChange: @MainActor @escaping (InputBarState) -> Void,
         onComplete: @MainActor @escaping (_ displayMessage: String, _ filteredText: String, _ messages: [ChatMessage], _ trace: AgentTrace?) -> Void,
@@ -414,27 +447,58 @@ class AgentLoop {
                 print("[Agent] Complexity: \(complexity), maxIter: \(maxIterations), maxTokens: \(maxTokens)")
 
                 // Build message chain — reuse previous for follow-ups
+                // IO-Aware Context Building (Flash Attention-inspired):
+                // Pre-stage all context segments in a contiguous buffer to avoid
+                // repeated string concatenation which causes O(n^2) memory copying.
                 let taskStartTime = CFAbsoluteTimeGetCurrent()
 
                 var messages: [ChatMessage]
                 if !previousMessages.isEmpty {
-                    messages = previousMessages
+                    // For follow-ups (parafovea), compress message history
+                    if stage == .parafovea {
+                        let compressed = ContextCompressor.compressHistory(
+                            previousMessages,
+                            maxMessages: stage.budget.maxHistoryMessages
+                        )
+                        messages = compressed
+                    } else {
+                        messages = previousMessages
+                    }
                     messages.append(ChatMessage(role: "user", content: effectiveCommand))
                 } else {
-                    var systemPrompt = await MainActor.run { manager.fullSystemPrompt(context: context, query: effectiveCommand) }
+                    // Use ContextCompressor for stage-aware system prompt (Foveal Attention)
+                    let ctxBuffer = FlashAttentionUtils.ContextBuffer(estimatedSegments: 8)
+
+                    let basePrompt = await MainActor.run {
+                        manager.fullSystemPrompt(context: context, query: effectiveCommand, stage: stage)
+                    }
+                    ctxBuffer.append(basePrompt)
+
                     if let override = agent?.systemPromptOverride {
-                        systemPrompt += "\n\n" + override
+                        ctxBuffer.append("\n\n" + override)
                     }
-                    // Inject episode recall — past similar tasks
-                    let episodeContext = EpisodeRecall.promptSection(forGoal: effectiveCommand)
-                    if !episodeContext.isEmpty {
-                        systemPrompt += episodeContext
+
+                    // Episode recall and learned rules only for foveal stage
+                    if stage == .fovea {
+                        let episodeContext = EpisodeRecall.promptSection(forGoal: effectiveCommand)
+                        if !episodeContext.isEmpty {
+                            ctxBuffer.append(episodeContext)
+                        }
+                        let rulesContext = LearningFeedbackLoop.promptSection()
+                        if !rulesContext.isEmpty {
+                            ctxBuffer.append(rulesContext)
+                        }
                     }
-                    // Inject learned rules from observation feedback loop
-                    let rulesContext = LearningFeedbackLoop.promptSection()
-                    if !rulesContext.isEmpty {
-                        systemPrompt += rulesContext
+
+                    // Inject activated dormant context (Stage 5 → Stage 1 promotion)
+                    if stage == .fovea {
+                        let dormantSection = DormantContextManager.shared.activatedPromptSection(for: effectiveCommand)
+                        if !dormantSection.isEmpty {
+                            ctxBuffer.append(dormantSection)
+                        }
                     }
+
+                    let systemPrompt = ctxBuffer.build()
                     messages = [
                         ChatMessage(role: "system", content: systemPrompt),
                         ChatMessage(role: "user", content: effectiveCommand)
@@ -563,6 +627,7 @@ class AgentLoop {
                         registry: registry,
                         iteration: iteration,
                         maxIterations: maxIterations,
+                        stage: stage,
                         onStateChange: onStateChange,
                         trace: trace
                     )
