@@ -13,8 +13,13 @@ struct CreatePresentationTool: ToolDefinition {
 
         ## MANDATORY WORKFLOW for 4+ slide decks:
         1. FIRST call search_images to find 2-4 relevant, high-quality image URLs for your topic.
-        2. THEN create the spec, embedding those image URLs in full_image, image_right, or content slides.
-        Presentations WITHOUT images look amateurish. Every 4+ slide deck MUST have at least 1-2 image slides.
+        2. THEN create the spec, embedding ONLY those returned URLs in full_image, image_right, or content slides.
+
+        ## CRITICAL IMAGE RULE:
+        NEVER invent, guess, or fabricate image URLs or filenames. Only use URLs returned by search_images. \
+        Filenames like "ai-trends-2025.jpg" or "team-photo.png" DO NOT EXIST and will be stripped. \
+        If you haven't called search_images yet, either call it first or make a deck WITHOUT images — \
+        a clean text-only deck is far better than one with broken image placeholders.
 
         ## DESIGN PRINCIPLES:
 
@@ -101,7 +106,7 @@ struct CreatePresentationTool: ToolDefinition {
         )
 
         // Find the PPT engine
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let execDir = appSupport.appendingPathComponent("Executer")
         let enginePath = execDir.appendingPathComponent("ppt_engine.py")
 
@@ -250,7 +255,7 @@ struct ExtractPPTDesignTool: ToolDefinition {
             return "Error: File not found at \(path)"
         }
 
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let execDir = appSupport.appendingPathComponent("Executer")
         let extractorPath = execDir.appendingPathComponent("ppt_design_extractor.py")
 
@@ -337,7 +342,7 @@ struct CreateWordDocumentTool: ToolDefinition {
             filename.hasSuffix(".docx") ? filename : filename + ".docx"
         )
 
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let execDir = appSupport.appendingPathComponent("Executer")
         let enginePath = execDir.appendingPathComponent("docx_engine.py")
 
@@ -417,7 +422,7 @@ struct CreateSpreadsheetTool: ToolDefinition {
             filename.hasSuffix(".xlsx") ? filename : filename + ".xlsx"
         )
 
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let execDir = appSupport.appendingPathComponent("Executer")
         let enginePath = execDir.appendingPathComponent("xlsx_engine.py")
 
@@ -469,9 +474,44 @@ enum PPTExecutor {
         }
     }
 
+    /// Required Python packages for document engines.
+    private static let requiredPackages = [
+        // Document engines
+        "python-pptx", "python-docx", "openpyxl",
+        // PDF processing (PyMuPDF is far superior to PyPDF2 — text extraction, splitting, merging, OCR-ready)
+        "PyPDF2", "PyMuPDF", "pdfplumber",
+        // Image processing
+        "Pillow",
+        // Data analysis
+        "pandas", "numpy", "matplotlib",
+        // Web & parsing
+        "requests", "beautifulsoup4", "lxml", "html2text",
+        // Formats & serialization
+        "pyyaml", "tabulate", "Jinja2", "chardet",
+        // Vector DB (existing)
+        "chromadb",
+    ]
+
+    /// Cached python path — detected once, reused.
+    private static var cachedPythonPath: String?
+
+    /// Whether the venv has already been ensured this session.
+    private static var venvReady = false
+
     static func findPython() -> String {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let venvPython = appSupport.appendingPathComponent("Executer/python_env/bin/python3").path
+        if let cached = cachedPythonPath { return cached }
+
+        let appSupport = URL.applicationSupportDirectory
+        let venvDir = appSupport.appendingPathComponent("Executer/python_env")
+        let venvPython = venvDir.appendingPathComponent("bin/python3").path
+
+        // Auto-provision the managed venv if it doesn't exist
+        if !FileManager.default.isExecutableFile(atPath: venvPython) {
+            setupVenv(at: venvDir)
+        } else if !venvReady {
+            // Venv exists — verify packages on first use this session
+            ensurePackages(venvDir: venvDir)
+        }
 
         let candidates = [
             venvPython,
@@ -481,9 +521,144 @@ enum PPTExecutor {
         ]
 
         for path in candidates {
-            if FileManager.default.isExecutableFile(atPath: path) { return path }
+            if FileManager.default.isExecutableFile(atPath: path) {
+                cachedPythonPath = path
+                return path
+            }
         }
+        cachedPythonPath = "python3"
         return "python3"
+    }
+
+    /// Create a managed Python venv and install all document dependencies (python-pptx, etc.).
+    private static func setupVenv(at venvDir: URL) {
+        print("[PPTExecutor] Setting up Python venv with document dependencies...")
+
+        // Find system python
+        let systemPython: String
+        if FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/python3") {
+            systemPython = "/opt/homebrew/bin/python3"
+        } else if FileManager.default.isExecutableFile(atPath: "/usr/local/bin/python3") {
+            systemPython = "/usr/local/bin/python3"
+        } else {
+            systemPython = "/usr/bin/python3"
+        }
+
+        // Create venv
+        let venvProcess = Process()
+        venvProcess.executableURL = URL(fileURLWithPath: systemPython)
+        venvProcess.arguments = ["-m", "venv", venvDir.path]
+        try? venvProcess.run()
+        venvProcess.waitUntilExit()
+
+        let venvPython = venvDir.appendingPathComponent("bin/python3").path
+        guard FileManager.default.isExecutableFile(atPath: venvPython) else {
+            print("[PPTExecutor] Failed to create Python venv")
+            return
+        }
+
+        // Install all required packages
+        let pipPath = venvDir.appendingPathComponent("bin/pip3").path
+        let pipProcess = Process()
+        pipProcess.executableURL = URL(fileURLWithPath: pipPath)
+        pipProcess.arguments = ["install"] + requiredPackages
+        pipProcess.standardOutput = FileHandle.nullDevice
+        pipProcess.standardError = FileHandle.nullDevice
+        try? pipProcess.run()
+        pipProcess.waitUntilExit()
+
+        if pipProcess.terminationStatus == 0 {
+            print("[PPTExecutor] Python dependencies installed successfully")
+            venvReady = true
+        } else {
+            print("[PPTExecutor] pip install failed (exit \(pipProcess.terminationStatus))")
+        }
+    }
+
+    /// Fingerprint of the current required packages list — changes when packages are added/removed.
+    /// Stored in the venv dir to detect when the package set has been updated.
+    private static var packageFingerprint: String {
+        // Sort for stability, then hash — any change to requiredPackages triggers reinstall
+        requiredPackages.sorted().joined(separator: ",")
+    }
+
+    /// Quick check that required packages are importable; install missing ones.
+    private static func ensurePackages(venvDir: URL) {
+        let venvPython = venvDir.appendingPathComponent("bin/python3").path
+        let fingerprintFile = venvDir.appendingPathComponent(".pkg_fingerprint").path
+
+        // Fast path: if fingerprint matches, we already installed this exact package set
+        if let stored = try? String(contentsOfFile: fingerprintFile, encoding: .utf8),
+           stored.trimmingCharacters(in: .whitespacesAndNewlines) == packageFingerprint {
+            venvReady = true
+            return
+        }
+
+        // Fingerprint mismatch or missing — verify key packages (old + new)
+        let checkProcess = Process()
+        let pipe = Pipe()
+        checkProcess.executableURL = URL(fileURLWithPath: venvPython)
+        checkProcess.arguments = ["-c",
+            "import pptx; import docx; import openpyxl; import fitz; import pandas; import numpy; import matplotlib; import pdfplumber; print('OK')"
+        ]
+        checkProcess.standardOutput = pipe
+        checkProcess.standardError = FileHandle.nullDevice
+        try? checkProcess.run()
+        checkProcess.waitUntilExit()
+
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        if out.contains("OK") {
+            // All good — write fingerprint so we skip next time
+            try? packageFingerprint.write(toFile: fingerprintFile, atomically: true, encoding: .utf8)
+            venvReady = true
+            return
+        }
+
+        // Some packages missing — install them all (pip handles already-installed gracefully)
+        print("[PPTExecutor] Installing missing Python packages...")
+        let pipPath = venvDir.appendingPathComponent("bin/pip3").path
+        let pipProcess = Process()
+        pipProcess.executableURL = URL(fileURLWithPath: pipPath)
+        pipProcess.arguments = ["install", "--quiet"] + requiredPackages
+        pipProcess.standardOutput = FileHandle.nullDevice
+        pipProcess.standardError = FileHandle.nullDevice
+        try? pipProcess.run()
+        pipProcess.waitUntilExit()
+
+        if pipProcess.terminationStatus == 0 {
+            try? packageFingerprint.write(toFile: fingerprintFile, atomically: true, encoding: .utf8)
+        }
+        venvReady = true
+    }
+
+    /// Install additional pip packages into the managed venv on demand.
+    static func installPackages(_ packages: [String]) async throws {
+        let _ = findPython() // ensure venv exists
+        let appSupport = URL.applicationSupportDirectory
+        let pipPath = appSupport.appendingPathComponent("Executer/python_env/bin/pip3").path
+
+        guard FileManager.default.isExecutableFile(atPath: pipPath) else {
+            print("[PPTExecutor] pip3 not found in managed venv")
+            return
+        }
+
+        // Sanitize package names
+        let safe = packages.compactMap { pkg -> String? in
+            let cleaned = pkg.replacingOccurrences(of: "[^a-zA-Z0-9._@/\\-]", with: "", options: .regularExpression)
+            return cleaned.isEmpty ? nil : cleaned
+        }
+        guard !safe.isEmpty else { return }
+
+        let result = try await AsyncShellRunner.run(
+            executable: pipPath,
+            arguments: ["install", "--quiet"] + safe,
+            timeout: 120
+        )
+        if result.exitCode == 0 {
+            print("[PPTExecutor] Installed packages: \(safe.joined(separator: ", "))")
+        } else {
+            print("[PPTExecutor] pip install failed: \(result.stderr.prefix(200))")
+        }
     }
 
     static func runPython(python: String, script: String, args: [String]) async throws -> ProcessResult {

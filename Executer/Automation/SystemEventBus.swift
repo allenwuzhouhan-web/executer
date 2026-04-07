@@ -20,13 +20,24 @@ class SystemEventBus {
     func start() {
         print("[EventBus] Starting system event monitoring")
 
-        // Remove existing observers to prevent duplicates on repeated start() calls
-        if !workspaceObservers.isEmpty {
-            for obs in workspaceObservers {
-                NSWorkspace.shared.notificationCenter.removeObserver(obs)
-            }
-            workspaceObservers.removeAll()
+        // Remove existing observers/timers to prevent duplicates on repeated start() calls
+        for obs in workspaceObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(obs)
         }
+        workspaceObservers.removeAll()
+
+        if let obs = screenObserver {
+            NotificationCenter.default.removeObserver(obs)
+            screenObserver = nil
+        }
+
+        for obs in lockObservers {
+            DistributedNotificationCenter.default().removeObserver(obs)
+        }
+        lockObservers.removeAll()
+
+        pollTimer?.invalidate()
+        pollTimer = nil
 
         // Capture initial state
         displayCount = NSScreen.screens.count
@@ -147,27 +158,35 @@ class SystemEventBus {
         }
     }
 
+    private static func jsonArgs(_ dict: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let str = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return str
+    }
+
     private func executeActions(_ actions: [RuleAction]) {
         for action in actions {
             Task {
                 do {
                     switch action {
                     case .launchApp(let name):
-                        let args = "{\"app_name\": \"\(name.replacingOccurrences(of: "\"", with: "\\\""))\"}"
+                        let args = Self.jsonArgs(["app_name": name])
                         _ = try await LaunchAppTool().execute(arguments: args)
                     case .quitApp(let name):
-                        let args = "{\"app_name\": \"\(name.replacingOccurrences(of: "\"", with: "\\\""))\"}"
+                        let args = Self.jsonArgs(["app_name": name])
                         _ = try await QuitAppTool().execute(arguments: args)
                     case .shellCommand(let command):
                         _ = try ShellRunner.run(command, timeout: 30)
                     case .setVolume(let level):
-                        _ = try await SetVolumeTool().execute(arguments: "{\"volume\": \(level)}")
+                        let args = Self.jsonArgs(["volume": level])
+                        _ = try await SetVolumeTool().execute(arguments: args)
                     case .toggleDarkMode:
                         _ = try await ToggleDarkModeTool().execute(arguments: "{}")
                     case .showNotification(let title, let body):
-                        _ = try await ShowNotificationTool().execute(
-                            arguments: "{\"title\": \"\(title)\", \"message\": \"\(body)\"}"
-                        )
+                        let args = Self.jsonArgs(["title": title, "message": body])
+                        _ = try await ShowNotificationTool().execute(arguments: args)
                     case .naturalLanguage(let command):
                         // Submit to the LLM via AppState
                         await MainActor.run {
@@ -176,6 +195,8 @@ class SystemEventBus {
                                 delegate.appState.submitCommand(command)
                             }
                         }
+                    case .startOvernightAgent:
+                        await OvernightAgent.shared.activate()
                     }
                     print("[EventBus] Action executed: \(action.displayDescription)")
                 } catch {

@@ -8,7 +8,7 @@ struct BrowserTaskTool: ToolDefinition {
         Execute a multi-step browser task using AI-powered automation. The browser agent can navigate pages, \
         click buttons, fill forms, log in, extract data, and complete complex web workflows. \
         Use this for interactive web tasks like booking, shopping, form submission, or multi-page navigation. \
-        Do NOT use for simple URL reads — use fetch_url_content instead.
+        For INTERACTIVE web tasks only (clicking, form-filling, multi-page navigation). For simple URL reading, use read_web_page or fetch_url_content.
         """
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
@@ -26,12 +26,33 @@ struct BrowserTaskTool: ToolDefinition {
         let visible = optionalBool("visible", from: args)
         let maxSteps = optionalInt("max_steps", from: args)
 
-        return try await BrowserService.shared.executeTask(
+        let result = try await BrowserService.shared.executeTask(
             task: task,
             url: url,
             visible: visible,
             maxSteps: maxSteps
         )
+
+        // Store trail for UI display (independent of LLM response)
+        if !result.trail.isEmpty {
+            await MainActor.run {
+                BrowserTrailStore.shared.currentTrail = result.trail
+            }
+        }
+
+        // Build text result for the LLM (includes trail so it can reference sites)
+        var output = result.text
+        if !result.trail.isEmpty {
+            output += "\n\n[Sites visited]\n"
+            for entry in result.trail {
+                let label = entry.summary.isEmpty ? entry.title : entry.summary
+                output += "- \(entry.url) — \(label)\n"
+            }
+        }
+        if result.steps > 0 {
+            output += "\n[Completed in \(result.steps) browser steps]"
+        }
+        return output
     }
 }
 

@@ -52,7 +52,7 @@ struct Goal: Codable, Identifiable {
         let intersection = relatedTopics.intersection(session.topics)
         let union = relatedTopics.union(session.topics)
         guard !union.isEmpty else { return false }
-        return Double(intersection.count) / Double(union.count) >= 0.25
+        return Double(intersection.count) / Double(union.count) >= 0.40
     }
 
     /// Formatted total time.

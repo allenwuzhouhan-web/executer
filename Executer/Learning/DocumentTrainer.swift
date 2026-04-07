@@ -12,98 +12,21 @@ final class DocumentTrainer {
     private let pipeline = TrainerAgentPipeline()
     private let store = DocumentStudyStore.shared
 
-    /// Cached Python3 path — detected once, reused.
-    private var cachedPythonPath: String?
-
     /// Path to bundled/installed Python scripts in App Support.
     private let scriptsDir: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         return appSupport.appendingPathComponent("Executer", isDirectory: true)
     }()
 
     private init() {
         installScriptsIfNeeded()
-        ensureVenv()
     }
 
     // MARK: - Python Detection
 
-    /// Find python3 binary. Prefers the managed venv (has python-pptx etc.), then Homebrew, then system.
+    /// Find python3 binary. Delegates to PPTExecutor which manages the shared venv.
     private func findPython() -> String {
-        if let cached = cachedPythonPath { return cached }
-
-        // Managed venv inside App Support — has all dependencies pre-installed
-        let venvPython = scriptsDir.appendingPathComponent("python_env/bin/python3").path
-
-        let candidates = [
-            venvPython,                        // Managed venv (preferred — has python-pptx)
-            "/opt/homebrew/bin/python3",       // Apple Silicon Homebrew
-            "/usr/local/bin/python3",          // Intel Homebrew
-            "/usr/bin/python3",                // macOS system
-        ]
-
-        for path in candidates {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                cachedPythonPath = path
-                print("[DocumentTrainer] Using Python: \(path)")
-                return path
-            }
-        }
-
-        cachedPythonPath = "python3"
-        return "python3"
-    }
-
-    /// Create the managed Python venv and install dependencies if not present.
-    private func ensureVenv() {
-        let venvDir = scriptsDir.appendingPathComponent("python_env")
-        let venvPython = venvDir.appendingPathComponent("bin/python3").path
-
-        // Already exists and has pptx?
-        if FileManager.default.isExecutableFile(atPath: venvPython) {
-            return
-        }
-
-        print("[DocumentTrainer] Setting up Python venv with dependencies...")
-
-        // Find system python to create the venv
-        let systemPython: String
-        if FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/python3") {
-            systemPython = "/opt/homebrew/bin/python3"
-        } else if FileManager.default.isExecutableFile(atPath: "/usr/local/bin/python3") {
-            systemPython = "/usr/local/bin/python3"
-        } else {
-            systemPython = "/usr/bin/python3"
-        }
-
-        // Create venv
-        let venvProcess = Process()
-        venvProcess.executableURL = URL(fileURLWithPath: systemPython)
-        venvProcess.arguments = ["-m", "venv", venvDir.path]
-        try? venvProcess.run()
-        venvProcess.waitUntilExit()
-
-        guard FileManager.default.isExecutableFile(atPath: venvPython) else {
-            print("[DocumentTrainer] Failed to create Python venv")
-            return
-        }
-
-        // Install dependencies
-        let pipProcess = Process()
-        pipProcess.executableURL = URL(fileURLWithPath: venvDir.appendingPathComponent("bin/pip3").path)
-        pipProcess.arguments = ["install", "python-pptx", "python-docx", "openpyxl", "PyPDF2"]
-        pipProcess.standardOutput = FileHandle.nullDevice
-        pipProcess.standardError = FileHandle.nullDevice
-        try? pipProcess.run()
-        pipProcess.waitUntilExit()
-
-        if pipProcess.terminationStatus == 0 {
-            print("[DocumentTrainer] Python dependencies installed successfully")
-            // Reset cached python path so we pick up the venv
-            cachedPythonPath = nil
-        } else {
-            print("[DocumentTrainer] pip install failed (exit \(pipProcess.terminationStatus))")
-        }
+        PPTExecutor.findPython()
     }
 
     /// Quick synchronous shell for python detection.

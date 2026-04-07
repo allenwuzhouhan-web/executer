@@ -1,5 +1,18 @@
 import Cocoa
 import CoreGraphics
+import ComputerLib
+
+// MARK: - AI Cursor Activation Helper
+
+/// Ensures AICursorManager is active whenever any cursor tool fires,
+/// so the purple cursor + trail + banner show even outside ComputerUseAgent.
+private func ensureAICursorActive() {
+    if !AICursorManager.shared.isActive {
+        DispatchQueue.main.async {
+            AICursorManager.shared.startAIControl()
+        }
+    }
+}
 
 // MARK: - Move Cursor
 
@@ -10,43 +23,20 @@ struct MoveCursorTool: ToolDefinition {
         JSONSchema.object(properties: [
             "x": JSONSchema.number(description: "X coordinate (pixels from left edge)"),
             "y": JSONSchema.number(description: "Y coordinate (pixels from top edge)"),
+            "speed": JSONSchema.string(description: "Movement speed: 'instant', 'fast', 'normal' (default), 'slow'"),
         ], required: ["x", "y"])
     }
 
     func execute(arguments: String) async throws -> String {
+        ensureAICursorActive()
         let args = try parseArguments(arguments)
         let targetX = try requiredDouble("x", from: args)
         let targetY = try requiredDouble("y", from: args)
         let target = CGPoint(x: targetX, y: targetY)
+        let speed = optionalString("speed", from: args)
 
-        // Smooth animation: move in steps over ~200ms
-        let current = NSEvent.mouseLocation
-        let screenHeight = NSScreen.main?.frame.height ?? 900
-        // Convert NS coordinates (bottom-left origin) to CG coordinates (top-left origin)
-        let startCG = CGPoint(x: current.x, y: screenHeight - current.y)
-
-        let steps = 20
-        let duration: Double = 0.2
-        let stepDelay = duration / Double(steps)
-
-        for i in 1...steps {
-            let t = Double(i) / Double(steps)
-            // Ease-out curve for natural deceleration
-            let ease = 1 - pow(1 - t, 3)
-            let x = startCG.x + (target.x - startCG.x) * ease
-            let y = startCG.y + (target.y - startCG.y) * ease
-            let point = CGPoint(x: x, y: y)
-
-            CGWarpMouseCursorPosition(point)
-
-            // Post a mouseMoved event so apps track the cursor
-            if let event = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
-                                   mouseCursorPosition: point, mouseButton: .left) {
-                event.post(tap: .cghidEventTap)
-            }
-
-            try await Task.sleep(nanoseconds: UInt64(stepDelay * 1_000_000_000))
-        }
+        let config = SmoothMouseDriver.configFromSpeed(speed)
+        try await SmoothMouseDriver.shared.moveTo(target, config: config)
 
         return "Cursor moved to (\(Int(targetX)), \(Int(targetY)))."
     }
@@ -67,6 +57,7 @@ struct ClickTool: ToolDefinition {
     }
 
     func execute(arguments: String) async throws -> String {
+        ensureAICursorActive()
         let args = try parseArguments(arguments)
         let button = optionalString("button", from: args) ?? "left"
         let count = optionalInt("count", from: args) ?? 1
@@ -81,6 +72,24 @@ struct ClickTool: ToolDefinition {
             let nsPos = NSEvent.mouseLocation
             let screenHeight = NSScreen.main?.frame.height ?? 900
             position = CGPoint(x: nsPos.x, y: screenHeight - nsPos.y)
+        }
+
+        // Safety gate: check if click position targets a dangerous element
+        if let map = ComputerLibBridge.shared.lastMap {
+            let windowTitle = map.windows.first(where: { $0.isFocused })?.title ?? ""
+            let context = DangerDetector.ScanContext(appBundleID: map.focusedApp.bundleID, windowTitle: windowTitle)
+            for el in map.elements {
+                guard let click = el.clickPoint, el.role.isInteractive else { continue }
+                let dx = click.x - position.x
+                let dy = click.y - position.y
+                if dx * dx + dy * dy < 400 { // 20px radius
+                    let result = DangerDetector.classify(element: el, context: context)
+                    if result.level == .dangerous {
+                        return "BLOCKED: Click at (\(Int(position.x)),\(Int(position.y))) targets \"\(el.label)\" — \(result.reason ?? "destructive action"). Use click_ref for explicit targeting."
+                    }
+                    break
+                }
+            }
         }
 
         let source = CGEventSource(stateID: .hidSystemState)
@@ -111,6 +120,9 @@ struct ClickTool: ToolDefinition {
             }
         }
 
+        // Invalidate perception cache — screen state changed after click
+        VisionEngine.shared.invalidateCache()
+
         let clickDesc = count > 1 ? "Double-clicked" : (isRight ? "Right-clicked" : "Clicked")
         return "\(clickDesc) at (\(Int(position.x)), \(Int(position.y)))."
     }
@@ -128,8 +140,21 @@ struct ClickElementTool: ToolDefinition {
     }
 
     func execute(arguments: String) async throws -> String {
+        ensureAICursorActive()
         let args = try parseArguments(arguments)
         let target = try requiredString("description", from: args).lowercased()
+
+        // Safety check via ComputerLib disambiguation
+        if let map = ComputerLibBridge.shared.lastMap {
+            if let matched = Disambiguator.bestMatch(label: target, in: map, preferredRole: .button, db: ElementDatabase.shared) {
+                let windowTitle = map.windows.first(where: { $0.isFocused })?.title ?? ""
+                let context = DangerDetector.ScanContext(appBundleID: map.focusedApp.bundleID, windowTitle: windowTitle)
+                let danger = DangerDetector.classify(element: matched, context: context)
+                if danger.level == .dangerous {
+                    return "BLOCKED: '\(target)' is dangerous — \(danger.reason ?? "destructive action")."
+                }
+            }
+        }
 
         // Try accessibility first — it's faster and gives exact positions
         if let pos = findElementViaAccessibility(matching: target) {
@@ -156,55 +181,35 @@ struct ClickElementTool: ToolDefinition {
         return "Could not find '\(target)' on screen. Try being more specific or use `click` with coordinates."
     }
 
+    /// Finds a clickable element by text, reusing the shared ScreenReader snapshot
+    /// instead of performing a separate AX tree walk.
     private func findElementViaAccessibility(matching text: String) -> CGPoint? {
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return nil }
-        let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+        guard let snapshot = ScreenReader.readFrontmostApp() else { return nil }
 
-        var windowValue: AnyObject?
-        AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue)
-        guard let window = windowValue else { return nil }
+        // Score all matching elements
+        let scored: [(CGPoint, Int)] = snapshot.elements.compactMap { el in
+            // Check all text fields for a match
+            let fields = [el.title, el.value, el.description, el.label]
+            guard fields.contains(where: { $0.lowercased().contains(text) }) else { return nil }
 
-        // Search for UI element matching text
-        return searchElement(window as! AXUIElement, for: text)
-    }
+            guard let pos = el.position, let size = el.size else { return nil }
+            let center = CGPoint(x: pos.x + size.width / 2, y: pos.y + size.height / 2)
 
-    private func searchElement(_ element: AXUIElement, for text: String, depth: Int = 0) -> CGPoint? {
-        guard depth < 10 else { return nil } // Prevent infinite recursion
+            var score = 0
+            if ScreenReader.isInteractiveRole(el.role) { score += 100 }
+            // Exact text match
+            let matchedField = fields.first { $0.lowercased().contains(text) } ?? ""
+            if matchedField.lowercased().trimmingCharacters(in: .whitespaces) == text { score += 50 }
+            // Smaller = more specific
+            let area = size.width * size.height
+            if area > 0 && area < 50000 { score += 30 }
+            else if area > 0 && area < 150000 { score += 15 }
+            if area <= 0 { score -= 50 }
 
-        // Check this element's title/value/description
-        for attr in [kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute] {
-            var value: AnyObject?
-            AXUIElementCopyAttributeValue(element, attr as CFString, &value)
-            if let str = value as? String, str.lowercased().contains(text) {
-                // Get position and size
-                var posValue: AnyObject?
-                var sizeValue: AnyObject?
-                AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posValue)
-                AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue)
-
-                if let posValue = posValue, let sizeValue = sizeValue {
-                    var pos = CGPoint.zero
-                    var size = CGSize.zero
-                    AXValueGetValue(posValue as! AXValue, .cgPoint, &pos)
-                    AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
-                    // Return center
-                    return CGPoint(x: pos.x + size.width / 2, y: pos.y + size.height / 2)
-                }
-            }
+            return (center, score)
         }
 
-        // Recurse into children
-        var childrenValue: AnyObject?
-        AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue)
-        if let children = childrenValue as? [AXUIElement] {
-            for child in children {
-                if let found = searchElement(child, for: text, depth: depth + 1) {
-                    return found
-                }
-            }
-        }
-
-        return nil
+        return scored.max(by: { $0.1 < $1.1 })?.0
     }
 }
 
@@ -221,6 +226,7 @@ struct ScrollTool: ToolDefinition {
     }
 
     func execute(arguments: String) async throws -> String {
+        ensureAICursorActive()
         let args = try parseArguments(arguments)
         let direction = try requiredString("direction", from: args).lowercased()
         let amount = optionalInt("amount", from: args) ?? 3
@@ -269,6 +275,7 @@ struct DragTool: ToolDefinition {
     }
 
     func execute(arguments: String) async throws -> String {
+        ensureAICursorActive()
         let args = try parseArguments(arguments)
         let fromX = try requiredDouble("from_x", from: args)
         let fromY = try requiredDouble("from_y", from: args)
@@ -302,6 +309,9 @@ struct DragTool: ToolDefinition {
             if let drag = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged,
                                   mouseCursorPosition: pos, mouseButton: .left) {
                 drag.post(tap: .cghidEventTap)
+            }
+            if AICursorManager.shared.isActive {
+                AICursorManager.shared.addTrailPoint(pos)
             }
             try await Task.sleep(nanoseconds: 12_000_000) // ~300ms total
         }

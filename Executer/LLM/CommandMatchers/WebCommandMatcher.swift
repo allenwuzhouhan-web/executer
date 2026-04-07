@@ -8,9 +8,16 @@ extension LocalCommandRouter {
         for prefix in navPrefixes {
             if input.hasPrefix(prefix) {
                 let target = String(input.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                // Try full target first (e.g., "open google.com/maps")
                 if let url = resolveURL(target) {
                     let jsonArg = "{\"url\": \"\(escapeJSON(url))\"}"
                     return try? await OpenInSafariTool().execute(arguments: jsonArg)
+                }
+                // If target has " and " or " then ", don't navigate — let tryCompoundOpenAndSearch handle it
+                for sep in [" and ", " then "] {
+                    if target.range(of: sep) != nil {
+                        break
+                    }
                 }
             }
         }
@@ -41,44 +48,63 @@ extension LocalCommandRouter {
     }
 
     func trySearchCommand(_ input: String) async -> String? {
-        // "search youtube for [query]" / "youtube [query]" / "search [query] on youtube"
-        if let query = extractSearchQuery(input, platform: "youtube") {
-            let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-            let url = "https://www.youtube.com/results?search_query=\(encoded)"
-            return try? await OpenInSafariTool().execute(arguments: "{\"url\": \"\(url)\"}")
+        // "open youtube and search for [query]" / "go to reddit.com and look up [query]"
+        if let result = await tryCompoundOpenAndSearch(input) {
+            return result
         }
 
-        // "search google for [query]" / "google [query]"
-        if let query = extractSearchQuery(input, platform: "google") {
-            let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-            return try? await SearchWebTool().execute(arguments: "{\"query\": \"\(escapeJSON(query))\"}")
+        // "search youtube for [query]" / "search youtube.com for [query]"
+        if let result = await tryPlatformSearch(input) {
+            return result
         }
 
-        // "search for [query]" / "look up [query]" / "search [query]"
+        // "search for [query]" / "look up [query]" / "search [query]" → Google
         let searchPrefixes = ["search for ", "look up ", "search "]
         for prefix in searchPrefixes {
             if input.hasPrefix(prefix) {
                 let query = String(input.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
-                // Don't match "search youtube/google" — those are handled above
-                if !query.isEmpty && !query.hasPrefix("youtube") && !query.hasPrefix("google") &&
-                   !query.contains(" on youtube") && !query.contains(" on google") {
-                    return try? await SearchWebTool().execute(arguments: "{\"query\": \"\(escapeJSON(query))\"}")
-                }
+                guard !query.isEmpty else { continue }
+                // Skip if it's "[platform] for [query]" or "[query] on [platform]" — handled elsewhere
+                if query.contains(" on ") || query.contains(" for ") { continue }
+                // Skip if first word is a resolvable site name
+                let firstWord = String(query.split(separator: " ").first ?? "")
+                if resolveURL(firstWord) != nil && query.split(separator: " ").count > 1 { continue }
+                return try? await SearchWebTool().execute(arguments: "{\"query\": \"\(escapeJSON(query))\"}")
             }
         }
 
-        // "search [query] on [platform]"
+        // "search [query] on [platform]" / "search cats on youtube.com"
         if input.hasPrefix("search ") && input.contains(" on ") {
             let afterSearch = String(input.dropFirst("search ".count))
             if let onRange = afterSearch.range(of: " on ", options: .backwards) {
                 let query = String(afterSearch[afterSearch.startIndex..<onRange.lowerBound])
-                let platform = String(afterSearch[onRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-
+                let rawPlatform = String(afterSearch[onRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
                 if !query.isEmpty {
-                    if let url = searchURLForPlatform(platform, query: query) {
-                        return try? await OpenInSafariTool().execute(arguments: "{\"url\": \"\(url)\"}")
-                    }
+                    return try? await openSearchURL(platform: rawPlatform, query: query)
                 }
+            }
+        }
+
+        // "[query] on [platform]" — "funny cats on youtube" / "headphones on amazon"
+        if input.contains(" on ") {
+            if let onRange = input.range(of: " on ", options: .backwards) {
+                let query = String(input[input.startIndex..<onRange.lowerBound])
+                let rawPlatform = String(input[onRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                // Only match if the suffix resolves to a known site
+                if !query.isEmpty && resolveURL(rawPlatform) != nil {
+                    return try? await openSearchURL(platform: rawPlatform, query: query)
+                }
+            }
+        }
+
+        // "[platform] [query]" — "youtube funny cats" / "reddit swift tips" / "amazon headphones"
+        // Only match if the first word resolves to a site and there's a query after it
+        let firstSpace = input.firstIndex(of: " ")
+        if let spaceIdx = firstSpace {
+            let firstWord = String(input[input.startIndex..<spaceIdx])
+            let rest = String(input[input.index(after: spaceIdx)...]).trimmingCharacters(in: .whitespaces)
+            if !rest.isEmpty && resolveURL(firstWord) != nil {
+                return try? await openSearchURL(platform: firstWord, query: rest)
             }
         }
 
@@ -92,75 +118,216 @@ extension LocalCommandRouter {
             }
         }
 
+        // "google [query]" — explicit google search
+        if input.hasPrefix("google ") {
+            let query = String(input.dropFirst("google ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty {
+                return try? await SearchWebTool().execute(arguments: "{\"query\": \"\(escapeJSON(query))\"}")
+            }
+        }
+
+        // "google images [query]" / "image search [query]"
+        if input.hasPrefix("google images ") || input.hasPrefix("image search ") {
+            let prefix = input.hasPrefix("google images ") ? "google images " : "image search "
+            let query = String(input.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !query.isEmpty {
+                let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+                let url = "https://www.google.com/search?tbm=isch&q=\(encoded)"
+                return try? await OpenInSafariTool().execute(arguments: "{\"url\": \"\(url)\"}")
+            }
+        }
+
+        // "maps [query]" / "directions to [place]" / "map of [place]"
+        for p in ["directions to ", "map of ", "maps "] as [String] {
+            if input.hasPrefix(p) {
+                let query = String(input.dropFirst(p.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !query.isEmpty {
+                    let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+                    let url = "https://www.google.com/maps/search/\(encoded)"
+                    return try? await OpenInSafariTool().execute(arguments: "{\"url\": \"\(url)\"}")
+                }
+            }
+        }
+
         return nil
     }
 
     // MARK: - URL Resolution
 
-    /// Tries to resolve a spoken/typed target into a valid URL.
+    /// Resolves a spoken/typed target into a valid URL.
+    /// Only resolves: full URLs, explicit domains (with dots), and known site shortcuts.
+    /// Never guesses — if the user doesn't provide a recognizable URL/domain, returns nil.
     func resolveURL(_ target: String) -> String? {
         let clean = target.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return nil }
+        guard !clean.isEmpty, !clean.contains(" ") else { return nil }
 
         // Already a URL
         if clean.hasPrefix("http://") || clean.hasPrefix("https://") {
             return clean
         }
 
-        // Looks like a domain (contains a dot, no spaces)
-        if clean.contains(".") && !clean.contains(" ") {
+        // Looks like a domain (contains a dot)
+        if clean.contains(".") {
             return "https://\(clean)"
         }
 
-        // Common site shortcuts — static to avoid 40+ allocations per call
-        return Self.siteShortcuts[clean]
+        // Known shortcuts for sites where the URL is non-obvious
+        if let url = Self.siteShortcuts[clean.lowercased()] {
+            return url
+        }
+
+        return nil
     }
 
-    // Cached outside resolveURL to avoid re-creating 40-entry dict on every call
+    // Only sites where the URL is non-obvious (not just {name}.com)
     private static let siteShortcuts: [String: String] = [
-            "youtube": "https://www.youtube.com",
-            "google": "https://www.google.com",
-            "gmail": "https://mail.google.com",
-            "twitter": "https://x.com",
-            "x": "https://x.com",
-            "reddit": "https://www.reddit.com",
-            "github": "https://github.com",
-            "facebook": "https://www.facebook.com",
-            "instagram": "https://www.instagram.com",
-            "linkedin": "https://www.linkedin.com",
-            "amazon": "https://www.amazon.com",
-            "netflix": "https://www.netflix.com",
-            "spotify": "https://open.spotify.com",
-            "twitch": "https://www.twitch.tv",
-            "discord": "https://discord.com/app",
-            "slack": "https://app.slack.com",
-            "notion": "https://www.notion.so",
-            "figma": "https://www.figma.com",
-            "chatgpt": "https://chat.openai.com",
-            "claude": "https://claude.ai",
-            "hacker news": "https://news.ycombinator.com",
-            "hackernews": "https://news.ycombinator.com",
-            "hn": "https://news.ycombinator.com",
-            "stack overflow": "https://stackoverflow.com",
-            "stackoverflow": "https://stackoverflow.com",
-            "wikipedia": "https://en.wikipedia.org",
-            "maps": "https://maps.google.com",
-            "google maps": "https://maps.google.com",
-            "google drive": "https://drive.google.com",
-            "drive": "https://drive.google.com",
-            "docs": "https://docs.google.com",
-            "google docs": "https://docs.google.com",
-            "sheets": "https://sheets.google.com",
-            "google sheets": "https://sheets.google.com",
-            "calendar": "https://calendar.google.com",
-            "google calendar": "https://calendar.google.com",
-            "whatsapp": "https://web.whatsapp.com",
-            "telegram": "https://web.telegram.org",
-            "tiktok": "https://www.tiktok.com",
-            "pinterest": "https://www.pinterest.com",
-            "ebay": "https://www.ebay.com",
-            "apple music": "https://music.apple.com",
-        ]
+        // URL differs from name
+        "twitter": "https://x.com",
+        "x": "https://x.com",
+        "gmail": "https://mail.google.com",
+        "hacker news": "https://news.ycombinator.com",
+        "hackernews": "https://news.ycombinator.com",
+        "hn": "https://news.ycombinator.com",
+        "stack overflow": "https://stackoverflow.com",
+        "stackoverflow": "https://stackoverflow.com",
+        "whatsapp": "https://web.whatsapp.com",
+        "telegram": "https://web.telegram.org",
+        "chatgpt": "https://chat.openai.com",
+        "claude": "https://claude.ai",
+        "wikipedia": "https://en.wikipedia.org",
+        "spotify": "https://open.spotify.com",
+        "apple music": "https://music.apple.com",
+        "disney plus": "https://www.disneyplus.com",
+        "disney+": "https://www.disneyplus.com",
+        "prime video": "https://www.amazon.com/gp/video/storefront",
+        "messenger": "https://www.messenger.com",
+        "best buy": "https://www.bestbuy.com",
+        "bestbuy": "https://www.bestbuy.com",
+        "uber eats": "https://www.ubereats.com",
+        "rotten tomatoes": "https://www.rottentomatoes.com",
+        "new york times": "https://www.nytimes.com",
+        "nytimes": "https://www.nytimes.com",
+        "nyt": "https://www.nytimes.com",
+        "wsj": "https://www.wsj.com",
+        "wall street journal": "https://www.wsj.com",
+        "bbc": "https://www.bbc.com",
+        "cnn": "https://www.cnn.com",
+        "bluesky": "https://bsky.app",
+        "wolfram": "https://www.wolframalpha.com",
+        "wolfram alpha": "https://www.wolframalpha.com",
+        // Google suite
+        "maps": "https://maps.google.com",
+        "google maps": "https://maps.google.com",
+        "google drive": "https://drive.google.com",
+        "drive": "https://drive.google.com",
+        "docs": "https://docs.google.com",
+        "google docs": "https://docs.google.com",
+        "sheets": "https://sheets.google.com",
+        "google sheets": "https://sheets.google.com",
+        "slides": "https://slides.google.com",
+        "google slides": "https://slides.google.com",
+        "calendar": "https://calendar.google.com",
+        "google calendar": "https://calendar.google.com",
+        "google scholar": "https://scholar.google.com",
+        "google images": "https://images.google.com",
+        // Non-.com TLDs
+        "notion": "https://www.notion.so",
+        "discord": "https://discord.com/app",
+        "slack": "https://app.slack.com",
+        "twitch": "https://www.twitch.tv",
+        "npm": "https://www.npmjs.com",
+        "pypi": "https://pypi.org",
+        "crates": "https://crates.io",
+        "gitlab": "https://gitlab.com",
+        "bitbucket": "https://bitbucket.org",
+        "linear": "https://linear.app",
+        "asana": "https://app.asana.com",
+        "threads": "https://www.threads.net",
+        "mastodon": "https://mastodon.social",
+    ]
+
+    // MARK: - Platform Search
+
+    /// Handles "search [platform] for [query]" / "[platform] [query]" patterns.
+    private func tryPlatformSearch(_ input: String) async -> String? {
+        // "search [platform] for [query]"
+        if input.hasPrefix("search ") && input.contains(" for ") {
+            let afterSearch = String(input.dropFirst("search ".count))
+            if let forRange = afterSearch.range(of: " for ") {
+                let platform = String(afterSearch[afterSearch.startIndex..<forRange.lowerBound])
+                let query = String(afterSearch[forRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                if !platform.isEmpty && !query.isEmpty && resolveURL(platform) != nil {
+                    return try? await openSearchURL(platform: platform, query: query)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Opens the best search URL for a platform + query.
+    /// Uses native search URLs for top sites, falls back to Google site: search for everything else.
+    private func openSearchURL(platform: String, query: String) async throws -> String? {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+
+        // Check if we have a native search URL for this platform
+        if let url = Self.nativeSearchURL(platform: platform, query: query) {
+            return try? await OpenInSafariTool().execute(arguments: "{\"url\": \"\(url)\"}")
+        }
+
+        // Fallback: Google site-scoped search — works for ANY website
+        let domain = Self.resolveDomain(platform)
+        let url = "https://www.google.com/search?q=\(encoded)+site:\(domain)"
+        return try? await OpenInSafariTool().execute(arguments: "{\"url\": \"\(url)\"}")
+    }
+
+    /// Returns the domain for a platform name. "youtube" → "youtube.com", "youtube.com" → "youtube.com"
+    private static func resolveDomain(_ platform: String) -> String {
+        let lower = platform.lowercased()
+        // Already has a TLD
+        if lower.contains(".") { return lower }
+        // Check shortcuts for non-obvious domains
+        if let url = siteShortcuts[lower],
+           let host = URL(string: url)?.host {
+            return host
+        }
+        // Default: {name}.com
+        return "\(lower).com"
+    }
+
+    /// Native search URL patterns for sites where we know the exact format.
+    /// Only the top ~10 sites people actually search on. Everything else gets Google site: search.
+    private static func nativeSearchURL(platform: String, query: String) -> String? {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let normalized = normalizePlatform(platform)
+        switch normalized {
+        case "youtube":
+            return "https://www.youtube.com/results?search_query=\(encoded)"
+        case "google":
+            return "https://www.google.com/search?q=\(encoded)"
+        case "reddit":
+            return "https://www.reddit.com/search/?q=\(encoded)"
+        case "amazon":
+            return "https://www.amazon.com/s?k=\(encoded)"
+        case "github":
+            return "https://github.com/search?q=\(encoded)"
+        case "twitter", "x":
+            return "https://x.com/search?q=\(encoded)"
+        case "wikipedia":
+            return "https://en.wikipedia.org/w/index.php?search=\(encoded)"
+        case "stackoverflow", "stack overflow":
+            return "https://stackoverflow.com/search?q=\(encoded)"
+        case "spotify":
+            return "https://open.spotify.com/search/\(encoded)"
+        case "google maps", "maps":
+            return "https://www.google.com/maps/search/\(encoded)"
+        case "google images":
+            return "https://www.google.com/search?tbm=isch&q=\(encoded)"
+        case "google scholar":
+            return "https://scholar.google.com/scholar?q=\(encoded)"
+        default:
+            return nil
+        }
+    }
 
     // MARK: - Search Query Extraction
 
@@ -195,7 +362,6 @@ extension LocalCommandRouter {
         // "[query] on [platform]"
         if input.hasSuffix(" on \(platform)") {
             let query = String(input.dropLast(" on \(platform)".count))
-            // Filter out things that don't look like search queries
             if !query.isEmpty && !query.hasPrefix("search") && !query.hasPrefix("look") {
                 return query
             }
@@ -211,30 +377,60 @@ extension LocalCommandRouter {
         return nil
     }
 
-    /// Build a search URL for a given platform.
+    /// Build a search URL for a given platform. Accepts both "youtube" and "youtube.com" forms.
+    /// Kept for backward compatibility — delegates to nativeSearchURL + Google fallback.
     func searchURLForPlatform(_ platform: String, query: String) -> String? {
-        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        switch platform.lowercased() {
-        case "youtube":
-            return "https://www.youtube.com/results?search_query=\(encoded)"
-        case "google":
-            return "https://www.google.com/search?q=\(encoded)"
-        case "reddit":
-            return "https://www.reddit.com/search/?q=\(encoded)"
-        case "amazon":
-            return "https://www.amazon.com/s?k=\(encoded)"
-        case "github":
-            return "https://github.com/search?q=\(encoded)"
-        case "twitter", "x":
-            return "https://x.com/search?q=\(encoded)"
-        case "wikipedia":
-            return "https://en.wikipedia.org/w/index.php?search=\(encoded)"
-        case "stack overflow", "stackoverflow":
-            return "https://stackoverflow.com/search?q=\(encoded)"
-        case "spotify":
-            return "https://open.spotify.com/search/\(encoded)"
-        default:
-            return nil
+        // Try native first
+        if let url = Self.nativeSearchURL(platform: platform, query: query) {
+            return url
         }
+        // Google site: fallback
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let domain = Self.resolveDomain(platform)
+        return "https://www.google.com/search?q=\(encoded)+site:\(domain)"
+    }
+
+    // MARK: - Compound "open X and search for Y"
+
+    /// Handles "open youtube and search for how claw works", "go to reddit and look up swift concurrency", etc.
+    /// Also handles domain forms: "go to youtube.com and search for funny cat videos".
+    private func tryCompoundOpenAndSearch(_ input: String) async -> String? {
+        let openPrefixes = ["open ", "go to ", "navigate to "]
+        let searchSeparators = [" and search for ", " and search ", " and look up ", " and find "]
+
+        for prefix in openPrefixes {
+            guard input.hasPrefix(prefix) else { continue }
+            let afterPrefix = String(input.dropFirst(prefix.count))
+
+            for sep in searchSeparators {
+                guard let sepRange = afterPrefix.range(of: sep) else { continue }
+                let rawPlatform = String(afterPrefix[afterPrefix.startIndex..<sepRange.lowerBound])
+                    .trimmingCharacters(in: .whitespaces)
+                let query = String(afterPrefix[sepRange.upperBound...])
+                    .trimmingCharacters(in: .whitespaces)
+
+                guard !rawPlatform.isEmpty, !query.isEmpty else { continue }
+
+                // Platform must be resolvable (known shortcut, has a dot, or resolves to .com)
+                guard resolveURL(rawPlatform) != nil else { continue }
+
+                return try? await openSearchURL(platform: rawPlatform, query: query)
+            }
+        }
+
+        return nil
+    }
+
+    /// Strips domain suffixes and "www." to get a clean platform name for lookup.
+    /// "youtube.com" → "youtube", "www.reddit.com" → "reddit", "en.wikipedia.org" → "wikipedia"
+    private static func normalizePlatform(_ raw: String) -> String {
+        var name = raw.lowercased()
+        for prefix in ["www.", "en.", "web.", "app.", "m."] {
+            if name.hasPrefix(prefix) { name = String(name.dropFirst(prefix.count)) }
+        }
+        for suffix in [".com", ".org", ".net", ".io", ".tv", ".co", ".ai", ".so", ".gg", ".app"] {
+            if name.hasSuffix(suffix) { name = String(name.dropLast(suffix.count)) }
+        }
+        return name
     }
 }

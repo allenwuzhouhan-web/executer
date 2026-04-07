@@ -111,7 +111,7 @@ def create_docx(spec, output_path):
                 headers = table_data.get("headers", [])
                 rows = table_data.get("rows", [])
                 if headers or rows:
-                    num_cols = len(headers) if headers else len(rows[0]) if rows else 1
+                    num_cols = len(headers) if headers else (len(rows[0]) if rows and rows[0] else 1)
                     total_rows = (1 if headers else 0) + len(rows)
                     table = doc.add_table(rows=total_rows, cols=num_cols)
                     table.style = 'Table Grid'

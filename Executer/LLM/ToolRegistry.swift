@@ -8,6 +8,7 @@ enum ToolCategory: String, CaseIterable {
     case aliases, clipboardHistory, systemInfo, automation
     case cursor, keyboard, language, scheduler, weather
     case messaging, academicResearch, documents, browser, mcp
+    case systemBash, media
 }
 
 /// Central registry of all tools the LLM can invoke.
@@ -21,6 +22,8 @@ class ToolRegistry {
     private var toolCategories: [String: ToolCategory]
     // Pre-built per-category schema cache
     private var schemasByCategory: [ToolCategory: [[String: AnyCodable]]]
+    // Lock for synchronizing reads/writes to mutable dictionaries above
+    private let lock = NSLock()
 
     private init() {
         var allTools: [any ToolDefinition] = [
@@ -99,10 +102,26 @@ class ToolRegistry {
             CenterWindowTool(),
             CloseWindowTool(),
 
-            // Productivity
-            CreateReminderTool(),
+            // Productivity — Calendar
+            ListCalendarsTool(),
             CreateCalendarEventTool(),
+            QueryCalendarEventsTool(),
+            UpdateCalendarEventTool(),
+            DeleteCalendarEventTool(),
+            // Productivity — Reminders
+            ListReminderListsTool(),
+            CreateReminderTool(),
+            QueryRemindersTool(),
+            CompleteReminderTool(),
+            DeleteReminderTool(),
+            // Productivity — Notes
             CreateNoteTool(),
+            QueryNotesTool(),
+            ReadNoteTool(),
+            UpdateNoteTool(),
+            DeleteNoteTool(),
+            ListNoteFoldersTool(),
+            // Productivity — Timers & Alarms
             SetTimerTool(),
             SetAlarmTool(),
             OpenSystemPreferencesTool(),
@@ -111,6 +130,46 @@ class ToolRegistry {
             RunShellCommandTool(),
             OpenTerminalTool(),
             OpenTerminalWithCommandTool(),
+
+            // System Bash (safe, scoped shell tools)
+            GetNetworkInfoTool(),
+            GetDiskUsageTool(),
+            ListProcessesTool(),
+            CheckPortTool(),
+            GitStatusTool(),
+            CountLinesTool(),
+            CompressFilesTool(),
+            GetEnvInfoTool(),
+            KillProcessTool(),
+            PingHostTool(),
+            WhatsUsingTool(),
+            QuickSpeedTestTool(),
+            DownloadFileTool(),
+            ExtractArchiveTool(),
+            HttpRequestTool(),
+            RunScriptTool(),
+            InstallPackageTool(),
+            DiffFilesTool(),
+            HashFileTool(),
+            CreateSymlinkTool(),
+            ChmodTool(),
+            ServeDirectoryTool(),
+            DockerTool(),
+            GitCommandTool(),
+            FindReplaceTool(),
+            Base64Tool(),
+            JsonProcessTool(),
+            CronTool(),
+            SSHCommandTool(),
+            CreateVenvTool(),
+            TextProcessTool(),
+            WatchCommandTool(),
+            ClipboardPipeTool(),
+            SqliteQueryTool(),
+            FileWatcherTool(),
+            ImageConvertTool(),
+            RenameFileTool(),
+            SystemProfilerTool(),
 
             // Screenshot
             CaptureScreenTool(),
@@ -131,7 +190,14 @@ class ToolRegistry {
             RemoveSkillTool(),
 
             // Web Content Reading
+            ReadWebPageTool(),
             ReadSafariPageTool(),
+
+            // Safari DOM Interaction (for React/dynamic web apps)
+            SafariReadElementsTool(),
+            SafariClickTool(),
+            SafariTypeTool(),
+            SafariSelectTool(),
             ReadSafariHTMLTool(),
             FetchURLContentTool(),
             ReadChromePageTool(),
@@ -154,6 +220,12 @@ class ToolRegistry {
             RecallMemoriesTool(),
             ForgetMemoryTool(),
             ListMemoriesTool(),
+
+            // Goals (persistent goal stack)
+            AddGoalTool(),
+            ListGoalsTool(),
+            CompleteGoalStepTool(),
+            GetNextGoalActionTool(),
 
             // Aliases
             CreateAliasTool(),
@@ -205,13 +277,29 @@ class ToolRegistry {
             RemoveAutomationRuleTool(),
             ToggleAutomationRuleTool(),
 
+            // Background Agents
+            StartBackgroundAgentTool(),
+            ListBackgroundAgentsTool(),
+            StopBackgroundAgentTool(),
+            SpawnSubAgentTool(),
+            CheckAgentStatusTool(),
+            WaitForAgentTool(),
+
+            // Email Briefing
+            SendEmailBriefingTool(),
+            ScheduleEmailBriefingTool(),
+            ListEmailBriefingsTool(),
+            CancelEmailBriefingTool(),
+
             // Cursor / Mouse Control
             MoveCursorTool(),
             ClickTool(),
             ClickElementTool(),
+            ClickRefTool(),
             ScrollTool(),
             DragTool(),
             GetCursorPositionTool(),
+            UIExploreTool(),
 
             // Keyboard / Typing
             TypeTextTool(),
@@ -254,11 +342,24 @@ class ToolRegistry {
             GetLearnedPatternsTool(),
             ListLearnedAppsTool(),
             GetCurrentSessionTool(),
+            RecallWorkflowTool(),
             GetTodayContextTool(),
             RecallWorkContextTool(),
             GetDailySummaryTool(),
             GetUserGoalsTool(),
             GetCurrentIntentTool(),
+
+            // Synthesis (cross-app intelligence)
+            SynthesizeActivityTool(),
+            SynthesizeResearchTool(),
+            SynthesizeProjectTool(),
+            PrepareMeetingTool(),
+            MeetingStatusTool(),
+
+            // Overnight Agent
+            StartOvernightAgentTool(),
+            OvernightAgentStatusTool(),
+            AddOvernightTaskTool(),
 
             // Phase 4-10: Prediction, Templates, Autonomy
             GetPredictionsTool(),
@@ -297,6 +398,33 @@ class ToolRegistry {
             BrowserSessionTool(),
             BrowserScreenshotTool(),
 
+            // Browser Intelligence (DOM, JS, network)
+            BrowserExecuteJSTool(),
+            BrowserReadDOMTool(),
+            BrowserGetConsoleTool(),
+            BrowserInspectElementTool(),
+            BrowserClickElementCSSTool(),
+            BrowserTypeInElementTool(),
+            BrowserInterceptNetworkTool(),
+            BrowserNavigateTool(),
+
+            // Chrome CDP Connection (real browser control)
+            BrowserConnectChromeTool(),
+            BrowserReadElementsTool(),
+            BrowserClickElementTool(),
+            BrowserTypeElementTool(),
+            BrowserPageStateTool(),
+            BrowserWaitForTool(),
+            BrowserSelectTabTool(),
+
+            // Vision & Screen Perception
+            PerceiveScreenTool(),
+            PerceiveScreenVisualTool(),
+            FindElementTool(),
+
+            // Fast Text Input
+            PasteTextTool(),
+
             // Document Training (8-stage study pipeline)
             TrainDocumentTool(),
             ListTrainedDocumentsTool(),
@@ -307,6 +435,51 @@ class ToolRegistry {
             ExtractPPTDesignTool(),
             CreateWordDocumentTool(),
             CreateSpreadsheetTool(),
+
+            // 3D Model Creation (Blender headless)
+            CreateBlenderModelTool(),
+
+            // Media Production (FFmpeg + Audio)
+            FFmpegEditVideoTool(),
+            CreateVideoTool(),
+            FFmpegProbeTool(),
+            CreateAudioTool(),
+            PlanVideoTool(),
+            SetupFFmpegTool(),
+            AnalyzeYouTubeChannelTool(),
+            ListVideoStylesTool(),
+            QuickVideoTool(),
+            CreatePodcastTool(),
+
+            // YouTube / Media Download (yt-dlp)
+            DownloadYouTubeTool(),
+            SetupYTDLPTool(),
+
+            // Mail (macOS Mail.app)
+            SearchMailTool(),
+            OpenEmailTool(),
+            ReadEmailTool(),
+            ListMailboxesTool(),
+
+            // RAG (local vector search)
+            RAGIngestTool(),
+            RAGSearchTool(),
+            RAGListCollectionsTool(),
+            RAGDeleteCollectionTool(),
+            RAGCollectionInfoTool(),
+
+            // Notion
+            NotionSetupTool(),
+            NotionSearchTool(),
+            NotionReadPageTool(),
+            NotionCreatePageTool(),
+            NotionUpdatePageTool(),
+            NotionAppendBlocksTool(),
+            NotionQueryDatabaseTool(),
+            NotionGetDatabaseTool(),
+            NotionAddToDatabaseTool(),
+            NotionCreateDatabaseTool(),
+            NotionAddCommentTool(),
         ]
 
         // MCP tools are registered asynchronously after server connection.
@@ -349,7 +522,10 @@ class ToolRegistry {
             "open_url": .web, "search_web": .web, "open_url_in_safari": .web,
             "get_safari_url": .web, "get_safari_title": .web, "get_chrome_url": .web, "new_safari_tab": .web,
             // Web Content
+            "read_web_page": .webContent,
             "read_safari_page": .webContent, "read_safari_html": .webContent,
+            "safari_read_elements": .webContent, "safari_click": .webContent,
+            "safari_type": .webContent, "safari_select": .webContent,
             "fetch_url_content": .webContent, "read_chrome_page": .webContent,
             // Windows
             "list_windows": .windows, "move_window": .windows, "resize_window": .windows,
@@ -357,13 +533,40 @@ class ToolRegistry {
             "tile_window_left": .windows, "tile_window_right": .windows,
             "tile_window_top_left": .windows, "center_window": .windows, "close_window": .windows,
             "tile_windows_side_by_side": .windows, "move_window_to_space": .windows, "arrange_windows": .windows,
-            // Productivity
-            "create_reminder": .productivity, "create_calendar_event": .productivity,
-            "create_note": .productivity, "set_timer": .productivity,
+            // Productivity — Calendar, Reminders, Notes
+            "list_calendars": .productivity, "create_calendar_event": .productivity,
+            "query_calendar_events": .productivity, "update_calendar_event": .productivity,
+            "delete_calendar_event": .productivity,
+            "list_reminder_lists": .productivity, "create_reminder": .productivity,
+            "query_reminders": .productivity, "complete_reminder": .productivity,
+            "delete_reminder": .productivity,
+            "create_note": .productivity, "query_notes": .productivity,
+            "read_note": .productivity, "update_note": .productivity,
+            "delete_note": .productivity, "list_note_folders": .productivity,
+            "set_timer": .productivity, "set_alarm": .productivity,
             "open_system_preferences_pane": .productivity,
-            "query_calendar_events": .productivity, "query_reminders": .productivity,
             // Terminal
             "run_shell_command": .terminal, "open_terminal": .terminal, "open_terminal_with_command": .terminal,
+            // System Bash (safe, scoped shell tools)
+            "get_network_info": .systemBash, "get_disk_usage": .systemBash,
+            "list_processes": .systemBash, "check_port": .systemBash,
+            "git_status": .systemBash, "count_lines": .systemBash,
+            "compress_files": .systemBash, "get_env_info": .systemBash,
+            "kill_process": .systemBash, "ping_host": .systemBash,
+            "whats_using": .systemBash, "quick_speed_test": .systemBash,
+            "download_file": .systemBash, "extract_archive": .systemBash,
+            "http_request": .systemBash, "run_script": .systemBash,
+            "install_package": .systemBash, "diff_files": .systemBash,
+            "hash_file": .systemBash, "create_symlink": .systemBash,
+            "chmod_file": .systemBash, "serve_directory": .systemBash,
+            "docker_command": .systemBash, "git_command": .systemBash,
+            "find_replace_in_files": .systemBash, "base64_convert": .systemBash,
+            "json_process": .systemBash, "cron_manage": .systemBash,
+            "ssh_command": .systemBash, "create_venv": .systemBash,
+            "text_process": .systemBash, "watch_command": .systemBash,
+            "clipboard_pipe": .systemBash, "sqlite_query": .systemBash,
+            "file_watcher": .systemBash, "image_convert": .systemBash,
+            "rename_file": .systemBash, "system_profiler": .systemBash,
             // Screenshot
             "capture_screen": .screenshot, "capture_window": .screenshot,
             "capture_screen_to_clipboard": .screenshot, "capture_area": .screenshot, "ocr_image": .screenshot,
@@ -385,6 +588,9 @@ class ToolRegistry {
             // Memory
             "save_memory": .memory, "recall_memories": .memory,
             "forget_memory": .memory, "list_memories": .memory,
+            // Goals
+            "add_goal": .memory, "list_goals": .memory,
+            "complete_goal_step": .memory, "get_next_goal_action": .memory,
             // Aliases
             "create_alias": .aliases, "list_aliases": .aliases, "remove_alias": .aliases,
             // System Info
@@ -396,9 +602,16 @@ class ToolRegistry {
             // Automation
             "create_automation_rule": .automation, "list_automation_rules": .automation,
             "remove_automation_rule": .automation, "toggle_automation_rule": .automation,
+            // Background Agents
+            "start_background_agent": .automation, "list_background_agents": .automation,
+            "stop_background_agent": .automation,
+            "spawn_subagent": .automation, "check_agent_status": .automation, "wait_for_agent": .automation,
+            // Email Briefing
+            "send_email_briefing": .productivity, "schedule_email_briefing": .productivity,
+            "list_email_briefings": .productivity, "cancel_email_briefing": .productivity,
             // Cursor
-            "move_cursor": .cursor, "click": .cursor, "click_element": .cursor,
-            "scroll": .cursor, "drag": .cursor, "get_cursor_position": .cursor,
+            "move_cursor": .cursor, "click": .cursor, "click_element": .cursor, "click_ref": .cursor,
+            "scroll": .cursor, "drag": .cursor, "get_cursor_position": .cursor, "explore_ui": .cursor,
             // Keyboard
             "type_text": .keyboard, "press_key": .keyboard, "hotkey": .keyboard, "select_all_text": .keyboard,
             // Language
@@ -416,10 +629,13 @@ class ToolRegistry {
             // Screen Reading & Learning
             "read_screen": .screenshot, "read_app_text": .screenshot,
             "get_learned_patterns": .memory, "list_learned_apps": .memory,
-            "get_current_session": .memory, "get_today_context": .memory,
+            "get_current_session": .memory, "recall_workflow": .skills, "get_today_context": .memory, "start_overnight_agent": .automation, "overnight_agent_status": .automation, "add_overnight_task": .automation,
             "recall_work_context": .memory, "get_daily_summary": .memory,
             "get_user_goals": .memory,
             "get_current_intent": .memory,
+            // Synthesis
+            "synthesize_activity": .memory, "synthesize_research": .memory, "synthesize_project": .memory,
+            "prepare_meeting": .memory, "meeting_status": .memory,
             "get_predictions": .memory,
             "get_routines": .memory,
             "list_workflow_templates": .memory,
@@ -435,6 +651,14 @@ class ToolRegistry {
             "train_document": .documents, "list_trained_documents": .documents, "recall_trained_knowledge": .documents,
             "create_presentation": .documents, "extract_ppt_design": .documents,
             "create_word_document": .documents, "create_spreadsheet": .documents,
+            "create_3d_model": .documents,
+            // Media Production (FFmpeg + Audio)
+            "ffmpeg_edit_video": .media, "create_video": .media,
+            "ffmpeg_probe": .media, "create_audio": .media,
+            "plan_video": .media, "setup_ffmpeg": .media,
+            "analyze_youtube_channel": .media, "list_video_styles": .media,
+            "quick_video": .media, "create_podcast": .media,
+            "download_youtube": .media, "setup_ytdlp": .media,
             // Tool Catalog
             "get_tool_guide": .skills,
             "request_tools": .skills,
@@ -443,6 +667,32 @@ class ToolRegistry {
             // Browser Automation
             "browser_task": .browser, "browser_extract": .browser,
             "browser_session": .browser, "browser_screenshot": .browser,
+            // Browser Intelligence
+            "browser_execute_js": .browser, "browser_read_dom": .browser,
+            "browser_get_console": .browser, "browser_inspect_element": .browser,
+            "browser_click_element_css": .browser, "browser_type_in_element": .browser,
+            "browser_intercept_network": .browser, "browser_navigate": .browser,
+            "browser_connect_chrome": .browser, "browser_read_elements": .browser,
+            "browser_click_element": .browser, "browser_type_element": .browser,
+            "browser_page_state": .browser, "browser_wait_for": .browser, "browser_select_tab": .browser,
+            // Vision & Perception
+            "perceive_screen": .screenshot, "perceive_screen_visual": .screenshot, "find_element": .screenshot,
+            // Fast Input
+            "paste_text": .keyboard,
+            // Mail
+            "search_mail": .productivity, "open_email": .productivity,
+            "read_email": .productivity, "list_mailboxes": .productivity,
+            // RAG
+            "rag_ingest": .fileContent, "rag_search": .fileContent,
+            "rag_list_collections": .fileContent, "rag_delete_collection": .fileContent,
+            "rag_collection_info": .fileContent,
+            // Notion
+            "notion_setup": .productivity, "notion_search": .productivity,
+            "notion_read_page": .productivity, "notion_create_page": .productivity,
+            "notion_update_page": .productivity, "notion_append_blocks": .productivity,
+            "notion_query_database": .productivity, "notion_get_database": .productivity,
+            "notion_add_to_database": .productivity, "notion_create_database": .productivity,
+            "notion_add_comment": .productivity,
         ]
         self.toolCategories = categoryMap
 
@@ -457,38 +707,94 @@ class ToolRegistry {
 
     /// Returns all tool definitions formatted for the DeepSeek API (OpenAI function calling format).
     func toolDefinitions() -> [[String: AnyCodable]] {
-        cachedSchemas
+        lock.lock(); defer { lock.unlock() }
+        return cachedSchemas
+    }
+
+    /// Returns tool schemas filtered by an explicit allowlist of tool names.
+    /// Used by ComputerUseAgent task profiles to restrict available tools.
+    func filteredToolDefinitions(allowlist: Set<String>) -> [[String: AnyCodable]] {
+        lock.lock()
+        let toolsCopy = tools
+        lock.unlock()
+        let schemas = allowlist.compactMap { name -> [String: AnyCodable]? in
+            guard let tool = toolsCopy[name] else { return nil }
+            return tool.toAPISchema()
+        }
+        print("[ToolRegistry] Filtered to \(schemas.count) tools by allowlist")
+        return schemas
+    }
+
+    /// Returns tool schemas filtered by explicit category set.
+    /// Used by AppAgent for per-app tool scoping.
+    func filteredToolDefinitions(categories: Set<ToolCategory>) -> [[String: AnyCodable]] {
+        lock.lock()
+        let byCatCopy = schemasByCategory
+        lock.unlock()
+        var schemas: [[String: AnyCodable]] = []
+        for cat in categories {
+            if let catSchemas = byCatCopy[cat] {
+                schemas.append(contentsOf: catSchemas)
+            }
+        }
+        // Deduplicate by tool name
+        var seen = Set<String>()
+        schemas = schemas.filter { schema in
+            guard let fn = schema["function"]?.value as? [String: AnyCodable],
+                  let name = fn["name"]?.value as? String else { return true }
+            return seen.insert(name).inserted
+        }
+        return schemas
     }
 
     /// Returns only the tool schemas relevant to the given query.
     /// Reduces from 220+ tools to ~30-40, saving ~15K tokens per API call.
     func filteredToolDefinitions(for query: String) -> [[String: AnyCodable]] {
         let categories = classifyQueryIntent(query)
+        lock.lock()
+        let byCatCopy = schemasByCategory
+        let totalCount = cachedSchemas.count
+        lock.unlock()
         var schemas: [[String: AnyCodable]] = []
         for cat in categories {
-            if let catSchemas = schemasByCategory[cat] {
+            if let catSchemas = byCatCopy[cat] {
                 schemas.append(contentsOf: catSchemas)
             }
         }
         let count = schemas.count
-        print("[ToolRegistry] Filtered to \(count) tools (from \(cachedSchemas.count)) for query")
-        // If filtering produced very few tools, include all as fallback
-        return count >= 5 ? schemas : cachedSchemas
+        print("[ToolRegistry] Filtered to \(count) tools (from \(totalCount)) for query")
+        // If filtering produced very few tools, expand with common utility categories instead of ALL tools
+        if count < 3 {
+            let utilityCategories: [ToolCategory] = [.files, .fileContent, .terminal, .appControl, .systemBash]
+            for cat in utilityCategories {
+                if let catSchemas = byCatCopy[cat], !categories.contains(cat) {
+                    schemas.append(contentsOf: catSchemas)
+                }
+            }
+            print("[ToolRegistry] Expanded to \(schemas.count) tools with utility categories")
+        }
+        return schemas
     }
 
     /// Returns tool schemas filtered by both agent whitelist AND query intent.
     /// Agent filtering narrows first, then intent filtering narrows further.
     func filteredToolDefinitions(for query: String, agent: AgentProfile) -> [[String: AnyCodable]] {
         // Step 1: If agent has an allowedToolIDs whitelist, restrict to those tools
+        lock.lock()
+        let toolsCopy = tools
+        let cachedSchemasCopy = cachedSchemas
+        let toolCategoriesCopy = toolCategories
+        lock.unlock()
+
         let agentSchemas: [[String: AnyCodable]]
         if let allowed = agent.allowedToolIDs {
             agentSchemas = allowed.compactMap { name in
-                guard let tool = tools[name] else { return nil }
+                guard let tool = toolsCopy[name] else { return nil }
                 return tool.toAPISchema()
             }
             print("[ToolRegistry] Agent '\(agent.id)' whitelist: \(agentSchemas.count) tools")
         } else {
-            agentSchemas = cachedSchemas
+            agentSchemas = cachedSchemasCopy
         }
 
         // Step 2: Apply intent-based category filtering on the agent-scoped set
@@ -496,7 +802,7 @@ class ToolRegistry {
         let filtered = agentSchemas.filter { schema in
             guard let fn = schema["function"]?.value as? [String: AnyCodable],
                   let name = fn["name"]?.value as? String,
-                  let cat = toolCategories[name] else {
+                  let cat = toolCategoriesCopy[name] else {
                 return true  // Keep tools without a category mapping
             }
             return categories.contains(cat)
@@ -523,10 +829,49 @@ class ToolRegistry {
         (["type", "press key", "hotkey", "keyboard", "shortcut", "cmd+"], [.keyboard]),
         (["window", "tile", "arrange", "side by side", "fullscreen", "minimize"], [.windows]),
         (["remind", "calendar", "note", "timer", "event", "meeting", "schedule"], [.productivity, .scheduler]),
-        (["terminal", "shell", "command", "run", "brew", "git", "npm", "pip"], [.terminal]),
+        (["mail", "email", "inbox", "mailbox", "unread", "sent me", "from lisa", "from ", "that email"], [.productivity]),
+        (["terminal", "shell", "command", "run", "brew", "npm", "pip"], [.terminal, .systemBash]),
+        (["git", "commit", "branch", "repo", "push", "pull", "merge", "stash"], [.systemBash, .terminal]),
+        (["network", "ip", "ip address", "wifi", "ping", "dns", "speed test", "internet", "connectivity", "latency"], [.systemBash]),
+        (["disk", "storage", "space", "disk usage", "free space"], [.systemBash, .systemInfo]),
+        (["process", "cpu", "memory usage", "ram", "top", "kill process", "pid"], [.systemBash]),
+        (["port", "listening", "address in use", "lsof", "what's using"], [.systemBash]),
+        (["lines of code", "loc", "count lines", "codebase size"], [.systemBash, .fileSearch]),
+        (["compress", "zip", "tar", "archive", "unzip"], [.systemBash, .files]),
+        (["environment", "python version", "node version", "runtime", "installed", "which", "venv", "virtual env"], [.systemBash]),
+        (["download", "curl", "wget", "fetch file"], [.systemBash, .web]),
+        (["extract", "unzip", "untar", "decompress"], [.systemBash, .files]),
+        (["http", "api", "request", "post", "endpoint", "rest", "curl"], [.systemBash, .web]),
+        (["script", "run script", "python script", "node script", "execute code", "write a script", "code"], [.systemBash, .terminal]),
+        // Data/file processing that needs scripting (run_script lives in .systemBash)
+        (["pdf", "split", "merge pages", "extract page", "chapter", "separate", "convert", "parse",
+          "transform", "batch", "process files", "csv", "json file", "xml", "yaml", "watermark",
+          "ocr pdf", "combine pdf", "split pdf", "merge pdf", "metadata", "epub", "textbook",
+          "by chapter", "by section", "each page", "page range", "data processing", "scrape",
+          "crawl", "regex", "pattern match", "calculate", "compute", "analyze", "statistics",
+          "chart", "plot", "graph data", "generate report", "automate", "bulk", "mass rename"],
+         [.systemBash, .files, .fileContent, .automation]),
+        (["install", "package", "brew install", "pip install", "npm install"], [.systemBash]),
+        (["diff", "compare", "difference"], [.systemBash, .fileContent]),
+        (["hash", "checksum", "md5", "sha256", "sha1", "verify"], [.systemBash]),
+        (["symlink", "symbolic link", "link"], [.systemBash, .files]),
+        (["permission", "chmod", "executable"], [.systemBash, .files]),
+        (["serve", "http server", "localhost"], [.systemBash]),
+        (["docker", "container", "compose", "image"], [.systemBash]),
+        (["find replace", "sed", "refactor", "rename across"], [.systemBash, .fileContent]),
+        (["base64", "encode", "decode"], [.systemBash]),
+        (["json", "parse json", "jq", "pretty print"], [.systemBash]),
+        (["cron", "crontab", "scheduled job"], [.systemBash, .scheduler]),
+        (["ssh", "remote", "server"], [.systemBash]),
+        (["text", "sort", "unique", "frequency", "column", "awk", "wc"], [.systemBash]),
+        (["watch", "poll", "wait for", "monitor"], [.systemBash]),
+        (["sqlite", "database", "sql", "query db"], [.systemBash]),
+        (["image convert", "resize image", "sips", "heic", "png to jpg"], [.systemBash]),
+        (["rename", "rename file"], [.systemBash, .files]),
+        (["hardware", "system profiler", "serial number", "usb", "thunderbolt", "graphics card"], [.systemBash, .systemInfo]),
         (["define", "definition", "synonym", "spell", "meaning"], [.language]),
         (["weather", "temperature", "forecast"], [.weather]),
-        (["automation", "when", "whenever", "rule"], [.automation]),
+        (["automation", "when", "whenever", "rule", "background", "in the background", "silently", "while I work"], [.automation]),
         (["clipboard", "copied", "paste"], [.clipboard, .clipboardHistory]),
         (["remember", "memory", "recall", "forget"], [.memory]),
         (["alias", "shortcut"], [.aliases]),
@@ -535,12 +880,20 @@ class ToolRegistry {
         (["tell", "text", "message", "msg", "send message", "wechat"], [.messaging]),
         (["news", "headlines", "article"], [.academicResearch]),
         (["paper", "research paper", "scholar", "academic", "semantic scholar"], [.academicResearch]),
-        (["document", "presentation", "slide", "pptx", "docx", "xlsx", "powerpoint", "word", "excel", "spreadsheet", "deck", "train", "study", "learn from", "keynote", "pages", "report", "essay", "memo", "letter", "table", "data sheet", "image", "photo", "picture"], [.documents, .files, .fileContent, .terminal]),
+        (["document", "presentation", "slide", "pptx", "docx", "xlsx", "powerpoint", "word", "excel", "spreadsheet", "deck", "train", "study", "learn from", "keynote", "pages", "report", "essay", "memo", "letter", "table", "data sheet", "image", "photo", "picture", "3d", "3d model", "blender", "mesh", "glb", "obj", "fbx", "stl", "3d print"], [.documents, .files, .fileContent, .terminal, .systemBash]),
         (["fill form", "login", "sign up", "sign in", "book", "order", "purchase", "checkout", "add to cart", "scrape", "automate web", "web form", "submit form", "browser"], [.browser, .web]),
+        (["notion", "notion page", "notion database", "notion db", "wiki", "knowledge base", "notion workspace"], [.productivity]),
+        (["video", "ffmpeg", "audio", "narration", "tts", "text to speech", "podcast", "youtube",
+          "trim video", "cut video", "merge video", "subtitle", "voiceover", "mp4", "mkv", "mov",
+          "wav", "mp3", "m4a", "background music", "sound effect", "transition", "montage",
+          "promo video", "explainer", "slideshow", "ken burns", "video edit", "video production",
+          "download video", "download youtube", "yt-dlp", "tiktok", "instagram video", "vimeo",
+          "quick video", "make a video", "create a video", "make me a video", "podcast episode"],
+         [.media, .files, .documents]),
     ]
 
-    // Always include these categories — universally useful
-    private static let alwaysIncluded: Set<ToolCategory> = [.memory, .skills, .clipboard]
+    // Always include these categories — universally useful (MCP tools are user-configured integrations, always available)
+    private static let alwaysIncluded: Set<ToolCategory> = [.memory, .skills, .clipboard, .mcp]
 
     func classifyQueryIntent(_ query: String) -> Set<ToolCategory> {
         let lower = query.lowercased()
@@ -552,6 +905,13 @@ class ToolRegistry {
             }
         }
 
+        // Media tasks should NOT get web/browser — their tools handle everything internally
+        if cats.contains(.media) {
+            cats.remove(.web)
+            cats.remove(.webContent)
+            cats.remove(.browser)
+        }
+
         // Web tasks often need browser interaction
         if cats.contains(.web) || cats.contains(.webContent) {
             cats.insert(.cursor)
@@ -559,9 +919,20 @@ class ToolRegistry {
             cats.insert(.browser)
         }
 
-        // If nothing matched beyond always-included, include everything
+        // Any UI interaction task should have keyboard shortcuts available (hotkey-first rule)
+        if cats.contains(.cursor) || cats.contains(.appControl) || cats.contains(.windows) || cats.contains(.browser) || cats.contains(.screenshot) {
+            cats.insert(.keyboard)
+        }
+
+        // If nothing matched beyond always-included, include everything EXCEPT web search tools.
+        // Web tools should only appear when the user's intent explicitly involves search/research/URLs.
+        // Including them by default causes the LLM to fall back to googling the user's prompt
+        // instead of using the correct tools (e.g., MCP, app control, etc.).
         if cats.count <= Self.alwaysIncluded.count {
-            return Set(ToolCategory.allCases)
+            var all = Set(ToolCategory.allCases)
+            all.remove(.web)
+            all.remove(.webContent)
+            return all
         }
 
         return cats
@@ -569,6 +940,7 @@ class ToolRegistry {
 
     /// Register MCP-discovered tools into the registry (called after server connection).
     func registerMCPTools(_ mcpTools: [any ToolDefinition]) {
+        lock.lock()
         for tool in mcpTools {
             tools[tool.name] = tool
             toolCategories[tool.name] = .mcp
@@ -577,16 +949,45 @@ class ToolRegistry {
         cachedSchemas = tools.values.map { $0.toAPISchema() }
         var byCategory: [ToolCategory: [[String: AnyCodable]]] = [:]
         for (name, tool) in tools {
-            let cat = toolCategories[name] ?? .terminal
+            let cat = toolCategories[name] ?? .files
             byCategory[cat, default: []].append(tool.toAPISchema())
         }
         schemasByCategory = byCategory
-        print("[ToolRegistry] Registered \(mcpTools.count) MCP tools, total: \(tools.count)")
+        let total = tools.count
+        lock.unlock()
+        print("[ToolRegistry] Registered \(mcpTools.count) MCP tools, total: \(total)")
+    }
+
+    /// Remove all MCP tools for a given server (called when a server is disconnected at runtime).
+    func unregisterMCPTools(forServer serverName: String) {
+        let prefix = "mcp_\(serverName)_"
+        lock.lock()
+        let toRemove = tools.keys.filter { $0.hasPrefix(prefix) }
+        for key in toRemove {
+            tools.removeValue(forKey: key)
+            toolCategories.removeValue(forKey: key)
+        }
+        // Rebuild schema caches
+        cachedSchemas = tools.values.map { $0.toAPISchema() }
+        var byCategory: [ToolCategory: [[String: AnyCodable]]] = [:]
+        for (name, tool) in tools {
+            let cat = toolCategories[name] ?? .files
+            byCategory[cat, default: []].append(tool.toAPISchema())
+        }
+        schemasByCategory = byCategory
+        let total = tools.count
+        lock.unlock()
+        if !toRemove.isEmpty {
+            print("[ToolRegistry] Unregistered \(toRemove.count) MCP tools for \(serverName), total: \(total)")
+        }
     }
 
     /// Execute a tool by name with the given JSON arguments string.
     func execute(toolName: String, arguments: String) async throws -> String {
-        guard let tool = tools[toolName] else {
+        lock.lock()
+        let tool = tools[toolName]
+        lock.unlock()
+        guard let tool else {
             throw ExecuterError.toolNotFound(toolName)
         }
         return try await tool.execute(arguments: arguments)
@@ -594,7 +995,8 @@ class ToolRegistry {
 
     /// Get a tool by name.
     func tool(named name: String) -> ToolDefinition? {
-        tools[name]
+        lock.lock(); defer { lock.unlock() }
+        return tools[name]
     }
 
     /// Execute a tool directly by name — used by SecurityGateway after permission checks.
@@ -604,17 +1006,21 @@ class ToolRegistry {
 
     /// Returns the API schema for a single tool, or nil if not found.
     func singleToolSchema(_ name: String) -> [[String: AnyCodable]]? {
-        guard let tool = tools[name] else { return nil }
+        lock.lock()
+        let tool = tools[name]
+        lock.unlock()
+        guard let tool else { return nil }
         return [tool.toAPISchema()]
     }
 
     /// Returns all registered tool names.
     func allToolNames() -> [String] {
+        lock.lock(); defer { lock.unlock() }
         return Array(tools.keys).sorted()
     }
 
     /// Total number of registered tools.
-    var count: Int { tools.count }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return tools.count }
 }
 
 /// Meta-tool: request additional tools mid-conversation.

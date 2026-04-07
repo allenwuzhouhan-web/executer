@@ -47,7 +47,7 @@ final class DocumentStyleManager {
     static let shared = DocumentStyleManager()
 
     private let stylesDir: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let dir = appSupport.appendingPathComponent("Executer/document_styles", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -231,7 +231,7 @@ struct ExtractDocumentStyleTool: ToolDefinition {
         let result = try ShellRunner.run(script, timeout: 30)
         if result.exitCode != 0 {
             if result.output.contains("ModuleNotFoundError") {
-                return "python-pptx not installed. Call setup_python_docs first."
+                return "python-pptx not installed. Auto-provisioning failed — check python venv."
             }
             return "Failed to extract style: \(result.output)"
         }
@@ -341,7 +341,7 @@ struct ExtractDocumentStyleTool: ToolDefinition {
         let docResult = try ShellRunner.run(script, timeout: 30)
         if docResult.exitCode != 0 {
             if docResult.output.contains("ModuleNotFoundError") {
-                return "python-docx not installed. Call setup_python_docs first."
+                return "python-docx not installed. Auto-provisioning failed — check python venv."
             }
             return "Failed to extract style: \(docResult.output)"
         }

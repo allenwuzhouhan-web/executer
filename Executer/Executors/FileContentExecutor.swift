@@ -164,7 +164,7 @@ struct EditFileTool: ToolDefinition {
 
 struct ListDirectoryTool: ToolDefinition {
     let name = "list_directory"
-    let description = "List files and folders in a directory with sizes and types."
+    let description = "List files and folders in a directory with sizes, types, and dates. For a visual tree of nested structure, use directory_tree instead."
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
             "path": JSONSchema.string(description: "Absolute path to the directory (use ~ for home directory)"),

@@ -11,6 +11,7 @@ enum ManifestKeys {
 
     /// Parsed public key for signature verification.
     static var publicKey: Curve25519.Signing.PublicKey? {
+        guard isConfigured else { return nil }
         let bytes = hexToBytes(publicKeyHex)
         guard bytes.count == 32 else { return nil }
         return try? Curve25519.Signing.PublicKey(rawRepresentation: Data(bytes))

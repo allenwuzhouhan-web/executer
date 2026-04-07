@@ -9,6 +9,11 @@ enum InputSanitizer {
         "get_clipboard_text", "get_clipboard_history", "search_clipboard_history",
         "search_file_contents", "file_preview",
         "run_shell_command", "ocr_image",
+        "browser_task", "browser_extract",
+        "browser_read_dom", "browser_get_console", "browser_execute_js",
+        "browser_inspect_element",
+        "browser_read_elements",
+        "safari_read_elements",
     ]
 
     /// Wraps tool output in a frame that tells the LLM it's untrusted data.
@@ -72,6 +77,61 @@ enum InputSanitizer {
         let pattern = "(" + phrases.joined(separator: "|") + ")"
         return try? NSRegularExpression(pattern: pattern, options: .caseInsensitive)
     }()
+
+    // MARK: - Stage-Aware Tool Result Truncation (Foveal Attention)
+
+    /// Tools whose results should be truncated based on attention stage.
+    private static let verboseTools: Set<String> = [
+        "read_file", "read_pdf_text", "file_preview", "search_file_contents",
+        "fetch_url_content", "read_safari_page", "read_safari_html", "read_chrome_page",
+        "browser_extract", "browser_read_dom", "browser_read_elements", "safari_read_elements",
+        "run_shell_command", "run_script", "browser_execute_js", "browser_get_console",
+    ]
+
+    private static let fileReadTools: Set<String> = [
+        "read_file", "read_pdf_text", "file_preview", "search_file_contents",
+    ]
+
+    private static let webContentTools: Set<String> = [
+        "fetch_url_content", "read_safari_page", "read_safari_html", "read_chrome_page",
+        "browser_extract", "browser_read_dom", "browser_read_elements", "safari_read_elements",
+    ]
+
+    private static let shellTools: Set<String> = [
+        "run_shell_command", "run_script", "browser_execute_js", "browser_get_console",
+    ]
+
+    /// Truncate tool results based on attention stage.
+    /// Fovea: generous limits. Parafovea: tight limits. Macula+: empty.
+    static func truncateForStage(toolName: String, result: String, stage: AttentionStage) -> String {
+        // Non-verbose tools always pass through at full length
+        guard verboseTools.contains(toolName) else { return result }
+
+        let maxChars: Int
+        switch stage {
+        case .fovea:
+            if fileReadTools.contains(toolName) {
+                maxChars = 8_000
+            } else if webContentTools.contains(toolName) {
+                maxChars = 6_000
+            } else if shellTools.contains(toolName) {
+                maxChars = 4_000
+            } else {
+                maxChars = 8_000
+            }
+        case .parafovea:
+            maxChars = 2_000
+        case .macula, .nearPeripheral, .farPeripheral:
+            // Background stages should never process tool results
+            return String(result.prefix(200)) + " [background stage — truncated]"
+        }
+
+        guard result.count > maxChars else { return result }
+        let truncated = String(result.prefix(maxChars))
+        return truncated + "\n[... truncated, \(result.count) chars total]"
+    }
+
+    // MARK: - Injection Defense
 
     /// Neuters common injection phrases by inserting zero-width spaces.
     static func stripInjectionPatterns(_ text: String) -> String {

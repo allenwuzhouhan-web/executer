@@ -49,6 +49,21 @@ enum LearningContextProvider {
             }
         }
 
+        // Layer 1e: Meeting awareness
+        if let meetingCtx = MeetingIntelligence.calendarContextForSynthesis() {
+            sections.append("## \(meetingCtx)")
+        }
+
+        // Layer 1f: Active synthesis insights (cross-app intelligence)
+        let synthesisContext = CrossAppSynthesizer.cachedPromptSection
+        if !synthesisContext.isEmpty {
+            sections.append(synthesisContext)
+        }
+
+        // Layer 2: Belief Engine context (long-term learned knowledge)
+        let beliefCtx = ContextSummaryGenerator.shared.generate(currentApp: appName, query: query)
+        if !beliefCtx.isEmpty { sections.append(beliefCtx) }
+
         let content = sections.joined(separator: "\n\n")
         guard !content.isEmpty else { return "" }
 
@@ -128,7 +143,7 @@ enum LearningContextProvider {
         let lower = query.lowercased()
 
         // Always inject if asking about learning itself
-        let learningKeywords = ["working on", "my goals", "my patterns", "learned", "session", "workflow", "routine", "today", "yesterday"]
+        let learningKeywords = ["working on", "my goals", "my patterns", "learned", "session", "workflow", "routine", "today", "yesterday", "synthesis", "synthesize", "combine", "correlate", "connect", "meeting", "prep", "calendar"]
         if learningKeywords.contains(where: { lower.contains($0) }) { return true }
 
         // Always inject if the frontmost app has learned patterns

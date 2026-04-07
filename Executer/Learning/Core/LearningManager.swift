@@ -5,6 +5,8 @@ import AppKit
 /// and provides LLM-injectable context.
 /// Phase 0 refactoring: delegates storage to LearningDatabase (SQLite),
 /// pattern extraction to PatternLearner, and keeps only orchestration logic.
+/// Phase 1 (Workflow Recorder): Replaced callback-based observation with
+/// ContinuousPerceptionDaemon + ObservationStream for always-on unified perception.
 class LearningManager {
     static let shared = LearningManager()
 
@@ -13,6 +15,9 @@ class LearningManager {
     private var flushTimer: Timer?
     private var screenSampleTimer: Timer?
     private var lastExtraction: Date = .distantPast
+
+    /// Whether the new ObservationStream pipeline is active.
+    private var daemonStarted = false
 
     var isEnabled: Bool {
         get { LearningConfig.shared.isLearningEnabled }
@@ -31,12 +36,10 @@ class LearningManager {
     func start() {
         guard isEnabled else { return }
 
-        AppObserver.shared.onAction = { [weak self] action in
-            self?.recordAction(action)
-        }
-        AppObserver.shared.start()
+        // Start the unified observation pipeline (Phase 1: Workflow Recorder)
+        startObservationPipeline()
 
-        // Periodic flush timer
+        // Periodic flush timer (for buffered actions → SQLite + pattern extraction)
         flushTimer = Timer.scheduledTimer(withTimeInterval: LearningConstants.bufferFlushInterval, repeats: true) { [weak self] _ in
             self?.flushBuffer()
         }
@@ -44,46 +47,13 @@ class LearningManager {
         // Start summary scheduler
         SummaryScheduler.shared.start()
 
-        // Start file and clipboard monitors
-        FileMonitor.shared.onFileEvent = { [weak self] event in
-            // Convert file events to semantic observations
-            let obs = SemanticObservation(
-                appName: event.appName,
-                category: .other,
-                intent: "File \(event.eventType.rawValue) in \(event.directory) (\(event.fileExtension))",
-                details: ["directory": event.directory, "extension": event.fileExtension, "event": event.eventType.rawValue],
-                relatedTopics: [event.directory, event.fileExtension]
-            )
-            AttentionTracker.shared.record([obs])
-            SessionDetector.shared.ingest([obs])
-        }
-        FileMonitor.shared.start()
-
-        ClipboardObserver.shared.onClipboardFlow = { flow in
-            let obs = SemanticObservation(
-                appName: flow.sourceApp,
-                category: .other,
-                intent: "Clipboard: \(flow.sourceApp) → \(flow.destinationApp) (\(flow.contentType.rawValue), \(flow.contentLength) chars)",
-                details: ["source": flow.sourceApp, "destination": flow.destinationApp, "type": flow.contentType.rawValue],
-                relatedTopics: [flow.sourceApp, flow.destinationApp]
-            )
-            AttentionTracker.shared.record([obs])
-            SessionDetector.shared.ingest([obs])
-        }
-        ClipboardObserver.shared.start()
-
         // Start smart app launch detection
         SmartLaunchDetector.shared.start()
 
         // Set adaptive sampling rate based on learning maturity
         AdaptiveSampling.shared.recalculateInterval()
 
-        // Adaptive screen sampling — interval changes based on learning age and active app
-        if LearningConfig.shared.isScreenSamplingEnabled {
-            startAdaptiveScreenSampling()
-        }
-
-        print("[Learning] Started — observing user workflows")
+        print("[Learning] Started — always-on observation pipeline active")
 
         // Show one-time onboarding message
         LearningOnboarding.showIfNeeded()
@@ -96,8 +66,124 @@ class LearningManager {
         NotificationCenter.default.post(name: .learningStateChanged, object: nil, userInfo: ["isLearning": true])
     }
 
+    /// Start the ContinuousPerceptionDaemon and register consumers.
+    /// Replaces the old callback-based wiring (AppObserver.onAction, FileMonitor.onFileEvent, etc.)
+    /// with a unified stream that all consumers subscribe to.
+    private func startObservationPipeline() {
+        guard !daemonStarted else { return }
+        daemonStarted = true
+
+        Task(priority: .utility) {
+            let daemon = ContinuousPerceptionDaemon.shared
+
+            // Consumer 1: Action recording (TeachMe + buffer for SQLite/patterns)
+            await daemon.addConsumer(name: "actionRecorder") { [weak self] event in
+                if case .userAction(let action) = event {
+                    self?.recordAction(action)
+                }
+            }
+
+            // Consumer 2: Semantic observation routing (AttentionTracker + SessionDetector)
+            await daemon.addConsumer(name: "semanticRouter") { event in
+                switch event {
+                case .userAction(let action):
+                    let observations = AttentionRouter.route(actions: [action], appName: action.appName)
+                    if !observations.isEmpty {
+                        AttentionTracker.shared.record(observations)
+                        SessionDetector.shared.ingest(observations)
+                    }
+
+                case .fileEvent(let fileEvent):
+                    let obs = SemanticObservation(
+                        appName: fileEvent.appName,
+                        category: .other,
+                        intent: "File \(fileEvent.eventType.rawValue) in \(fileEvent.directory) (\(fileEvent.fileExtension))",
+                        details: ["directory": fileEvent.directory, "extension": fileEvent.fileExtension, "event": fileEvent.eventType.rawValue],
+                        relatedTopics: [fileEvent.directory, fileEvent.fileExtension]
+                    )
+                    AttentionTracker.shared.record([obs])
+                    SessionDetector.shared.ingest([obs])
+
+                case .clipboardFlow(let flow):
+                    let obs = SemanticObservation(
+                        appName: flow.sourceApp,
+                        category: .other,
+                        intent: "Clipboard: \(flow.sourceApp) → \(flow.destinationApp) (\(flow.contentType.rawValue), \(flow.contentLength) chars)",
+                        details: ["source": flow.sourceApp, "destination": flow.destinationApp, "type": flow.contentType.rawValue],
+                        relatedTopics: [flow.sourceApp, flow.destinationApp]
+                    )
+                    AttentionTracker.shared.record([obs])
+                    SessionDetector.shared.ingest([obs])
+
+                case .screenSample(let sample):
+                    let observations = AttentionRouter.route(actions: [], appName: sample.appName, screenText: sample.visibleTextPreview)
+                    if !observations.isEmpty {
+                        AttentionTracker.shared.record(observations)
+                        SessionDetector.shared.ingest(observations)
+                    }
+
+                case .systemEvent(let sysEvent):
+                    switch sysEvent.kind {
+                    case .screenLocked:
+                        await ContinuousPerceptionDaemon.shared.handleScreenLock()
+                    case .screenUnlocked:
+                        await ContinuousPerceptionDaemon.shared.handleScreenUnlock()
+                    default:
+                        break
+                    }
+                case .oeAppEvent, .oeURLEvent, .oeActivityEvent, .oeTransitionEvent, .oeFileEvent:
+                    break
+                }
+            }
+
+            // Consumer 3: Goal tracking (process completed sessions)
+            await daemon.addConsumer(name: "goalTracker") { _ in
+                // Use todaysSessions() which acquires NSLock (thread-safe)
+                for session in SessionDetector.shared.todaysSessions().filter({ !$0.isActive }) {
+                    GoalTracker.shared.processSession(session)
+                }
+            }
+
+            // Consumer 4: Journal recording (Phase 3 — registered BEFORE boundary detector
+            // so the journal is ready to receive events before boundaries trigger new journals)
+            await daemon.addConsumer(name: "journalRecorder") { event in
+                await JournalManager.shared.recordEvent(event)
+            }
+
+            // Consumer 5: Task boundary detection (Phase 2: Workflow Recorder)
+            await TaskBoundaryDetector.shared.applyCalibration()
+            await TaskBoundaryDetector.shared.setOnBoundary { boundary in
+                Task { await JournalManager.shared.handleBoundary(boundary) }
+            }
+            await daemon.addConsumer(name: "boundaryDetector") { event in
+                await TaskBoundaryDetector.shared.process(event)
+            }
+
+            // Consumer 6: Autonomous workflow agent (Phase 20: The Sovereign)
+            await AutonomousWorkflowAgent.shared.start()
+            await daemon.addConsumer(name: "autonomousAgent") { event in
+                await AutonomousWorkflowAgent.shared.processEvent(event)
+            }
+
+            // Start journal archiver (30-day archive, 90-day purge)
+            JournalArchiver.shared.start()
+
+            // Start the daemon (wires ObservationStream → Throttler → Consumers)
+            await daemon.start()
+        }
+    }
+
     func stop() {
-        AppObserver.shared.stop()
+        // Stop the unified observation pipeline
+        if daemonStarted {
+            daemonStarted = false
+            Task {
+                await AutonomousWorkflowAgent.shared.stop()
+                await JournalManager.shared.shutdown()
+                await ContinuousPerceptionDaemon.shared.stop()
+            }
+            JournalArchiver.shared.stop()
+        }
 
         // Hide learning indicator
         DispatchQueue.main.async {
@@ -106,8 +192,6 @@ class LearningManager {
 
         NotificationCenter.default.post(name: .learningStateChanged, object: nil, userInfo: ["isLearning": false])
         SmartLaunchDetector.shared.stop()
-        FileMonitor.shared.stop()
-        ClipboardObserver.shared.stop()
         flushTimer?.invalidate()
         flushTimer = nil
         SummaryScheduler.shared.stop()
@@ -152,21 +236,6 @@ class LearningManager {
             extractPatterns(forActions: actions)
             lastExtraction = Date()
         }
-
-        // Phase 2: Route through attention extractors
-        let groupedByApp = Dictionary(grouping: actions, by: \.appName)
-        for (appName, appActions) in groupedByApp {
-            let observations = AttentionRouter.route(actions: appActions, appName: appName)
-            if !observations.isEmpty {
-                AttentionTracker.shared.record(observations)
-                SessionDetector.shared.ingest(observations)
-            }
-        }
-
-        // Phase 3: Process completed sessions through GoalTracker
-        for session in SessionDetector.shared.completedSessions {
-            GoalTracker.shared.processSession(session)
-        }
     }
 
     // MARK: - Pattern Extraction
@@ -196,6 +265,9 @@ class LearningManager {
             autoCompilePatterns(profile.patterns, appName: appName)
         }
         print("[Learning] Extracted patterns for \(appNames.count) apps")
+
+        // Trigger learning feedback loop: convert high-frequency patterns to rules
+        Task { await LearningFeedbackLoop.generateRules() }
     }
 
     // MARK: - Auto-Compile Patterns → Skills
@@ -205,81 +277,9 @@ class LearningManager {
     private var compiledPatternIds: Set<UUID> = []
 
     private func autoCompilePatterns(_ patterns: [WorkflowPattern], appName: String) {
-        for pattern in patterns {
-            // Only compile patterns with enough confidence (5+ observations)
-            guard pattern.frequency >= 5 else { continue }
-            // Only compile patterns with 3+ steps (trivial patterns aren't useful as skills)
-            guard pattern.actions.count >= 3 else { continue }
-
-            // Check if this pattern already has a compiled skill
-            let skillName = "auto_\(appName.lowercased().replacingOccurrences(of: " ", with: "_"))_\(pattern.name.lowercased().prefix(30).replacingOccurrences(of: " ", with: "_"))"
-
-            // Compile pattern into a workflow template
-            guard let template = WorkflowCompiler.compile(pattern) else { continue }
-
-            // Check if skill already exists — if so, UPDATE it (patterns evolve)
-            let existingSkill = SkillsManager.shared.skills.first { $0.name == skillName }
-            let steps = template.steps.map { $0.description }
-
-            let skill = SkillsManager.Skill(
-                name: skillName,
-                description: "Auto-learned: \(pattern.name) (observed \(pattern.frequency)x)",
-                exampleTriggers: [pattern.name.lowercased(), "\(appName.lowercased()) \(pattern.name.lowercased())"],
-                steps: steps,
-                verificationStatus: "verified"  // Auto-compiled from observation — safe
-            )
-
-            if existingSkill != nil {
-                // Skill exists — update it if the pattern has evolved
-                if existingSkill?.steps != steps {
-                    SkillsManager.shared.addSkill(skill)
-                    print("[Learning] Updated auto-skill: \(skillName) (\(pattern.frequency)x, \(steps.count) steps)")
-                }
-            } else {
-                // New skill — compile and save
-                SkillsManager.shared.addSkill(skill)
-                TemplateLibrary.shared.save(template)
-                print("[Learning] Auto-compiled skill: \(skillName) (\(pattern.frequency)x, \(steps.count) steps)")
-            }
-        }
-    }
-
-    // MARK: - Adaptive Screen Sampling
-
-    private func startAdaptiveScreenSampling() {
-        screenSampleTimer?.invalidate()
-
-        let interval = AdaptiveSampling.shared.currentInterval
-        screenSampleTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            self?.sampleScreen()
-
-            // Check if interval should change (app boost, time progression)
-            let newInterval = AdaptiveSampling.shared.currentInterval
-            if abs(newInterval - interval) > 1.0 {
-                // Interval changed — restart timer with new interval
-                self?.startAdaptiveScreenSampling()
-            }
-        }
-
-        print("[Learning] Screen sampling at \(Int(interval))s intervals")
-    }
-
-    // MARK: - Screen Sampling
-
-    private func sampleScreen() {
-        guard let app = NSWorkspace.shared.frontmostApplication,
-              let name = app.localizedName,
-              app.bundleIdentifier != "com.allenwu.executer" else { return }
-
-        let texts = ScreenReader.readVisibleText(pid: app.processIdentifier)
-        guard !texts.isEmpty else { return }
-
-        // Route screen text through attention extractors (text is transient, never stored)
-        let observations = AttentionRouter.route(actions: [], appName: name, screenText: texts)
-        if !observations.isEmpty {
-            AttentionTracker.shared.record(observations)
-            SessionDetector.shared.ingest(observations)
-        }
+        let eligible = patterns.filter { $0.frequency >= 5 && $0.actions.count >= 3 }
+        guard !eligible.isEmpty else { return }
+        Task { await WorkflowCompressionBridge.shared.enqueue(eligible) }
     }
 
     // MARK: - LLM Context Injection

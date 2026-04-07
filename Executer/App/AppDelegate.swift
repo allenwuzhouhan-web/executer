@@ -3,7 +3,7 @@ import SwiftUI
 import UserNotifications
 
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
-    let appState = AppState()
+    @MainActor let appState = AppState()
     private var launchGlow: LaunchGlowWindow?
     private var startupSound: StartupSound?
     private var onboardingWindow: OnboardingWindowController?
@@ -39,6 +39,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
         appState.setup()
 
+        // DEBUG: Run synthesis tests + force a live synthesis pass on launch
+        #if DEBUG
+        Task.detached(priority: .utility) {
+            // 1. Run unit tests
+            await SynthesisEngineTests.runAll()
+
+            // 2. Force a live synthesis pass (bypasses the 30-min rate limit)
+            print("\n[DEBUG] Running live synthesis pass...")
+            let insights = await SynthesisEngine.shared.runOvernightPass()
+            if insights.isEmpty {
+                print("[DEBUG] No insights found (need 3+ data sources with content — use the app for a bit first)")
+            } else {
+                for i in insights {
+                    print("[DEBUG] 💡 \(i.headline)")
+                    print("        \(i.explanation)")
+                    print("        Domains: \(i.domains.joined(separator: ", ")) | Score: \(i.surpriseScore)")
+                }
+            }
+        }
+        #endif
+
         // Connect to MCP servers in the background, then register discovered tools
         Task.detached(priority: .utility) {
             await MCPServerManager.shared.connectAll()
@@ -63,6 +84,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         FocusStateService.shared.start()
         ClipboardHistoryManager.shared.startMonitoring()
         TaskScheduler.shared.resumePendingTasks()
+        BackgroundAgentManager.shared.resumePendingAgents()
         FileIndex.shared.startIndexing()
         ContextualAwareness.shared.markSessionStart()
         HealthCheckService.shared.checkIfDue(appState: appState)
@@ -107,12 +129,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             Task { await TextSnapshotService.shared.start() }
             // Start background learning — observes how user interacts with apps
             LearningManager.shared.start()
+            // Start coworking agent — daytime proactive assistant
+            Task { @MainActor in CoworkerAgent.shared.start() }
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         RuntimeShield.stopPeriodicChecks()
         EnvironmentIntegrity.stopFileMonitoring()
+        // Persist running agent sessions so they can resume after restart
+        appState.persistRunningSession()
         Task { await AuditLog.shared.persistToDisk() }
         LearningManager.shared.stop()
         Task { await BrowserService.shared.shutdown() }

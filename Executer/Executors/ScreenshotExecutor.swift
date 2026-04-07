@@ -14,7 +14,7 @@ struct CaptureScreenTool: ToolDefinition {
     func execute(arguments: String) async throws -> String {
         let args = try parseArguments(arguments)
         let filename = optionalString("filename", from: args) ?? "screenshot-\(Int(Date().timeIntervalSince1970))"
-        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+        let desktop = URL.desktopDirectory
         let path = desktop.appendingPathComponent("\(filename).png").path
         let result = try ShellRunner.run("screencapture -x \"\(path)\"")
         if result.exitCode == 0 {
@@ -36,7 +36,7 @@ struct CaptureWindowTool: ToolDefinition {
     func execute(arguments: String) async throws -> String {
         let args = try parseArguments(arguments)
         let filename = optionalString("filename", from: args) ?? "window-\(Int(Date().timeIntervalSince1970))"
-        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+        let desktop = URL.desktopDirectory
         let path = desktop.appendingPathComponent("\(filename).png").path
         let result = try ShellRunner.run("screencapture -x -w \"\(path)\"")
         if result.exitCode == 0 {
@@ -74,7 +74,7 @@ struct CaptureAreaTool: ToolDefinition {
     func execute(arguments: String) async throws -> String {
         let args = try parseArguments(arguments)
         let filename = optionalString("filename", from: args) ?? "area-\(Int(Date().timeIntervalSince1970))"
-        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+        let desktop = URL.desktopDirectory
         let path = desktop.appendingPathComponent("\(filename).png").path
         let result = try ShellRunner.run("screencapture -i -x \"\(path)\"")
         if result.exitCode == 0 && FileManager.default.fileExists(atPath: path) {

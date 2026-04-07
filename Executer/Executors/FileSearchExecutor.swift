@@ -126,7 +126,7 @@ struct ReadPDFTextTool: ToolDefinition {
 
 struct DirectoryTreeTool: ToolDefinition {
     let name = "directory_tree"
-    let description = "Show a tree view of a directory structure, like the 'tree' command."
+    let description = "Show directory structure as a visual tree. Use for understanding folder hierarchy. For a flat file listing with details (size, date), use list_directory instead."
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
             "path": JSONSchema.string(description: "Absolute path to the directory (use ~ for home directory)"),

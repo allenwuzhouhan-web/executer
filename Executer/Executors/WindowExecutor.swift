@@ -10,7 +10,8 @@ private func getFrontmostWindowElement() -> AXUIElement? {
     guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue) == .success else {
         return nil
     }
-    return (windowValue as! AXUIElement)
+    // swiftlint:disable:next force_cast
+    return (windowValue as! AXUIElement) // CFType cast — nil handled by guard above
 }
 
 private func setWindowPosition(_ window: AXUIElement, x: CGFloat, y: CGFloat) {
@@ -26,7 +27,9 @@ private func setWindowSize(_ window: AXUIElement, width: CGFloat, height: CGFloa
 }
 
 private func getScreenFrame() -> CGRect {
-    let screen = NSScreen.main ?? NSScreen.screens.first!
+    guard let screen = NSScreen.main ?? NSScreen.screens.first else {
+        return CGRect(x: 0, y: 0, width: 1440, height: 900)
+    }
     let visibleFrame = screen.visibleFrame
     // Convert from Cocoa (origin at bottom-left) to Carbon (origin at top-left)
     let screenFrame = screen.frame
@@ -166,8 +169,9 @@ struct FullscreenWindowTool: ToolDefinition {
 
         // Fallback: press the fullscreen button (green traffic light)
         var buttonValue: AnyObject?
-        if AXUIElementCopyAttributeValue(window, "AXFullScreenButton" as CFString, &buttonValue) == .success {
-            AXUIElementPerformAction(buttonValue as! AXUIElement, kAXPressAction as CFString)
+        if AXUIElementCopyAttributeValue(window, "AXFullScreenButton" as CFString, &buttonValue) == .success,
+           let bv = buttonValue {
+            AXUIElementPerformAction(bv as! AXUIElement, kAXPressAction as CFString)
             return "Toggled fullscreen via zoom button."
         }
 

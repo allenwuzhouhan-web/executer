@@ -8,6 +8,8 @@ struct SettingsView: View {
             GeneralSettingsTab()
                 .environmentObject(appState)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            MCPSettingsTab()
+                .tabItem { Label("Integrations", systemImage: "puzzlepiece.extension") }
             LearningSettingsTab()
                 .tabItem { Label("Learning", systemImage: "brain") }
             PermissionsSettingsTab()

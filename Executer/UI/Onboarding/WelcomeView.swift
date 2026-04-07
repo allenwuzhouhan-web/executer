@@ -1,106 +1,8 @@
 import SwiftUI
 
-// MARK: - Main Welcome View
-
-struct WelcomeView: View {
-    @State private var currentPage = 0
-    @State private var appeared = false
-    let onComplete: () -> Void
-
-    private let pageCount = 5
-
-    var body: some View {
-        ZStack {
-            AnimatedGradientBackground()
-
-            VStack(spacing: 0) {
-                // Page content with slide transition
-                ZStack {
-                    if currentPage == 0 {
-                        PreReleaseWarningPage()
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
-                    }
-                    if currentPage == 1 {
-                        WelcomePage1(appeared: $appeared)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
-                    }
-                    if currentPage == 2 {
-                        WelcomePage2()
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
-                    }
-                    if currentPage == 3 {
-                        WelcomePage3()
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
-                    }
-                    if currentPage == 4 {
-                        WelcomePage4(onComplete: onComplete)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            ))
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // Page indicator dots + navigation
-                HStack(spacing: 16) {
-                    Button {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                            currentPage = max(0, currentPage - 1)
-                        }
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(currentPage > 0 ? 1 : 0)
-
-                    HStack(spacing: 8) {
-                        ForEach(0..<pageCount, id: \.self) { i in
-                            Circle()
-                                .fill(i == currentPage ? Color.accentColor : Color.gray.opacity(0.3))
-                                .frame(width: 8, height: 8)
-                                .scaleEffect(i == currentPage ? 1.2 : 1.0)
-                                .animation(.spring(response: 0.3), value: currentPage)
-                        }
-                    }
-
-                    Button {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                            currentPage = min(pageCount - 1, currentPage + 1)
-                        }
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(currentPage < pageCount - 1 ? 1 : 0)
-                }
-                .padding(.bottom, 16)
-            }
-        }
-        .frame(width: 560, height: 480)
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.8)) {
-                appeared = true
-            }
-        }
-    }
-}
+// MARK: - Shared Onboarding Components
+// The main onboarding flow is in OnboardingView.swift.
+// This file contains the shared page views and helper components used by OnboardingView.
 
 // MARK: - Animated Gradient Background
 
@@ -284,11 +186,8 @@ struct FeatureCard: View {
             Spacer(minLength: 0)
         }
         .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-        )
+        .liquidGlassInteractive(cornerRadius: 10, tint: .blue)
+        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 }
 
@@ -328,14 +227,8 @@ struct WelcomePage3: View {
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(selectedLanguage == lang ? Color.accentColor.opacity(0.15) : Color.clear)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(selectedLanguage == lang ? Color.accentColor : Color.clear, lineWidth: 1.5)
-                            )
+                            .background(selectedLanguage == lang ? Color.accentColor.opacity(0.15) : Color.clear)
+                            .liquidGlassInteractive(cornerRadius: 10, tint: selectedLanguage == lang ? .accentColor : nil)
                         }
                         .buttonStyle(.plain)
                     }
@@ -367,14 +260,8 @@ struct WelcomePage3: View {
                                     .foregroundStyle(selectedPlatform == platform ? .primary : .secondary)
                             }
                             .frame(width: 90, height: 70)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(selectedPlatform == platform ? platform.color.opacity(0.1) : Color.gray.opacity(0.05))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(selectedPlatform == platform ? platform.color.opacity(0.5) : Color.clear, lineWidth: 1.5)
-                            )
+                            .background(selectedPlatform == platform ? platform.color.opacity(0.1) : Color.gray.opacity(0.05))
+                            .liquidGlassInteractive(cornerRadius: 12, tint: selectedPlatform == platform ? platform.color : nil)
                         }
                         .buttonStyle(.plain)
                     }
@@ -463,7 +350,8 @@ struct WelcomePage4: View {
                                 )
                             )
                     )
-                    .shadow(color: .purple.opacity(0.3), radius: 10, y: 4)
+                    .liquidGlassInteractive(cornerRadius: 20, tint: .purple)
+                    .shadow(color: .purple.opacity(0.25), radius: 8, y: 4)
             }
             .buttonStyle(.plain)
             .opacity(buttonOpacity)
@@ -506,15 +394,8 @@ struct KeyCap: View {
         Text(label)
             .font(.system(size: label == "Space" ? 16 : 22, weight: .medium, design: .rounded))
             .frame(width: label == "Space" ? 80 : 50, height: 50)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .shadow(color: .black.opacity(0.15), radius: 3, y: 2)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-            )
+            .liquidGlassInteractive(cornerRadius: 10)
+            .shadow(color: .black.opacity(0.1), radius: 3, y: 2)
     }
 }
 

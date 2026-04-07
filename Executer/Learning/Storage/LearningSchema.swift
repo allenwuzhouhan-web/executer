@@ -40,6 +40,61 @@ enum LearningSchema {
             version INTEGER PRIMARY KEY
         );
         INSERT OR IGNORE INTO schema_version (version) VALUES (1);
+
+        -- Episode log: records multi-step task executions (v2)
+        CREATE TABLE IF NOT EXISTS episodes (
+            id TEXT PRIMARY KEY,
+            goal TEXT NOT NULL,
+            plan TEXT,
+            actions_json TEXT,
+            outcome TEXT NOT NULL,
+            failure_reason TEXT,
+            what_worked TEXT,
+            duration_seconds REAL,
+            tool_count INTEGER,
+            timestamp REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_episodes_time ON episodes(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_episodes_outcome ON episodes(outcome);
+
+        -- Actionable rules derived from patterns (v2)
+        CREATE TABLE IF NOT EXISTS learned_rules (
+            id TEXT PRIMARY KEY,
+            rule_text TEXT NOT NULL,
+            source_pattern_id TEXT,
+            confidence REAL DEFAULT 0.5,
+            times_applied INTEGER DEFAULT 0,
+            created_at REAL NOT NULL,
+            last_applied REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rules_confidence ON learned_rules(confidence DESC);
+
+        INSERT OR IGNORE INTO schema_version (version) VALUES (2);
+
+        -- UI knowledge: learned element behaviors from exploration (v3)
+        -- Stores what happens when you click/interact with specific elements in specific apps.
+        -- Used to inject knowledge into the agent's context so it knows what buttons do.
+        CREATE TABLE IF NOT EXISTS ui_knowledge (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            app_name TEXT NOT NULL,
+            app_bundle_id TEXT,
+            section_path TEXT,
+            element_label TEXT NOT NULL,
+            element_role TEXT,
+            action_type TEXT NOT NULL DEFAULT 'click',
+            result_description TEXT NOT NULL,
+            screenshot_before TEXT,
+            screenshot_after TEXT,
+            confidence REAL DEFAULT 1.0,
+            times_confirmed INTEGER DEFAULT 1,
+            created_at REAL NOT NULL,
+            last_seen REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_uiknow_app ON ui_knowledge(app_name);
+        CREATE INDEX IF NOT EXISTS idx_uiknow_app_section ON ui_knowledge(app_name, section_path);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_uiknow_unique ON ui_knowledge(app_name, section_path, element_label, action_type);
+
+        INSERT OR IGNORE INTO schema_version (version) VALUES (3);
         """
 
         queue.sync {

@@ -4,7 +4,7 @@ import Foundation
 
 struct ReadSafariPageTool: ToolDefinition {
     let name = "read_safari_page"
-    let description = "Read the text content of the current Safari page. Returns the visible text (no HTML tags)."
+    let description = "Read text from the CURRENTLY OPEN Safari tab. Use when the user already has a Safari page open. For reading any URL programmatically, use read_web_page or fetch_url_content instead."
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
             "max_length": JSONSchema.integer(description: "Maximum characters to return (default 5000)", minimum: 100, maximum: 20000),
@@ -36,7 +36,7 @@ struct ReadSafariPageTool: ToolDefinition {
 
 struct ReadSafariHTMLTool: ToolDefinition {
     let name = "read_safari_html"
-    let description = "Read HTML content from the current Safari page. Optionally target a specific CSS selector."
+    let description = "Read raw HTML from the CURRENTLY OPEN Safari tab, optionally targeting a CSS selector. Only use when you need HTML structure, not just text."
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
             "selector": JSONSchema.string(description: "CSS selector to target (e.g. 'article', '.main-content'). Omit for full page."),
@@ -51,7 +51,9 @@ struct ReadSafariHTMLTool: ToolDefinition {
 
         let js: String
         if let selector = selector {
-            let escaped = selector.replacingOccurrences(of: "'", with: "\\'")
+            let escaped = selector
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
             js = "var el = document.querySelector('\(escaped)'); el ? el.innerHTML : 'Selector not found: \(escaped)'"
         } else {
             js = "document.documentElement.outerHTML"
@@ -77,7 +79,7 @@ struct ReadSafariHTMLTool: ToolDefinition {
 
 struct FetchURLContentTool: ToolDefinition {
     let name = "fetch_url_content"
-    let description = "Fetch a URL and return its text content (HTML tags stripped). Useful for reading web pages without a browser."
+    let description = "Fetch any URL and return its text content (HTML tags stripped, no browser needed). This is the DEFAULT tool for reading web pages. Use read_safari_page/read_chrome_page only to read what the user ALREADY has open."
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
             "url": JSONSchema.string(description: "The URL to fetch"),
@@ -101,7 +103,10 @@ struct FetchURLContentTool: ToolDefinition {
         }
 
         let host = url.host?.lowercased() ?? ""
-        if host == "localhost" || host == "127.0.0.1" || host.hasPrefix("192.168.") || host.hasPrefix("10.") || host.hasPrefix("172.") {
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" ||
+           host.hasPrefix("192.168.") || host.hasPrefix("10.") || host.hasPrefix("172.") ||
+           host.hasPrefix("fc") || host.hasPrefix("fd") || host.hasPrefix("fe80") ||
+           host.hasPrefix("0.") || host == "0" {
             return "Local/private URLs are not allowed."
         }
 
@@ -111,7 +116,7 @@ struct FetchURLContentTool: ToolDefinition {
 
         let (data, response) = try await PinnedURLSession.shared.session.data(for: request)
 
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             return "HTTP error: \(status)"
         }
@@ -125,7 +130,10 @@ struct FetchURLContentTool: ToolDefinition {
             return "Could not decode response as text."
         }
 
-        // Strip HTML tags
+        // Strip script and style blocks entirely (content + tags)
+        text = text.replacingOccurrences(of: "<script[^>]*>[\\s\\S]*?</script>", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "<style[^>]*>[\\s\\S]*?</style>", with: " ", options: .regularExpression)
+        // Strip remaining HTML tags
         text = text.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
         // Normalize whitespace
         text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -143,7 +151,7 @@ struct FetchURLContentTool: ToolDefinition {
 
 struct ReadChromePageTool: ToolDefinition {
     let name = "read_chrome_page"
-    let description = "Read the text content of the current Google Chrome page."
+    let description = "Read text from the CURRENTLY OPEN Chrome tab. For reading any URL programmatically, use read_web_page or fetch_url_content instead."
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
             "max_length": JSONSchema.integer(description: "Maximum characters to return (default 5000)", minimum: 100, maximum: 20000),

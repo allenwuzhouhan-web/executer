@@ -124,7 +124,7 @@ struct ReadDocumentTool: ToolDefinition {
 
         if result.exitCode != 0 {
             if result.output.contains("ModuleNotFoundError") || result.output.contains("No module named") {
-                return "python-pptx not installed. Call setup_python_docs first, then retry."
+                return "python-pptx not installed. Auto-provisioning failed — try running: \(PPTExecutor.findPython()) -m pip install python-pptx"
             }
             // Try Spotlight fallback
             let fallback = try ShellRunner.run("mdimport -d2 \"\(path)\" 2>&1 | head -50", timeout: 10)
@@ -178,7 +178,7 @@ struct ReadDocumentTool: ToolDefinition {
 
         if result.exitCode != 0 {
             if result.output.contains("ModuleNotFoundError") || result.output.contains("No module named") {
-                return "openpyxl not installed. Call setup_python_docs first, then retry."
+                return "openpyxl not installed. Auto-provisioning failed — try running: \(PPTExecutor.findPython()) -m pip install openpyxl"
             }
             return "Failed to read XLSX: \(result.output)"
         }
@@ -249,7 +249,7 @@ struct CreateDocumentTool: ToolDefinition {
 
         if result.exitCode != 0 {
             if result.output.contains("ModuleNotFoundError") || result.output.contains("No module named") {
-                return "Required Python library not installed. Call setup_python_docs first, then retry."
+                return "Required Python library not installed. Auto-provisioning failed — check python venv at ~/Library/Application Support/Executer/python_env/"
             }
             return "Failed to create document: \(result.output)"
         }
@@ -485,24 +485,21 @@ struct SetupPythonDocsTool: ToolDefinition {
     }
 
     func execute(arguments: String) async throws -> String {
-        // Check if already installed
-        let check = try ShellRunner.run("python3 -c \"import pptx; import docx; import openpyxl; print('OK')\"", timeout: 10)
-        if check.exitCode == 0 && check.output.contains("OK") {
-            return "All document libraries already installed (python-pptx, python-docx, openpyxl)."
+        // Trigger the shared venv auto-provisioning — this creates the venv and installs
+        // python-pptx, python-docx, openpyxl, PyPDF2, Pillow if not already present.
+        let python = PPTExecutor.findPython()
+
+        // Verify packages are importable
+        let result = try await PPTExecutor.runPython(
+            python: python,
+            script: "-c",
+            args: ["import pptx; import docx; import openpyxl; print('OK')"]
+        )
+
+        if result.stdout.contains("OK") {
+            return "All document libraries ready (python-pptx, python-docx, openpyxl). Using: \(python)"
         }
 
-        // Install missing libraries
-        let install = try ShellRunner.run("pip3 install python-pptx python-docx openpyxl --quiet 2>&1", timeout: 120)
-        if install.exitCode != 0 {
-            return "Failed to install libraries: \(install.output)\n\nTry running manually: pip3 install python-pptx python-docx openpyxl"
-        }
-
-        // Verify
-        let verify = try ShellRunner.run("python3 -c \"import pptx; import docx; import openpyxl; print('OK')\"", timeout: 10)
-        if verify.exitCode == 0 && verify.output.contains("OK") {
-            return "Successfully installed: python-pptx, python-docx, openpyxl. Document tools are now ready."
-        }
-
-        return "Installation may have partially succeeded. Output: \(install.output)"
+        return "Setup issue — python at \(python) cannot import required packages. stderr: \(result.stderr.prefix(300))"
     }
 }

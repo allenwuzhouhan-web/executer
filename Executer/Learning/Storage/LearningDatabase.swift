@@ -8,7 +8,7 @@ final class LearningDatabase {
     private let queue = DispatchQueue(label: "com.executer.learningdb", qos: .utility)
 
     private init() {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent(LearningConstants.appSupportSubdirectory, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dbPath = dir.appendingPathComponent(LearningConstants.databaseFilename).path
@@ -35,6 +35,10 @@ final class LearningDatabase {
             sqlite3_exec(db, "PRAGMA auto_vacuum=INCREMENTAL", nil, nil, nil)
             // Synchronous NORMAL for better write performance (safe with WAL)
             sqlite3_exec(db, "PRAGMA synchronous=NORMAL", nil, nil, nil)
+            // M-series optimizations: mmap for zero-copy reads, large page cache, temp in RAM
+            sqlite3_exec(db, "PRAGMA mmap_size=268435456", nil, nil, nil)      // 256MB
+            sqlite3_exec(db, "PRAGMA cache_size=-64000", nil, nil, nil)         // 64MB
+            sqlite3_exec(db, "PRAGMA temp_store=MEMORY", nil, nil, nil)
         }
     }
 
@@ -80,6 +84,7 @@ final class LearningDatabase {
                 return
             }
 
+            var transactionFailed = false
             for action in actions {
                 sqlite3_reset(stmt)
                 sqlite3_bind_text(stmt, 1, (action.type.rawValue as NSString).utf8String, -1, nil)
@@ -91,11 +96,20 @@ final class LearningDatabase {
                 sqlite3_bind_text(stmt, 6, (sanitizedValue as NSString).utf8String, -1, nil)
                 sqlite3_bind_null(stmt, 7)
                 sqlite3_bind_double(stmt, 8, action.timestamp.timeIntervalSince1970)
-                sqlite3_step(stmt)
+                if sqlite3_step(stmt) != SQLITE_DONE {
+                    let errMsg = String(cString: sqlite3_errmsg(db))
+                    print("[LearningDB] Batch insert observation failed: \(errMsg)")
+                    transactionFailed = true
+                    break
+                }
             }
 
             sqlite3_finalize(stmt)
-            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            if transactionFailed {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            } else {
+                sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            }
         }
     }
 
@@ -199,6 +213,39 @@ final class LearningDatabase {
         }
     }
 
+    func highFrequencyPatterns(minFrequency: Int = 5, limit: Int = 10) -> [WorkflowPattern] {
+        queue.sync {
+            let sql = "SELECT id, app_name, name, actions_json, frequency, first_seen, last_seen FROM patterns WHERE frequency >= ? ORDER BY frequency DESC LIMIT ?"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+
+            sqlite3_bind_int(stmt, 1, Int32(minFrequency))
+            sqlite3_bind_int(stmt, 2, Int32(limit))
+
+            var results: [WorkflowPattern] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) ?? UUID()
+                let app = String(cString: sqlite3_column_text(stmt, 1))
+                let name = String(cString: sqlite3_column_text(stmt, 2))
+                let actionsJSON = String(cString: sqlite3_column_text(stmt, 3))
+                let frequency = Int(sqlite3_column_int(stmt, 4))
+                let firstSeen = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 5))
+                let lastSeen = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
+
+                let actions: [WorkflowPattern.PatternAction]
+                if let data = actionsJSON.data(using: .utf8) {
+                    actions = (try? JSONDecoder().decode([WorkflowPattern.PatternAction].self, from: data)) ?? []
+                } else {
+                    actions = []
+                }
+
+                results.append(WorkflowPattern(id: id, appName: app, name: name, actions: actions, frequency: frequency, firstSeen: firstSeen, lastSeen: lastSeen))
+            }
+            return results
+        }
+    }
+
     func replacePatterns(forApp appName: String, patterns: [WorkflowPattern]) {
         queue.sync {
             sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
@@ -208,7 +255,13 @@ final class LearningDatabase {
             var delStmt: OpaquePointer?
             sqlite3_prepare_v2(db, delSQL, -1, &delStmt, nil)
             sqlite3_bind_text(delStmt, 1, (appName as NSString).utf8String, -1, nil)
-            sqlite3_step(delStmt)
+            if sqlite3_step(delStmt) != SQLITE_DONE {
+                let errMsg = String(cString: sqlite3_errmsg(db))
+                print("[LearningDB] Delete patterns for app failed: \(errMsg)")
+                sqlite3_finalize(delStmt)
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                return
+            }
             sqlite3_finalize(delStmt)
 
             // Insert all new patterns
@@ -220,6 +273,7 @@ final class LearningDatabase {
             }
 
             let encoder = JSONEncoder()
+            var transactionFailed = false
             for pattern in patterns {
                 sqlite3_reset(insertStmt)
                 let actionsJSON = String(data: (try? encoder.encode(pattern.actions)) ?? Data(), encoding: .utf8) ?? "[]"
@@ -231,11 +285,20 @@ final class LearningDatabase {
                 sqlite3_bind_int(insertStmt, 5, Int32(pattern.frequency))
                 sqlite3_bind_double(insertStmt, 6, pattern.firstSeen.timeIntervalSince1970)
                 sqlite3_bind_double(insertStmt, 7, pattern.lastSeen.timeIntervalSince1970)
-                sqlite3_step(insertStmt)
+                if sqlite3_step(insertStmt) != SQLITE_DONE {
+                    let errMsg = String(cString: sqlite3_errmsg(db))
+                    print("[LearningDB] Batch replace pattern failed: \(errMsg)")
+                    transactionFailed = true
+                    break
+                }
             }
 
             sqlite3_finalize(insertStmt)
-            sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            if transactionFailed {
+                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            } else {
+                sqlite3_exec(db, "COMMIT", nil, nil, nil)
+            }
         }
     }
 
@@ -311,6 +374,104 @@ final class LearningDatabase {
         }
     }
 
+    // MARK: - Episodes
+
+    /// Execute arbitrary SQL with typed bindings. Used by EpisodeLogger and LearningFeedbackLoop.
+    func executeSQL(_ sql: String, bindings: [Any?]) {
+        queue.sync {
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                print("[LearningDB] executeSQL prepare failed for: \(sql.prefix(80))")
+                return
+            }
+
+            for (i, binding) in bindings.enumerated() {
+                let idx = Int32(i + 1)
+                switch binding {
+                case let s as String:
+                    sqlite3_bind_text(stmt, idx, (s as NSString).utf8String, -1, nil)
+                case let d as Double:
+                    sqlite3_bind_double(stmt, idx, d)
+                case let n as Int:
+                    sqlite3_bind_int(stmt, idx, Int32(n))
+                case nil:
+                    sqlite3_bind_null(stmt, idx)
+                default:
+                    if let desc = binding.map({ "\($0)" }) {
+                        sqlite3_bind_text(stmt, idx, (desc as NSString).utf8String, -1, nil)
+                    } else {
+                        sqlite3_bind_null(stmt, idx)
+                    }
+                }
+            }
+            sqlite3_step(stmt)
+        }
+    }
+
+    /// Query episodes by keyword similarity to a goal string.
+    func queryEpisodes(goalQuery: String, limit: Int = 5) -> [(id: String, goal: String, outcome: String, failureReason: String?, whatWorked: String?, toolCount: Int)] {
+        queue.sync {
+            let sql = "SELECT id, goal, outcome, failure_reason, what_worked, tool_count FROM episodes ORDER BY timestamp DESC LIMIT ?"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            sqlite3_bind_int(stmt, 1, Int32(limit * 5)) // fetch extra for filtering
+
+            let queryWords = Set(goalQuery.lowercased().split(separator: " ").filter { $0.count > 2 }.map(String.init))
+
+            var results: [(id: String, goal: String, outcome: String, failureReason: String?, whatWorked: String?, toolCount: Int)] = []
+
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = String(cString: sqlite3_column_text(stmt, 0))
+                let goal = String(cString: sqlite3_column_text(stmt, 1))
+                let goalWords = Set(goal.lowercased().split(separator: " ").filter { $0.count > 2 }.map(String.init))
+                let overlap = queryWords.intersection(goalWords).count
+                guard overlap >= 1 else { continue }
+
+                let outcome = String(cString: sqlite3_column_text(stmt, 2))
+                let failureReason = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
+                let whatWorked = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+                let toolCount = Int(sqlite3_column_int(stmt, 5))
+
+                results.append((id, goal, outcome, failureReason, whatWorked, toolCount))
+                if results.count >= limit { break }
+            }
+            return results
+        }
+    }
+
+    /// Query learned rules above a confidence threshold.
+    func queryRules(minConfidence: Double = 0.5, limit: Int = 10) -> [String] {
+        queue.sync {
+            let sql = "SELECT rule_text FROM learned_rules WHERE confidence >= ? ORDER BY confidence DESC, times_applied DESC LIMIT ?"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            sqlite3_bind_double(stmt, 1, minConfidence)
+            sqlite3_bind_int(stmt, 2, Int32(limit))
+
+            var results: [String] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                results.append(String(cString: sqlite3_column_text(stmt, 0)))
+            }
+            return results
+        }
+    }
+
+    /// Check if a rule already exists for a given source pattern.
+    func hasRuleForPattern(patternId: String) -> Bool {
+        queue.sync {
+            let sql = "SELECT COUNT(*) FROM learned_rules WHERE source_pattern_id = ?"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+            sqlite3_bind_text(stmt, 1, (patternId as NSString).utf8String, -1, nil)
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return false }
+            return sqlite3_column_int(stmt, 0) > 0
+        }
+    }
+
     // MARK: - At-Rest Encryption
 
     /// Encrypt the database file when the app closes.
@@ -323,7 +484,7 @@ final class LearningDatabase {
         }
 
         let fm = FileManager.default
-        let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent(LearningConstants.appSupportSubdirectory, isDirectory: true)
         let dbPath = dir.appendingPathComponent(LearningConstants.databaseFilename)
 
@@ -361,6 +522,131 @@ final class LearningDatabase {
                 try? FileManager.default.removeItem(at: url)
             }
         }
+    }
+
+    // MARK: - UI Knowledge (Exploration Learning)
+
+    struct UIKnowledgeEntry {
+        let appName: String
+        let sectionPath: String
+        let elementLabel: String
+        let elementRole: String
+        let actionType: String
+        let resultDescription: String
+        let timesConfirmed: Int
+    }
+
+    /// Store or update a learned UI element behavior.
+    /// Uses UPSERT: if the same app+section+element+action exists, updates the result and bumps confirmation count.
+    func upsertUIKnowledge(
+        appName: String,
+        appBundleID: String? = nil,
+        sectionPath: String,
+        elementLabel: String,
+        elementRole: String,
+        actionType: String = "click",
+        resultDescription: String,
+        screenshotBefore: String? = nil,
+        screenshotAfter: String? = nil
+    ) {
+        queue.sync {
+            let now = Date().timeIntervalSince1970
+            let sql = """
+            INSERT INTO ui_knowledge (app_name, app_bundle_id, section_path, element_label, element_role, action_type, result_description, screenshot_before, screenshot_after, confidence, times_confirmed, created_at, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, 1, ?, ?)
+            ON CONFLICT(app_name, section_path, element_label, action_type)
+            DO UPDATE SET
+                result_description = excluded.result_description,
+                screenshot_after = excluded.screenshot_after,
+                times_confirmed = times_confirmed + 1,
+                last_seen = excluded.last_seen,
+                confidence = MIN(1.0, confidence + 0.1)
+            """
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                print("[LearningDB] upsertUIKnowledge prepare failed")
+                return
+            }
+            sqlite3_bind_text(stmt, 1, (appName as NSString).utf8String, -1, nil)
+            if let bid = appBundleID {
+                sqlite3_bind_text(stmt, 2, (bid as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, 2)
+            }
+            sqlite3_bind_text(stmt, 3, (sectionPath as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 4, (elementLabel as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 5, (elementRole as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 6, (actionType as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 7, (resultDescription as NSString).utf8String, -1, nil)
+            if let sb = screenshotBefore {
+                sqlite3_bind_text(stmt, 8, (sb as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, 8)
+            }
+            if let sa = screenshotAfter {
+                sqlite3_bind_text(stmt, 9, (sa as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, 9)
+            }
+            sqlite3_bind_double(stmt, 10, now)
+            sqlite3_bind_double(stmt, 11, now)
+
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                print("[LearningDB] upsertUIKnowledge failed: \(String(cString: sqlite3_errmsg(db)))")
+            }
+        }
+    }
+
+    /// Query learned UI knowledge for a specific app.
+    /// Returns knowledge entries sorted by confirmation count (most reliable first).
+    func queryUIKnowledge(forApp appName: String, limit: Int = 30) -> [UIKnowledgeEntry] {
+        queue.sync {
+            let sql = """
+            SELECT app_name, section_path, element_label, element_role, action_type, result_description, times_confirmed
+            FROM ui_knowledge
+            WHERE app_name = ?
+            ORDER BY times_confirmed DESC, last_seen DESC
+            LIMIT ?
+            """
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            sqlite3_bind_text(stmt, 1, (appName as NSString).utf8String, -1, nil)
+            sqlite3_bind_int(stmt, 2, Int32(limit))
+
+            var results: [UIKnowledgeEntry] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                results.append(UIKnowledgeEntry(
+                    appName: String(cString: sqlite3_column_text(stmt, 0)),
+                    sectionPath: String(cString: sqlite3_column_text(stmt, 1)),
+                    elementLabel: String(cString: sqlite3_column_text(stmt, 2)),
+                    elementRole: String(cString: sqlite3_column_text(stmt, 3)),
+                    actionType: String(cString: sqlite3_column_text(stmt, 4)),
+                    resultDescription: String(cString: sqlite3_column_text(stmt, 5)),
+                    timesConfirmed: Int(sqlite3_column_int(stmt, 6))
+                ))
+            }
+            return results
+        }
+    }
+
+    /// Format UI knowledge as a prompt section for the LLM.
+    /// Example output:
+    /// ## Known UI Elements for Notion:
+    /// - "Create Page" in "Sidebar > Private" → Creates a new private page
+    /// - "Search" in "navigation" → Opens the search modal (confirmed 5x)
+    func formatUIKnowledgePrompt(forApp appName: String) -> String? {
+        let entries = queryUIKnowledge(forApp: appName, limit: 20)
+        guard !entries.isEmpty else { return nil }
+
+        var lines: [String] = ["## Known UI Elements for \(appName) (learned from exploration):"]
+        for e in entries {
+            let section = e.sectionPath.isEmpty ? "" : " in \"\(e.sectionPath)\""
+            let confirmed = e.timesConfirmed > 1 ? " (confirmed \(e.timesConfirmed)x)" : ""
+            lines.append("- \(e.actionType) \"\(e.elementLabel)\"\(section) → \(e.resultDescription)\(confirmed)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     deinit {

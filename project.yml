@@ -11,6 +11,10 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "14.0"
     SWIFT_VERSION: "5.9"
 
+packages:
+  ComputerLib:
+    path: ../computer
+
 targets:
   Executer:
     type: application
@@ -21,6 +25,9 @@ targets:
           - "Resources/Assets.xcassets/AppIcon.appiconset"
     resources:
       - path: Executer/Resources/Assets.xcassets
+    dependencies:
+      - package: ComputerLib
+        product: ComputerLib
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.allenwu.executer

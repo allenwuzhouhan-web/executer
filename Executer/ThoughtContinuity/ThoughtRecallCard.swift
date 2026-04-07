@@ -4,7 +4,7 @@ import Cocoa
 struct ThoughtRecallCard: View {
     let recall: ThoughtRecall
     @EnvironmentObject var appState: AppState
-    @State private var isGenerating = false
+    // No state needed — finishWithAI dispatches immediately to the agent loop
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -31,6 +31,8 @@ struct ThoughtRecallCard: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.tertiary)
+                        .frame(width: 18, height: 18)
+                        .liquidGlassCircle()
                 }
                 .buttonStyle(.plain)
             }
@@ -65,14 +67,9 @@ struct ThoughtRecallCard: View {
                     finishWithAI()
                 } label: {
                     HStack(spacing: 4) {
-                        if isGenerating {
-                            ProgressView()
-                                .controlSize(.mini)
-                        } else {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                        Text(isGenerating ? "Writing..." : "Finish with AI")
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Finish with AI")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                     }
                     .frame(maxWidth: .infinity)
@@ -82,20 +79,12 @@ struct ThoughtRecallCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(isGenerating)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background {
-            VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.purple.opacity(0.2), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+        .liquidGlass(cornerRadius: 12, tint: .purple)
+        .shadow(color: .purple.opacity(0.06), radius: 8, y: 4)
         .padding(.top, 6)
         .task {
             // Auto-dismiss after 10 seconds if user hasn't interacted
@@ -143,43 +132,16 @@ struct ThoughtRecallCard: View {
     }
 
     private func finishWithAI() {
-        isGenerating = true
+        ThoughtRecallService.shared.markComplete(recall)
 
-        Task {
-            guard let completion = await ThoughtRecallService.shared.generateCompletion(for: recall) else {
-                await MainActor.run {
-                    isGenerating = false
-                    appState.inputBarState = .error(message: "Could not generate completion")
-                }
-                return
-            }
+        // Build a task description from the thought context so the AgentLoop
+        // understands what the user was doing and can use tools to finish it.
+        let taskDescription = ThoughtRecallService.shared.buildFinishTaskPrompt(for: recall)
 
-            await MainActor.run {
-                // Copy completion to clipboard
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(completion, forType: .string)
-
-                ThoughtRecallService.shared.markComplete(recall)
-
-                // Reopen the app
-                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: recall.appBundleId) {
-                    NSWorkspace.shared.open(url)
-                }
-
-                // Brief delay then paste
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    // Simulate Cmd+V to paste
-                    let source = CGEventSource(stateID: .hidSystemState)
-                    let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true) // V key
-                    keyDown?.flags = .maskCommand
-                    let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
-                    keyUp?.flags = .maskCommand
-                    keyDown?.post(tap: .cghidEventTap)
-                    keyUp?.post(tap: .cghidEventTap)
-                }
-
-                appState.inputBarState = .result(message: "AI completion pasted")
-            }
+        // Dismiss the card and route through the real agent loop
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            appState.inputBarState = .ready
         }
+        appState.submitCommand(taskDescription)
     }
 }

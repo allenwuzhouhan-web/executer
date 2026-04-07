@@ -88,8 +88,13 @@ class FileIndex {
     // MARK: - Indexing
 
     private func buildIndex() {
-        guard !isIndexing else { return }
-        isIndexing = true
+        // Check-and-set the isIndexing flag atomically inside the queue
+        let shouldIndex = queue.sync { () -> Bool in
+            guard !isIndexing else { return false }
+            isIndexing = true
+            return true
+        }
+        guard shouldIndex else { return }
 
         queue.async { [weak self] in
             guard let self = self else { return }

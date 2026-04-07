@@ -7,13 +7,51 @@ import AppKit
 /// Can read text, buttons, menus, fields, labels, and their positions from any app.
 enum ScreenReader {
 
+    // MARK: - Cache
+
+    /// Time-based cache to avoid redundant AX tree walks within a short window.
+    private static let cacheLock = NSLock()
+    private static var cachedSnapshot: AppSnapshot?
+    private static var cacheTimestamp: Date = .distantPast
+    private static var cachePID: pid_t = 0
+    /// Cache TTL in seconds. AX reads are ~50ms; caching avoids duplicates within 150ms.
+    static var cacheTTL: TimeInterval = 0.15
+
+    /// Invalidate the cache (call after performing a UI action that changes the screen).
+    static func invalidateCache() {
+        cacheLock.lock()
+        cachedSnapshot = nil
+        cacheLock.unlock()
+    }
+
     // MARK: - Full UI Tree Reading
 
     /// Reads the entire visible UI tree of the frontmost application.
-    /// Returns a structured snapshot of all visible elements.
+    /// Returns a cached result if within TTL, otherwise performs a fresh AX read.
     static func readFrontmostApp() -> AppSnapshot? {
         guard let frontApp = NSWorkspace.shared.frontmostApplication else { return nil }
-        return readApp(pid: frontApp.processIdentifier, name: frontApp.localizedName ?? "Unknown")
+        let pid = frontApp.processIdentifier
+
+        // Check cache
+        cacheLock.lock()
+        if pid == cachePID, let cached = cachedSnapshot,
+           Date().timeIntervalSince(cacheTimestamp) < cacheTTL {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
+        let result = readApp(pid: pid, name: frontApp.localizedName ?? "Unknown")
+
+        // Store in cache
+        if let result = result {
+            cacheLock.lock()
+            cachedSnapshot = result
+            cacheTimestamp = Date()
+            cachePID = pid
+            cacheLock.unlock()
+        }
+        return result
     }
 
     /// Reads the UI tree of a specific application by PID.
@@ -27,12 +65,20 @@ enum ScreenReader {
             return nil
         }
 
+        // CFType cast always succeeds — safety comes from the nil guard above
         let windowAX = windowElement as! AXUIElement
         let windowTitle = getStringAttribute(windowAX, kAXTitleAttribute) ?? ""
 
-        // Traverse the UI tree
+        // Progressive depth: try shallow first (depth 6), deepen to 12 if insufficient
         var elements: [UIElementSnapshot] = []
-        traverseElement(windowAX, depth: 0, maxDepth: 12, elements: &elements)
+        traverseElement(windowAX, depth: 0, maxDepth: 6, elements: &elements)
+
+        let interactiveCount = elements.filter { isInteractiveRole($0.role) }.count
+        if interactiveCount < 5 {
+            // Shallow read was insufficient — do a full deep read
+            elements.removeAll()
+            traverseElement(windowAX, depth: 0, maxDepth: 12, elements: &elements)
+        }
 
         return AppSnapshot(
             appName: name,
@@ -41,6 +87,40 @@ enum ScreenReader {
             elements: elements,
             timestamp: Date()
         )
+    }
+
+    /// Roles considered interactive for sufficiency threshold.
+    static func isInteractiveRole(_ role: String) -> Bool {
+        switch role {
+        case "AXButton", "AXMenuItem", "AXTextField", "AXTextArea",
+             "AXCheckBox", "AXRadioButton", "AXPopUpButton",
+             "AXSlider", "AXLink", "AXTab", "AXToolbar",
+             "AXComboBox", "AXIncrementor", "AXColorWell":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Read a targeted subtree by finding an element near a specific screen point.
+    /// Useful for refreshing only the area around a recently-clicked element.
+    static func readSubtree(pid: pid_t, near point: CGPoint, radius: CGFloat = 200) -> [UIElementSnapshot] {
+        let appElement = AXUIElementCreateApplication(pid)
+        var windowValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue) == .success,
+              let windowElement = windowValue else { return [] }
+
+        var allElements: [UIElementSnapshot] = []
+        traverseElement(windowElement as! AXUIElement, depth: 0, maxDepth: 12, elements: &allElements)
+
+        // Filter to elements within radius of the target point
+        return allElements.filter { el in
+            guard let pos = el.position, let size = el.size else { return false }
+            let center = CGPoint(x: pos.x + size.width / 2, y: pos.y + size.height / 2)
+            let dx = center.x - point.x
+            let dy = center.y - point.y
+            return (dx * dx + dy * dy) <= (radius * radius)
+        }
     }
 
     /// Reads just the text content visible in the frontmost app (lightweight).
@@ -59,27 +139,39 @@ enum ScreenReader {
 
     // MARK: - Element Traversal
 
+    /// Maximum elements to collect before stopping traversal (prevents runaway on huge trees).
+    private static let maxElements = 500
+
     private static func traverseElement(_ element: AXUIElement, depth: Int, maxDepth: Int, elements: inout [UIElementSnapshot]) {
-        guard depth < maxDepth else { return }
+        guard depth < maxDepth, elements.count < maxElements else { return }
 
         let role = getStringAttribute(element, kAXRoleAttribute) ?? ""
         let subrole = getStringAttribute(element, kAXSubroleAttribute) ?? ""
+
+        // Skip secure text fields (passwords)
+        if subrole == "AXSecureTextField" { return }
+
+        // Skip deep container-only roles that bloat the tree without useful info
+        if depth > 4 && !isInteractiveRole(role) {
+            let title = getStringAttribute(element, kAXTitleAttribute) ?? ""
+            let value = getStringAttribute(element, kAXValueAttribute) ?? ""
+            if title.isEmpty && value.isEmpty {
+                // Still recurse children — the interesting elements are deeper
+                recurseChildren(element, depth: depth, maxDepth: maxDepth, elements: &elements)
+                return
+            }
+        }
+
         let title = getStringAttribute(element, kAXTitleAttribute) ?? ""
         let value = getStringAttribute(element, kAXValueAttribute) ?? ""
         let description = getStringAttribute(element, kAXDescriptionAttribute) ?? ""
         let label = getStringAttribute(element, kAXLabelValueAttribute ?? "AXLabel") ?? ""
         let identifier = getStringAttribute(element, "AXIdentifier") ?? ""
 
-        // Skip secure text fields (passwords)
-        if subrole == "AXSecureTextField" { return }
-
-        // Only record elements with meaningful content
+        // Only record elements with meaningful content or interactive role
         let hasContent = !title.isEmpty || !value.isEmpty || !description.isEmpty || !label.isEmpty
-        let isInteractive = ["AXButton", "AXMenuItem", "AXTextField", "AXTextArea",
-                            "AXCheckBox", "AXRadioButton", "AXPopUpButton",
-                            "AXSlider", "AXLink", "AXTab", "AXToolbar"].contains(role)
 
-        if hasContent || isInteractive {
+        if hasContent || isInteractiveRole(role) {
             let position = getPosition(element)
             let size = getSize(element)
 
@@ -87,7 +179,7 @@ enum ScreenReader {
                 role: role,
                 subrole: subrole,
                 title: title,
-                value: String(value.prefix(500)), // Truncate long values
+                value: String(value.prefix(500)),
                 description: description,
                 label: label,
                 identifier: identifier,
@@ -97,7 +189,10 @@ enum ScreenReader {
             ))
         }
 
-        // Recurse into children
+        recurseChildren(element, depth: depth, maxDepth: maxDepth, elements: &elements)
+    }
+
+    private static func recurseChildren(_ element: AXUIElement, depth: Int, maxDepth: Int, elements: inout [UIElementSnapshot]) {
         var childrenValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue) == .success,
               let children = childrenValue as? [AXUIElement] else {
@@ -105,6 +200,7 @@ enum ScreenReader {
         }
 
         for child in children {
+            guard elements.count < maxElements else { return }
             traverseElement(child, depth: depth + 1, maxDepth: maxDepth, elements: &elements)
         }
     }

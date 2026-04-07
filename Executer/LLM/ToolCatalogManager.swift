@@ -61,18 +61,45 @@ final class ToolCatalogManager {
             for example in guide.examples.prefix(maxExamples) {
                 lines.append("  Example: \"\(example.userRequest)\" → \(example.toolChain.joined(separator: " → "))")
             }
-            if !guide.commonMistakes.isEmpty && isWeakerModel {
-                lines.append("  Avoid: \(guide.commonMistakes.first!)")
+            if let firstMistake = guide.commonMistakes.first, isWeakerModel {
+                lines.append("  Avoid: \(firstMistake)")
             }
         }
 
-        let result = lines.joined(separator: "\n")
-        // Hard cap at 3000 chars
+        var result = lines.joined(separator: "\n")
+        // Hard cap at 3000 chars for guides
         if result.count > 3000 {
-            return String(result.prefix(2950)) + "\n..."
+            result = String(result.prefix(2950)) + "\n..."
         }
+
+        // Append keyboard shortcuts reference when keyboard tools are active
+        if categories.contains(.keyboard) {
+            result += Self.keyboardShortcutsReference
+        }
+
         return result
     }
+
+    // MARK: - Keyboard Shortcuts Reference (injected on-demand)
+
+    /// Full macOS keyboard shortcuts reference — only included when keyboard category is active.
+    /// This saves ~1500 tokens on every non-UI API call.
+    private static let keyboardShortcutsReference = """
+
+    ## macOS Keyboard Shortcuts (use with `hotkey` tool)
+
+    Common: cut "cmd+x" | copy "cmd+c" | paste "cmd+v" | undo "cmd+z" | redo "cmd+shift+z" | select all "cmd+a" | find "cmd+f" | find next "cmd+g" | save "cmd+s" | save as "cmd+shift+s" | print "cmd+p" | open "cmd+o" | new tab "cmd+t" | close window "cmd+w" | close all "cmd+alt+w" | minimize "cmd+m" | hide app "cmd+h" | hide others "cmd+alt+h" | quit "cmd+q" | force quit "cmd+alt+escape" | spotlight "cmd+space" | emoji "ctrl+cmd+space" | full screen "ctrl+cmd+f" | switch apps "cmd+tab" | switch windows "cmd+`" | screenshot tools "cmd+shift+5" | screenshot full "cmd+shift+3" | screenshot region "cmd+shift+4" | settings "cmd+," | lock screen "ctrl+cmd+q"
+
+    Browser: address bar "cmd+l" | new tab "cmd+t" | close tab "cmd+w" | refresh "cmd+r" | back "cmd+[" | forward "cmd+]" | reopen closed tab "cmd+shift+t" | next tab "ctrl+tab" | prev tab "ctrl+shift+tab" | zoom in "cmd+=" | zoom out "cmd+-" | reset zoom "cmd+0" | incognito "cmd+shift+n" (Chrome) / "cmd+shift+p" (Firefox)
+
+    Text: bold "cmd+b" | italic "cmd+i" | underline "cmd+u" | delete word left alt+delete | delete char right fn+delete | line start "cmd+left" | line end "cmd+right" | doc start "cmd+up" | doc end "cmd+down" | word left "alt+left" | word right "alt+right" | select to line start "cmd+shift+left" | select to line end "cmd+shift+right" | select to doc start "cmd+shift+up" | select to doc end "cmd+shift+down" | select word left "alt+shift+left" | select word right "alt+shift+right" | page up fn+up | page down fn+down | home fn+left | end fn+right | add link "cmd+k" | paste style "cmd+alt+v" | paste plain "cmd+alt+shift+v"
+
+    Finder: get info "cmd+i" | duplicate "cmd+d" | alias "ctrl+cmd+a" | go to folder "cmd+shift+g" | desktop "cmd+shift+d" | home "cmd+shift+h" | downloads "cmd+alt+l" | documents "cmd+shift+o" | utilities "cmd+shift+u" | iCloud "cmd+shift+i" | airdrop "cmd+shift+r" | recents "cmd+shift+f" | computer "cmd+shift+c" | icons/list/columns/gallery "cmd+1"/"cmd+2"/"cmd+3"/"cmd+4" | path bar "cmd+alt+p" | sidebar "cmd+alt+s" | status bar "cmd+/" | view options "cmd+j" | trash "cmd+delete" | empty trash "cmd+shift+delete" | move files "cmd+c" then "cmd+alt+v" | back "cmd+[" | forward "cmd+]" | parent "cmd+up" | open item "cmd+down" | toggle dock "cmd+alt+d"
+
+    System: mission control "ctrl+up" | app exposé "ctrl+down" | show desktop fn+f11 | notification center fn+n | control center fn+c | dock fn+a | dictation fn+d | quick note fn+q | launchpad fn+shift+a | switch spaces "ctrl+left"/"ctrl+right" | new folder "cmd+shift+n"
+
+    Accessibility: shortcuts panel "cmd+alt+f5" | invert colors "ctrl+alt+cmd+8" | focus menu bar "ctrl+f2" | focus dock "ctrl+f3" | voiceover "cmd+f5"
+    """
 
     // MARK: - On-Demand Lookup
 
@@ -234,6 +261,157 @@ final class ToolCatalogManager {
                 ),
             ],
             commonMistakes: ["Imported skills are pending until verified. Use verify_skill_now for immediate use."]
+        ),
+
+        // Keyboard Shortcuts — prefer hotkeys over UI clicks
+        ToolUsageGuide(
+            toolName: "hotkey (keyboard shortcuts)",
+            category: "keyboard",
+            whenToUse: "ALWAYS prefer hotkey over click_element or menu navigation when a keyboard shortcut exists. Hotkeys are instant and reliable; clicking menus is slow and brittle.",
+            composesWellWith: ["hotkey", "type_text", "press_key", "launch_app", "click_element"],
+            examples: [
+                UsageExample(
+                    userRequest: "save this document",
+                    toolChain: ["hotkey(combo: 'cmd+s')"],
+                    explanation: "Use Cmd+S, NOT click File → Save."
+                ),
+                UsageExample(
+                    userRequest: "copy this text and paste it in Notes",
+                    toolChain: ["hotkey(combo: 'cmd+a')", "hotkey(combo: 'cmd+c')", "launch_app(name: 'Notes')", "hotkey(combo: 'cmd+v')"],
+                    explanation: "Select all, copy, switch app, paste — all via hotkeys. No clicking needed."
+                ),
+                UsageExample(
+                    userRequest: "open google.com in a new tab",
+                    toolChain: ["hotkey(combo: 'cmd+t')", "type_text(text: 'google.com')", "press_key(key: 'enter')"],
+                    explanation: "New tab via Cmd+T, type URL, press Enter. Don't click the + button or address bar."
+                ),
+                UsageExample(
+                    userRequest: "go to my Downloads folder",
+                    toolChain: ["launch_app(name: 'Finder')", "hotkey(combo: 'cmd+alt+l')"],
+                    explanation: "Use Finder shortcut Cmd+Opt+L to jump directly to Downloads."
+                ),
+                UsageExample(
+                    userRequest: "take a screenshot of a region",
+                    toolChain: ["hotkey(combo: 'cmd+shift+4')"],
+                    explanation: "Cmd+Shift+4 for region screenshot. Don't open Screenshot app."
+                ),
+                UsageExample(
+                    userRequest: "find something on this page",
+                    toolChain: ["hotkey(combo: 'cmd+f')", "type_text(text: 'search term')"],
+                    explanation: "Cmd+F opens find bar, then type the query. Don't click a search icon."
+                ),
+            ],
+            commonMistakes: [
+                "Don't click File → Save when Cmd+S works.",
+                "Don't click the URL bar — use Cmd+L to focus it instantly.",
+                "Don't click Edit → Copy/Paste — use Cmd+C/Cmd+V.",
+                "Don't click the + button for new tab — use Cmd+T.",
+                "Don't navigate Finder menus — use direct shortcuts (Cmd+Shift+D for Desktop, Cmd+Shift+H for Home, etc.).",
+            ]
+        ),
+
+        // Notion — Workspace & Knowledge Management
+        ToolUsageGuide(
+            toolName: "notion (workspace)",
+            category: "productivity",
+            whenToUse: "When the user wants to create, read, update, or organize content in Notion — pages, databases, wikis, project trackers, notes. Use notion_search to find existing content, notion_read_page to read it, notion_create_page to create rich pages, and notion_query_database to pull structured data.",
+            composesWellWith: ["notion_search", "notion_read_page", "notion_create_page", "notion_append_blocks", "notion_get_database", "notion_query_database", "notion_add_to_database", "notion_create_database"],
+            examples: [
+                UsageExample(
+                    userRequest: "create a project brief in Notion",
+                    toolChain: ["notion_search(query: 'Projects')", "notion_create_page(parent_id: found_page_id, title: 'Project Brief', content: '# Overview\\n...')"],
+                    explanation: "Search for the parent page first, then create a rich page with markdown content. The markdown is auto-converted to Notion blocks (headings, bullets, code blocks, tables, etc.)."
+                ),
+                UsageExample(
+                    userRequest: "add a task to my Notion task database",
+                    toolChain: ["notion_search(query: 'Tasks', filter: 'database')", "notion_get_database(database_id: found_db_id)", "notion_add_to_database(database_id: ..., properties: '{\"Name\": \"...\", \"Status\": \"...\"}')"],
+                    explanation: "Find the database, check its schema to know property names and types, then add the entry with the right property values."
+                ),
+                UsageExample(
+                    userRequest: "what's in my Notion meeting notes?",
+                    toolChain: ["notion_search(query: 'meeting notes')", "notion_read_page(page_id: found_page_id)"],
+                    explanation: "Search to find the page, then read its full content rendered as markdown."
+                ),
+                UsageExample(
+                    userRequest: "create a tracking database in Notion",
+                    toolChain: ["notion_search(query: 'parent page')", "notion_create_database(parent_page_id: ..., title: 'Bug Tracker', properties: '{\"Name\": \"title\", \"Status\": {\"type\": \"select\", \"options\": [\"Open\", \"In Progress\", \"Closed\"]}, \"Priority\": {\"type\": \"select\", \"options\": [\"P0\", \"P1\", \"P2\"]}, \"Assignee\": \"rich_text\", \"Due\": \"date\"}')"],
+                    explanation: "Find a parent page, then create a database with typed columns. Use descriptive option names."
+                ),
+            ],
+            commonMistakes: [
+                "Don't skip notion_get_database before adding entries — you need to know the exact property names and types.",
+                "Don't forget to search for the parent page/database first — don't guess IDs.",
+                "If Notion returns 'unauthorized', the user needs to share the page with their integration in Notion (page ... menu → Connect to).",
+                "When creating rich pages, write FULL markdown content — headings, bullets, code blocks, tables. Don't just write plain text paragraphs.",
+            ]
+        ),
+
+        // Media Production — Video & Audio Creation
+        ToolUsageGuide(
+            toolName: "create_video (media production)",
+            category: "media",
+            whenToUse: "When the user wants to create a video from images, clips, or text — explainers, promos, montages, slideshows, tutorials. Also use for video editing (trimming, merging, overlays).",
+            composesWellWith: ["search_images", "create_video", "create_audio", "ffmpeg_edit_video", "ffmpeg_probe", "plan_video", "quick_video", "create_podcast", "download_youtube"],
+            examples: [
+                UsageExample(
+                    userRequest: "make a 30-second promo video for my bakery",
+                    toolChain: ["quick_video(topic: 'My Bakery Promo', narration: 'Welcome to Sweet Bakes...', type: 'promo')"],
+                    explanation: "Use quick_video for one-shot video creation — it auto-searches images, generates scenes, adds TTS, and opens the result."
+                ),
+                UsageExample(
+                    userRequest: "create a 5-minute explainer about quantum computing",
+                    toolChain: ["quick_video(topic: 'Quantum Computing', narration: 'paragraph1\\n\\nparagraph2\\n\\n...', type: 'explainer', duration_seconds: 300)"],
+                    explanation: "quick_video handles the full pipeline: each narration paragraph becomes a scene, images are auto-searched, TTS and subtitles generated."
+                ),
+                UsageExample(
+                    userRequest: "create a podcast about AI trends",
+                    toolChain: ["create_podcast(title: 'AI Trends 2025', narration: 'Full episode script...', voice: 'Daniel')"],
+                    explanation: "create_podcast handles TTS + background music + ducking in one call. Auto-opens the result."
+                ),
+                UsageExample(
+                    userRequest: "download this YouTube video",
+                    toolChain: ["download_youtube(url: 'https://youtube.com/watch?v=...', format: 'best_video')"],
+                    explanation: "download_youtube uses yt-dlp to download and auto-opens the result. For audio only, use format: 'mp3'."
+                ),
+                UsageExample(
+                    userRequest: "trim the first 10 seconds off this video",
+                    toolChain: ["ffmpeg_edit_video(spec: {input: path, operations: [{type: 'trim', start: 10}]})"],
+                    explanation: "ffmpeg_edit_video for editing existing videos. Auto-opens result."
+                ),
+            ],
+            commonMistakes: [
+                "Use quick_video for most video creation — it auto-searches images and handles everything in one call.",
+                "Use create_podcast for podcast episodes — much simpler than create_audio with manual track specs.",
+                "For create_video with manual spec: use 'search_query' in scenes instead of 'source' to auto-search images.",
+                "Scenes shorter than 3 seconds feel rushed — use at least 4-5 seconds per scene.",
+                "Always include audio (narration or background music) — silent videos feel broken.",
+            ]
+        ),
+
+        // Python Scripting
+        ToolUsageGuide(
+            toolName: "run_script (Python scripting)",
+            category: "systemBash",
+            whenToUse: "When the task needs real computation: PDF processing, CSV/Excel transforms, batch file operations, data conversion, web scraping, image manipulation, or any automation requiring scripting.",
+            composesWellWith: ["find_files", "read_file", "open_file", "set_clipboard_text"],
+            examples: [
+                UsageExample(
+                    userRequest: "split this PDF into chapters",
+                    toolChain: ["find_files(name: '*.pdf')", "run_script(language: 'python', code: 'from PyPDF2 import ...', working_dir: '~/Desktop/chapters')"],
+                    explanation: "Find the PDF, write Python to split it with PyPDF2, save chapter files to working_dir."
+                ),
+                UsageExample(
+                    userRequest: "combine these CSVs into one Excel file",
+                    toolChain: ["run_script(language: 'python', code: 'import openpyxl; ...', working_dir: '~/Documents')"],
+                    explanation: "Use openpyxl (pre-installed) to read CSVs and write combined XLSX."
+                ),
+            ],
+            commonMistakes: [
+                "Don't describe what a script WOULD do — write and execute the actual code.",
+                "Don't use run_shell_command for multi-line Python — use run_script.",
+                "Print a clear summary as the last line so the user knows what happened.",
+                "Use working_dir to control where output files go.",
+            ]
         ),
 
         // General: Parallel Execution

@@ -43,7 +43,7 @@ class AgentLoop {
 
     private static let friendlyNames: [String: String] = [
         "launch_app": "Opening app", "quit_app": "Closing app",
-        "click": "Clicking", "click_element": "Clicking",
+        "click": "Clicking", "click_element": "Clicking", "click_ref": "Clicking",
         "type_text": "Typing", "press_key": "Pressing key",
         "hotkey": "Shortcut", "scroll": "Scrolling",
         "move_cursor": "Moving cursor", "drag": "Dragging",
@@ -53,17 +53,31 @@ class AgentLoop {
         "music_play_song": "Playing", "music_pause": "Pausing",
         "browser_task": "Browsing web", "browser_extract": "Extracting web data",
         "browser_session": "Managing browser", "browser_screenshot": "Browser screenshot",
+        "notion_search": "Searching Notion", "notion_read_page": "Reading Notion page",
+        "notion_create_page": "Creating Notion page", "notion_update_page": "Updating Notion page",
+        "notion_append_blocks": "Writing to Notion", "notion_query_database": "Querying Notion DB",
+        "notion_get_database": "Reading Notion DB", "notion_add_to_database": "Adding to Notion DB",
+        "notion_create_database": "Creating Notion DB", "notion_add_comment": "Commenting in Notion",
+        "notion_setup": "Setting up Notion",
+        "ffmpeg_edit_video": "Editing video", "create_video": "Creating video",
+        "ffmpeg_probe": "Inspecting media", "create_audio": "Creating audio",
+        "plan_video": "Planning video", "setup_ffmpeg": "Setting up FFmpeg",
+        "analyze_youtube_channel": "Analyzing YouTube channel",
+        "list_video_styles": "Listing video styles",
+        "quick_video": "Creating video", "create_podcast": "Creating podcast",
+        "download_youtube": "Downloading video", "setup_ytdlp": "Setting up yt-dlp",
     ]
 
     // UI tools MUST execute sequentially — they depend on screen state
     private static let uiSequentialTools: Set<String> = [
-        "click", "click_element", "type_text", "press_key", "hotkey",
+        "click", "click_element", "click_ref", "type_text", "press_key", "hotkey",
         "scroll", "drag", "move_cursor", "launch_app", "select_all_text",
+        "paste_text", "browser_click_element_css", "browser_type_in_element",
     ]
 
     private static let toolDelays: [String: UInt64] = [
         "launch_app": 1_000_000_000,
-        "click": 200_000_000, "click_element": 200_000_000,
+        "click": 200_000_000, "click_element": 200_000_000, "click_ref": 200_000_000,
         "type_text": 200_000_000, "press_key": 200_000_000,
         "hotkey": 200_000_000, "scroll": 200_000_000,
         "move_cursor": 200_000_000,
@@ -109,7 +123,7 @@ class AgentLoop {
         ]
 
         // Save to auto_skills.json (locked to prevent concurrent file corruption)
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let skillFile = appSupport.appendingPathComponent("Executer/auto_skills.json")
 
         skillFileLock.lock()
@@ -133,18 +147,89 @@ class AgentLoop {
             try? data.write(to: skillFile)
             print("[Agent] Auto-skill recorded: \(skill["name"] ?? "?")")
         }
+
+        // Record in ToolComposer's composition cache for reuse (WIP — Composer excluded from build)
+        // let toolChain = steps.compactMap { $0["tool"] }
+        // if toolChain.count >= 2 {
+        //     CompositionCache.shared.record(goal: String(command.prefix(200)), toolChain: toolChain, argumentTemplates: toolChain.map { _ in "{}" })
+        // }
     }
 
     // MARK: - Document Task Detection
 
     private static func isDocumentCreationCommand(_ command: String) -> Bool {
         let lower = command.lowercased()
-        let documentKeywords = [
-            "ppt", "powerpoint", "presentation", "slide", "deck",
-            "word", "docx", "document", "report", "essay", "memo", "letter",
-            "excel", "xlsx", "spreadsheet", "table", "data sheet",
+
+        // Processing verbs = manipulating an existing document, NOT creating one.
+        // These go through normal agent loop with run_script, not document service.
+        let processingVerbs = [
+            "split", "merge", "extract", "convert", "parse", "process",
+            "analyze", "transform", "separate", "combine", "compress",
+            "watermark", "ocr", "scrape", "batch", "rename", "organize",
+            "by chapter", "by section", "by page", "each page",
         ]
-        return documentKeywords.contains { lower.contains($0) }
+        if processingVerbs.contains(where: { lower.contains($0) }) { return false }
+
+        // Format-specific keywords are almost always creation
+        let formatKeywords = ["pptx", "docx", "xlsx", "powerpoint", "keynote"]
+        if formatKeywords.contains(where: { lower.contains($0) }) { return true }
+
+        // Generic keywords need a creation verb to confirm intent
+        let creationVerbs = ["create", "make", "write", "generate", "draft", "build", "design", "compose"]
+        let documentKeywords = [
+            "ppt", "presentation", "slide", "deck",
+            "word", "document", "report", "essay", "memo", "letter",
+            "excel", "spreadsheet", "table", "data sheet",
+        ]
+        return creationVerbs.contains(where: { lower.contains($0) })
+            && documentKeywords.contains(where: { lower.contains($0) })
+    }
+
+    // MARK: - Multimodal Task Detection
+
+    /// Detect queries that benefit from a multimodal LLM (image/PDF visual understanding, OCR interpretation).
+    /// When detected and a Kimi API key is available, routes to Kimi instead of DeepSeek.
+    private static func isMultimodalQuery(_ command: String) -> Bool {
+        let lower = command.lowercased()
+
+        // Strong signals — user is asking the LLM to understand visual content
+        let strongKeywords = [
+            "this image", "this photo", "this picture", "this screenshot", "this diagram",
+            "this chart", "this graph", "look at this", "what's in this", "describe this",
+            "analyze this image", "read this image", "interpret this",
+            "what does this show", "what do you see", "explain this image",
+            "scanned document", "scanned pdf", "handwritten",
+            "image to text", "photo to text", "ocr this",
+        ]
+        if strongKeywords.contains(where: { lower.contains($0) }) { return true }
+
+        // Medium signals — only match when combined with an action verb suggesting understanding
+        let mediumKeywords = ["textbook", "this pdf", "this document"]
+        let understandingVerbs = ["read", "understand", "analyze", "summarize", "explain",
+                                  "what does", "what is", "describe", "interpret", "translate"]
+        for keyword in mediumKeywords {
+            if lower.contains(keyword) && understandingVerbs.contains(where: { lower.contains($0) }) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    // MARK: - Instruction Detection
+
+    /// Detect when the LLM returned step-by-step instructions instead of actually calling tools.
+    private static func looksLikeInstructions(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let patterns = [
+            "step 1", "step 2", "1. ", "2. ", "3. ",
+            "you can ", "you could ", "you'll need",
+            "first, ", "then, ", "next, ",
+            "open terminal", "run the following", "use the command",
+            "here's how", "here is how", "to do this",
+            "here are the steps", "follow these",
+        ]
+        return patterns.filter({ lower.contains($0) }).count >= 2
     }
 
     // MARK: - Complexity Classification
@@ -153,11 +238,19 @@ class AgentLoop {
         let lower = command.lowercased()
 
         if lower.hasPrefix("[deep research]") { return .deep }
-        if lower.hasPrefix("[browser visible]") || lower.hasPrefix("[browser background]") { return .complex }
+
+        // Browser tasks: classify based on actual task content, not the prefix.
+        // The browser_task tool handles its own multi-step automation internally —
+        // the outer agent just needs to call it once. Don't over-escalate.
+        if lower.hasPrefix("[browser visible]") || lower.hasPrefix("[browser background]") {
+            return .medium
+        }
 
         let complexIndicators = ["and then", "after that", "organize", "clean up",
                                  "research", "investigate", "compare", "analyze",
-                                 "set up", "configure", "build", "create a"]
+                                 "set up", "configure", "build", "create a",
+                                 "notion database", "notion tracker", "notion wiki",
+                                 "populate", "add entries", "fill in"]
         let matchCount = complexIndicators.filter { lower.contains($0) }.count
         if matchCount >= 2 { return .complex }
         if matchCount == 1 && lower.count > 60 { return .complex }
@@ -187,9 +280,13 @@ class AgentLoop {
         let estimatedTokens = messages.reduce(0) { $0 + (($1.content?.count ?? 0) / 4) }
         guard estimatedTokens > maxEstimatedTokens else { return }
 
-        // Keep: system message (first), last 8 messages (most recent context)
+        // Keep: system message (first), last 8 messages (most recent context), deduped
         let systemMessage = messages.first
-        let recentMessages = Array(messages.suffix(8))
+        // Drop the first element from suffix if it duplicates the system message
+        var recentMessages = Array(messages.suffix(8))
+        if let sys = systemMessage, recentMessages.first?.role == sys.role && recentMessages.first?.content == sys.content {
+            recentMessages.removeFirst()
+        }
         messages = (systemMessage != nil ? [systemMessage!] : []) + recentMessages
 
         let newEstimate = messages.reduce(0) { $0 + (($1.content?.count ?? 0) / 4) }
@@ -202,7 +299,8 @@ class AgentLoop {
         registry: ToolRegistry,
         toolName: String,
         arguments: String,
-        maxRetries: Int = 1
+        maxRetries: Int = 1,
+        trace: AgentTrace? = nil
     ) async -> String {
         for attempt in 0...maxRetries {
             do {
@@ -212,6 +310,11 @@ class AgentLoop {
                     let backoff = UInt64(pow(2.0, Double(attempt))) * 500_000_000
                     try? await Task.sleep(nanoseconds: backoff)
                     print("[Agent] Retry \(attempt + 1) for \(toolName): \(error.localizedDescription)")
+                    trace?.append(TraceEntry(kind: .retry(
+                        toolName: toolName,
+                        attempt: attempt + 1,
+                        reason: error.localizedDescription
+                    )))
                     continue
                 }
                 return "Error after \(maxRetries + 1) attempts: \(error.localizedDescription)"
@@ -228,7 +331,9 @@ class AgentLoop {
         registry: ToolRegistry,
         iteration: Int,
         maxIterations: Int,
-        onStateChange: @MainActor @escaping (InputBarState) -> Void
+        stage: AttentionStage = .fovea,
+        onStateChange: @MainActor @escaping (InputBarState) -> Void,
+        trace: AgentTrace? = nil
     ) async -> [ToolResult] {
         var allResults: [ToolResult] = []
         allResults.reserveCapacity(toolCalls.count)
@@ -244,7 +349,7 @@ class AgentLoop {
             if isUITool {
                 // Flush any pending parallel batch first
                 if !pendingBatch.isEmpty {
-                    let batchResults = await executeParallelBatch(pendingBatch, registry: registry)
+                    let batchResults = await executeParallelBatch(pendingBatch, registry: registry, stage: stage, trace: trace)
                     allResults.append(contentsOf: batchResults)
                     pendingBatch.removeAll()
                 }
@@ -256,13 +361,26 @@ class AgentLoop {
                     onStateChange(.executing(toolName: displayName, step: iteration + 1, total: maxIterations))
                 }
 
-                let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments)
+                let toolStart = CFAbsoluteTimeGetCurrent()
+                let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments, trace: trace)
+                let toolMs = (CFAbsoluteTimeGetCurrent() - toolStart) * 1000
                 print("[Agent] Result: \(result)")
-                allResults.append(ToolResult(callId: call.id, toolName: call.function.name, result: result))
+                let framed = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+                let sanitized = InputSanitizer.truncateForStage(toolName: call.function.name, result: framed, stage: stage)
 
-                // Apply delay for UI tools
+                trace?.append(TraceEntry(kind: .toolCall(
+                    name: call.function.name,
+                    arguments: call.function.arguments,
+                    result: result,
+                    durationMs: toolMs,
+                    success: !result.hasPrefix("Error")
+                ), durationMs: toolMs))
+                allResults.append(ToolResult(callId: call.id, toolName: call.function.name, result: sanitized))
+
+                // Apply delay for UI tools (halved in speed mode)
                 if let delay = toolDelays[call.function.name] {
-                    try? await Task.sleep(nanoseconds: delay)
+                    let effectiveDelay = speedMode ? max(delay / 2, 30_000_000) : delay
+                    try? await Task.sleep(nanoseconds: effectiveDelay)
                 }
             } else {
                 // Accumulate for parallel execution
@@ -278,7 +396,7 @@ class AgentLoop {
             await MainActor.run {
                 onStateChange(.executing(toolName: batchDisplay, step: iteration + 1, total: maxIterations))
             }
-            let batchResults = await executeParallelBatch(pendingBatch, registry: registry)
+            let batchResults = await executeParallelBatch(pendingBatch, registry: registry, stage: stage, trace: trace)
             allResults.append(contentsOf: batchResults)
         }
 
@@ -288,15 +406,28 @@ class AgentLoop {
     /// Execute a batch of independent tools in parallel using TaskGroup.
     static func executeParallelBatch(
         _ calls: [ToolCall],
-        registry: ToolRegistry
+        registry: ToolRegistry,
+        stage: AttentionStage = .fovea,
+        trace: AgentTrace? = nil
     ) async -> [ToolResult] {
         if calls.count == 1 {
             // Single tool — no need for TaskGroup overhead
             let call = calls[0]
             print("[Agent] Tool call: \(call.function.name)")
-            let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments)
+            let toolStart = CFAbsoluteTimeGetCurrent()
+            let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments, trace: trace)
+            let toolMs = (CFAbsoluteTimeGetCurrent() - toolStart) * 1000
             print("[Agent] Result: \(result)")
-            return [ToolResult(callId: call.id, toolName: call.function.name, result: result)]
+            let framed = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+            let sanitized = InputSanitizer.truncateForStage(toolName: call.function.name, result: framed, stage: stage)
+            trace?.append(TraceEntry(kind: .toolCall(
+                name: call.function.name,
+                arguments: call.function.arguments,
+                result: result,
+                durationMs: toolMs,
+                success: !result.hasPrefix("Error")
+            ), durationMs: toolMs))
+            return [ToolResult(callId: call.id, toolName: call.function.name, result: sanitized)]
         }
 
         print("[Agent] Parallel batch: \(calls.map(\.function.name).joined(separator: ", "))")
@@ -304,8 +435,19 @@ class AgentLoop {
         return await withTaskGroup(of: ToolResult.self) { group in
             for call in calls {
                 group.addTask {
-                    let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments)
-                    return ToolResult(callId: call.id, toolName: call.function.name, result: result)
+                    let toolStart = CFAbsoluteTimeGetCurrent()
+                    let result = await executeWithRetry(registry: registry, toolName: call.function.name, arguments: call.function.arguments, trace: trace)
+                    let toolMs = (CFAbsoluteTimeGetCurrent() - toolStart) * 1000
+                    let framed = InputSanitizer.frameToolResult(toolName: call.function.name, result: result)
+                    let sanitized = InputSanitizer.truncateForStage(toolName: call.function.name, result: framed, stage: stage)
+                    trace?.append(TraceEntry(kind: .toolCall(
+                        name: call.function.name,
+                        arguments: call.function.arguments,
+                        result: result,
+                        durationMs: toolMs,
+                        success: !result.hasPrefix("Error")
+                    ), durationMs: toolMs))
+                    return ToolResult(callId: call.id, toolName: call.function.name, result: sanitized)
                 }
             }
 
@@ -326,11 +468,15 @@ class AgentLoop {
         resolvedCommand: String,
         previousMessages: [ChatMessage],
         agent: AgentProfile? = nil,
+        stage: AttentionStage = .fovea,
+        resumeFromIteration: Int = 0,
         onStateChange: @MainActor @escaping (InputBarState) -> Void,
-        onComplete: @MainActor @escaping (_ displayMessage: String, _ filteredText: String, _ messages: [ChatMessage]) -> Void,
-        onError: @MainActor @escaping (String) -> Void
+        onComplete: @MainActor @escaping (_ displayMessage: String, _ filteredText: String, _ messages: [ChatMessage], _ trace: AgentTrace?) -> Void,
+        onError: @MainActor @escaping (_ message: String, _ trace: AgentTrace?) -> Void
     ) -> Task<Void, Never> {
         return Task.detached {
+            let trace = AgentTrace(goal: fullCommand)
+            let isResume = resumeFromIteration > 0
             do {
                 let manager = LLMServiceManager.shared
                 let registry = ToolRegistry.shared
@@ -338,9 +484,17 @@ class AgentLoop {
 
                 // Route document creation commands to the document-specific provider if configured
                 let isDocumentTask = Self.isDocumentCreationCommand(fullCommand)
-                let service: LLMServiceProtocol = (isDocumentTask && manager.hasDocumentOverride)
-                    ? manager.documentService
-                    : manager.currentService
+                let isMultimodal = Self.isMultimodalQuery(fullCommand)
+
+                let service: LLMServiceProtocol
+                if isDocumentTask && manager.hasDocumentOverride {
+                    service = manager.documentService
+                } else if isMultimodal && manager.hasMultimodalProvider {
+                    service = manager.multimodalService
+                    print("[Agent] Multimodal query detected — routing to \(manager.multimodalProviderName)")
+                } else {
+                    service = manager.currentService
+                }
 
                 // Transform browser choice prefix into LLM-friendly instruction
                 var effectiveCommand = fullCommand
@@ -366,15 +520,58 @@ class AgentLoop {
                 print("[Agent] Complexity: \(complexity), maxIter: \(maxIterations), maxTokens: \(maxTokens)")
 
                 // Build message chain — reuse previous for follow-ups
+                // IO-Aware Context Building (Flash Attention-inspired):
+                // Pre-stage all context segments in a contiguous buffer to avoid
+                // repeated string concatenation which causes O(n^2) memory copying.
+                let taskStartTime = CFAbsoluteTimeGetCurrent()
+
                 var messages: [ChatMessage]
                 if !previousMessages.isEmpty {
-                    messages = previousMessages
+                    // For follow-ups (parafovea), compress message history
+                    if stage == .parafovea {
+                        let compressed = ContextCompressor.compressHistory(
+                            previousMessages,
+                            maxMessages: stage.budget.maxHistoryMessages
+                        )
+                        messages = compressed
+                    } else {
+                        messages = previousMessages
+                    }
                     messages.append(ChatMessage(role: "user", content: effectiveCommand))
                 } else {
-                    var systemPrompt = manager.fullSystemPrompt(context: context, query: effectiveCommand)
-                    if let override = agent?.systemPromptOverride {
-                        systemPrompt += "\n\n" + override
+                    // Use ContextCompressor for stage-aware system prompt (Foveal Attention)
+                    let ctxBuffer = FlashAttentionUtils.ContextBuffer(estimatedSegments: 8)
+
+                    let basePrompt = await MainActor.run {
+                        manager.fullSystemPrompt(context: context, query: effectiveCommand, stage: stage)
                     }
+                    ctxBuffer.append(basePrompt)
+
+                    if let override = agent?.systemPromptOverride {
+                        ctxBuffer.append("\n\n" + override)
+                    }
+
+                    // Episode recall and learned rules only for foveal stage
+                    if stage == .fovea {
+                        let episodeContext = EpisodeRecall.promptSection(forGoal: effectiveCommand)
+                        if !episodeContext.isEmpty {
+                            ctxBuffer.append(episodeContext)
+                        }
+                        let rulesContext = LearningFeedbackLoop.promptSection()
+                        if !rulesContext.isEmpty {
+                            ctxBuffer.append(rulesContext)
+                        }
+                    }
+
+                    // Inject activated dormant context (Stage 5 → Stage 1 promotion)
+                    if stage == .fovea {
+                        let dormantSection = DormantContextManager.shared.activatedPromptSection(for: effectiveCommand)
+                        if !dormantSection.isEmpty {
+                            ctxBuffer.append(dormantSection)
+                        }
+                    }
+
+                    let systemPrompt = ctxBuffer.build()
                     messages = [
                         ChatMessage(role: "system", content: systemPrompt),
                         ChatMessage(role: "user", content: effectiveCommand)
@@ -382,6 +579,17 @@ class AgentLoop {
                 }
 
                 messages.reserveCapacity(messages.count + maxIterations * 3)
+
+                // Persist session for crash recovery (unless resuming — session already exists)
+                if !isResume {
+                    await MainActor.run {
+                        AgentSessionStore.shared.startSession(
+                            command: resolvedCommand,
+                            agentId: agent?.id ?? "general",
+                            messages: messages
+                        )
+                    }
+                }
 
                 // Planning phase for complex tasks
                 if complexity == .complex || complexity == .deep {
@@ -400,6 +608,8 @@ class AgentLoop {
                         maxTokens: 512
                     ), let plan = planResponse.text {
                         print("[Agent] Plan: \(plan)")
+                        trace.planOutput = plan
+                        trace.append(TraceEntry(kind: .planning(output: plan)))
                         await MainActor.run {
                             onStateChange(.planning(summary: String(plan.prefix(200))))
                         }
@@ -410,13 +620,14 @@ class AgentLoop {
 
                 var finalText = "Done."
 
-                // Sub-agent decomposition for complex tasks
+                // HostAgent decomposition: route complex tasks through AppAgents
                 if complexity == .complex || complexity == .deep {
                     let coordinator = SubAgentCoordinator()
                     if let subTasks = await coordinator.decompose(command: fullCommand, manager: manager) {
-                        print("[Agent] Decomposed into \(subTasks.count) sub-agents")
+                        print("[HostAgent] Decomposed into \(subTasks.count) AppAgents: \(subTasks.map { "\($0.id):\($0.targetApp ?? "general")" }.joined(separator: ", "))")
+                        trace.append(TraceEntry(kind: .subAgentDecomposition(taskCount: subTasks.count)))
                         await MainActor.run {
-                            onStateChange(.executing(toolName: "Coordinating \(subTasks.count) sub-agents", step: 0, total: subTasks.count))
+                            onStateChange(.executing(toolName: "Routing \(subTasks.count) sub-agents", step: 0, total: subTasks.count))
                         }
 
                         if let mergedResult = try? await coordinator.executeSubAgents(
@@ -424,6 +635,7 @@ class AgentLoop {
                             systemPrompt: manager.fullSystemPrompt(context: context, query: fullCommand),
                             manager: manager,
                             registry: registry,
+                            trace: trace,
                             onProgress: { desc, step, total in
                                 onStateChange(.executing(toolName: String(desc.prefix(40)), step: step, total: total))
                             }
@@ -432,7 +644,14 @@ class AgentLoop {
                             // Skip to post-processing
                             let filteredText = PersonalityEngine.shared.postFilterResponse(finalText)
                             HandoffService.shared.saveHandoff(command: resolvedCommand, response: finalText, appContext: context.frontmostApp)
-                            await MainActor.run { onComplete(filteredText, filteredText, messages) }
+                            trace.finalOutcome = .success
+                            trace.endTime = Date()
+                            await MainActor.run {
+                                AgentSessionStore.shared.complete(
+                                    result: filteredText, messages: messages, trace: trace
+                                )
+                                onComplete(filteredText, filteredText, messages, trace)
+                            }
                             return
                         }
                         // If decomposition execution failed, fall through to normal agent loop
@@ -451,14 +670,38 @@ class AgentLoop {
 
                     print("[Agent] Iteration \(iteration + 1)/\(maxIterations) — \(messages.count) messages")
 
+                    let llmStart = CFAbsoluteTimeGetCurrent()
                     let response = try await service.sendChatRequest(
                         messages: messages,
                         tools: tools,
                         maxTokens: maxTokens
                     )
+                    let llmMs = (CFAbsoluteTimeGetCurrent() - llmStart) * 1000
+
+                    trace.append(TraceEntry(kind: .llmCall(
+                        messageCount: messages.count,
+                        responseLength: response.text?.count ?? 0,
+                        hasToolCalls: response.toolCalls != nil && !(response.toolCalls?.isEmpty ?? true),
+                        reasoning: response.rawMessage.reasoning_content
+                    ), durationMs: llmMs))
 
                     guard let toolCalls = response.toolCalls, !toolCalls.isEmpty else {
-                        finalText = response.text ?? "Done."
+                        let text = response.text ?? "Done."
+
+                        // Nudge: if early iteration and LLM gave step-by-step instructions instead of
+                        // calling tools, retry once with an explicit "execute, don't instruct" message.
+                        if iteration <= 1 && Self.looksLikeInstructions(text) {
+                            print("[Agent] LLM gave instructions instead of tool calls — nudging to use tools")
+                            messages.append(response.rawMessage)
+                            messages.append(ChatMessage(
+                                role: "user",
+                                content: "Do NOT give me instructions or steps. You have tools available — use them to execute this task directly. " +
+                                         "For file processing, data manipulation, or scripting tasks, call the run_script tool. Execute now."
+                            ))
+                            continue
+                        }
+
+                        finalText = text
                         print("[Agent] Final response received (\(finalText.count) chars)")
                         break
                     }
@@ -472,7 +715,9 @@ class AgentLoop {
                         registry: registry,
                         iteration: iteration,
                         maxIterations: maxIterations,
-                        onStateChange: onStateChange
+                        stage: stage,
+                        onStateChange: onStateChange,
+                        trace: trace
                     )
 
                     // Append results as tool messages
@@ -510,11 +755,16 @@ class AgentLoop {
                             }
                         }
                     }
+
+                    // Checkpoint session to disk after each iteration (crash recovery)
+                    await MainActor.run {
+                        AgentSessionStore.shared.checkpoint(messages: messages, iteration: iteration)
+                    }
                 }
 
                 // Apply personality post-filter before display
                 let filteredText = PersonalityEngine.shared.postFilterResponse(finalText)
-                let displayMessage = filteredText
+                var displayMessage = filteredText
 
                 // Save to handoff
                 HandoffService.shared.saveHandoff(
@@ -533,13 +783,104 @@ class AgentLoop {
                     )
                 }
 
+                // Episode logging: record this task for future recall
+                let taskDuration = CFAbsoluteTimeGetCurrent() - taskStartTime
+                let hasError = finalText.lowercased().contains("error") || finalText.lowercased().contains("failed")
+                EpisodeLogger.shared.record(
+                    goal: resolvedCommand,
+                    plan: nil,
+                    messages: messages,
+                    finalOutcome: hasError ? .failure : .success,
+                    failureReason: hasError ? String(finalText.prefix(200)) : nil,
+                    durationSeconds: taskDuration
+                )
+
+                // Post-task self-evaluation for complex/deep tasks (max 2 retries)
+                if complexity == .complex || complexity == .deep {
+                    let taskType = PostTaskEvaluator.classifyTaskType(fullCommand, messages: messages)
+                    if case .general = taskType {
+                        // Skip evaluation for general tasks
+                    } else {
+                        for retryAttempt in 0..<2 {
+                            let evaluation = await PostTaskEvaluator.shared.evaluate(
+                                goal: fullCommand, result: finalText, taskType: taskType
+                            )
+                            trace.append(TraceEntry(kind: .selfEvaluation(
+                                passed: !evaluation.shouldRetry,
+                                feedback: evaluation.feedback
+                            )))
+                            guard evaluation.shouldRetry else {
+                                if !evaluation.passed && !evaluation.feedback.isEmpty {
+                                    finalText += "\n\n[Self-check: \(evaluation.feedback)]"
+                                }
+                                break
+                            }
+
+                            print("[Agent] Self-evaluation failed (attempt \(retryAttempt + 1)): \(evaluation.feedback)")
+                            await MainActor.run {
+                                onStateChange(.executing(toolName: "Self-checking...", step: retryAttempt + 1, total: 2))
+                            }
+
+                            // Inject feedback and retry
+                            messages.append(ChatMessage(role: "user", content: "Your output had issues: \(evaluation.feedback)\nPlease fix these issues."))
+
+                            if let retryResponse = try? await service.sendChatRequest(
+                                messages: messages, tools: tools, maxTokens: maxTokens
+                            ) {
+                                if let retryCalls = retryResponse.toolCalls, !retryCalls.isEmpty {
+                                    messages.append(retryResponse.rawMessage)
+                                    let retryResults = await Self.executeToolCalls(
+                                        retryCalls, registry: registry,
+                                        iteration: 0, maxIterations: 3,
+                                        onStateChange: onStateChange,
+                                        trace: trace
+                                    )
+                                    for r in retryResults {
+                                        messages.append(ChatMessage(role: "tool", content: r.result, tool_call_id: r.callId))
+                                    }
+                                }
+                                if let retryText = retryResponse.text, !retryText.isEmpty {
+                                    finalText = retryText
+                                }
+                            }
+                        }
+                        // Re-apply personality filter after any retry
+                        let refiltered = PersonalityEngine.shared.postFilterResponse(finalText)
+                        displayMessage = refiltered
+                    }
+                }
+
+                trace.finalOutcome = .success
+                trace.endTime = Date()
                 await MainActor.run {
-                    onComplete(displayMessage, filteredText, messages)
+                    AgentSessionStore.shared.complete(
+                        result: filteredText,
+                        richResultRaw: displayMessage != filteredText ? displayMessage : nil,
+                        messages: messages,
+                        trace: trace
+                    )
+                    AICursorManager.shared.stopAIControl()
+                    onComplete(displayMessage, filteredText, messages, trace)
                 }
             } catch {
-                if Task.isCancelled { return }
+                if Task.isCancelled {
+                    trace.finalOutcome = .cancelled
+                    trace.endTime = Date()
+                    await MainActor.run {
+                        AgentSessionStore.shared.cancel()
+                    }
+                    return
+                }
+                trace.finalOutcome = .failure(error.localizedDescription)
+                trace.endTime = Date()
+                trace.append(TraceEntry(kind: .error(
+                    source: "AgentLoop",
+                    message: error.localizedDescription
+                )))
                 await MainActor.run {
-                    onError(error.localizedDescription)
+                    AgentSessionStore.shared.fail(error: error.localizedDescription, trace: trace)
+                    AICursorManager.shared.stopAIControl()
+                    onError(error.localizedDescription, trace)
                 }
             }
         }

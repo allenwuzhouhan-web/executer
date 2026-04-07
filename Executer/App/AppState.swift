@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 class AppState: ObservableObject {
     @Published var inputBarVisible = false
     @Published var inputBarState: InputBarState = .idle
@@ -15,6 +16,7 @@ class AppState: ObservableObject {
     private var currentTask: Task<Void, Never>?
     private var conversationMessages: [ChatMessage] = []
     private var lastCommandTime: Date = .distantPast
+    private var pendingResumeSession: AgentSession?
 
     private var inputBarPanel: InputBarPanel?
     private var notchWindow: NotchWindow?
@@ -75,7 +77,106 @@ class AppState: ObservableObject {
         voiceIntegration.delegate = self
         voiceIntegration.setup()
 
+        // Restore conversation from last session (enables follow-ups after restart)
+        restoreLastSession()
+
+        AutonomousPillarBootstrap.initialize()
+
         print("[AppState] setup() complete")
+    }
+
+    // MARK: - Session Persistence
+
+    /// Restore conversation state from the last persisted session.
+    private func restoreLastSession() {
+        let store = AgentSessionStore.shared
+
+        // Check for interrupted session — agent was running when app quit
+        if let interrupted = store.findInterruptedSession() {
+            pendingResumeSession = interrupted
+            print("[AppState] Found interrupted session: \(interrupted.command.prefix(60))")
+        }
+
+        // Restore conversation messages from last session for follow-up continuity
+        if let messages = store.lastSessionMessages() {
+            conversationMessages = messages
+            lastCommandTime = Date() // allow follow-up window
+            print("[AppState] Restored \(messages.count) conversation messages from previous session")
+        }
+    }
+
+    /// Resume an agent that was interrupted by app quit.
+    /// Called when the user opens the input bar and there's a pending resume.
+    func checkForInterruptedAgent() {
+        guard let session = pendingResumeSession else { return }
+        pendingResumeSession = nil
+
+        // Only resume if session is less than 10 minutes old
+        guard Date().timeIntervalSince(session.updatedAt) < 600 else {
+            AgentSessionStore.shared.dismissInterrupted(session)
+            return
+        }
+
+        // Show the interrupted session's state as a thought recall
+        let recall = ThoughtRecall(
+            thoughtId: 0,
+            appBundleId: "com.allenwu.executer",
+            appName: "Executer",
+            windowTitle: nil,
+            textPreview: String(session.command.prefix(200)),
+            summary: "This task was interrupted when the app closed. Tap to resume.",
+            timeElapsed: Date().timeIntervalSince(session.updatedAt),
+            timestamp: session.updatedAt
+        )
+        inputBarState = .thoughtRecall(recall)
+    }
+
+    /// Actually resume execution of an interrupted session.
+    func resumeInterruptedSession() {
+        let store = AgentSessionStore.shared
+        guard let interrupted = store.findInterruptedSession() else { return }
+        let resumed = store.resumeSession(interrupted)
+
+        // Restore agent profile
+        if let agent = AgentRegistry.shared.profile(for: resumed.agentId) {
+            currentAgent = agent
+        }
+
+        inputBarState = .processing
+        let agentProfile: AgentProfile? = resumed.agentId == "general" ? nil : currentAgent
+
+        currentTask = agentLoop.execute(
+            fullCommand: resumed.command,
+            resolvedCommand: resumed.command,
+            previousMessages: resumed.messages,
+            agent: agentProfile,
+            resumeFromIteration: resumed.lastIteration,
+            onStateChange: { [weak self] state in
+                self?.inputBarState = state
+            },
+            onComplete: { [weak self] displayMessage, filteredText, messages, trace in
+                let parsed = ResponseParser.parse(displayMessage)
+                switch parsed {
+                case .text:
+                    self?.inputBarState = .result(message: displayMessage, trace: trace)
+                default:
+                    self?.inputBarState = .richResult(result: parsed, rawMessage: displayMessage, trace: trace)
+                }
+                self?.resultText = filteredText
+                self?.conversationMessages = messages
+                self?.lastCommandTime = Date()
+                CommandHistory.shared.add(command: resumed.command, result: filteredText)
+            },
+            onError: { [weak self] errorMessage, trace in
+                self?.inputBarState = .error(message: errorMessage, trace: trace)
+                self?.resultText = errorMessage
+            }
+        )
+    }
+
+    /// Mark any running session as interrupted (called on app termination).
+    func persistRunningSession() {
+        AgentSessionStore.shared.markRunningAsInterrupted()
     }
 
     // MARK: - Voice
@@ -148,7 +249,17 @@ class AppState: ObservableObject {
 
     /// The app the user was in BEFORE opening the input bar.
     /// Captured here because once the bar opens, Executer becomes frontmost.
-    var lastFrontmostAppName: String = ""
+    var lastFrontmostAppName: String = "" {
+        didSet { AppState.lastCapturedAppName = lastFrontmostAppName }
+    }
+
+    /// Thread-safe static copy for cross-thread access (read by LLMProvider from background).
+    private nonisolated(unsafe) static let _lastCapturedAppNameLock = NSLock()
+    private nonisolated(unsafe) static var _lastCapturedAppName: String = ""
+    nonisolated(unsafe) static var lastCapturedAppName: String {
+        get { _lastCapturedAppNameLock.lock(); defer { _lastCapturedAppNameLock.unlock() }; return _lastCapturedAppName }
+        set { _lastCapturedAppNameLock.lock(); defer { _lastCapturedAppNameLock.unlock() }; _lastCapturedAppName = newValue }
+    }
 
     func showInputBar() {
         guard !inputBarVisible else { return }
@@ -162,6 +273,18 @@ class AppState: ObservableObject {
         contextualNudge = nil
         inputBarPanel?.showBar()
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+
+        // Check for interrupted agent session (takes priority over everything)
+        if pendingResumeSession != nil {
+            checkForInterruptedAgent()
+            return  // Don't check thoughts/nudges — interrupted session is showing
+        }
+
+        // Check for pending coworking suggestion (takes priority over thought recall)
+        if let suggestion = CoworkerAgent.shared.pendingSuggestion() {
+            inputBarState = .coworkingSuggestion(suggestion)
+            return
+        }
 
         // Check for abandoned thoughts (async — only shows if user hasn't started typing)
         Task {
@@ -235,21 +358,51 @@ class AppState: ObservableObject {
 
     // MARK: - Browser Detection
 
-    private static let browserKeywords: [String] = [
-        "fill form", "fill out", "log in to", "login to", "sign up on", "sign in to",
-        "book a", "book on", "order from", "order on", "purchase", "checkout",
-        "add to cart", "submit form", "automate web", "go to", "navigate to",
-        "browse to", "on the website", "on the site", "using the browser",
+    // Lookup/research/transaction tasks → prompt Watch/Background
+    private static let browserLookupKeywords: [String] = [
+        // Research & lookup
+        "look up", "search for", "find out", "find information",
+        "find reviews", "find the best", "find prices", "compare",
+        "check availability", "check the price", "research",
+        // Form-filling & transactions
+        "fill form", "fill out", "log in to", "login to",
+        "sign up on", "sign in to", "book a", "book on",
+        "order from", "order on", "purchase", "checkout",
+        "add to cart", "submit form", "automate web",
+        "on the website", "on the site", "using the browser",
     ]
 
+    // Simple navigation → skip prompt, let WebCommandMatcher handle it
+    private static let simpleNavPrefixes: [String] = [
+        "go to ", "navigate to ", "browse to ", "open ",
+    ]
+
+    /// Detects browser tasks that are complex enough to warrant asking Watch/Background.
+    /// Simple browser tasks (search, navigate+search, open a site) just execute immediately as visible.
     private func looksLikeBrowserTask(_ command: String) -> Bool {
         let lower = command.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        // Must contain a browser-like keyword + a URL or site reference
-        let hasBrowserKeyword = Self.browserKeywords.contains { lower.contains($0) }
+
+        // Simple navigation? Don't prompt — WebCommandMatcher handles these
+        if Self.simpleNavPrefixes.contains(where: { lower.hasPrefix($0) }) {
+            return false
+        }
+
+        let hasLookupKeyword = Self.browserLookupKeywords.contains { lower.contains($0) }
         let hasSiteReference = lower.contains(".com") || lower.contains(".org") || lower.contains(".net")
             || lower.contains("http") || lower.contains("website") || lower.contains("site")
-            || lower.contains("page") || lower.contains("browser")
-        return hasBrowserKeyword && hasSiteReference
+            || lower.contains("browser") || lower.contains("online")
+
+        guard hasLookupKeyword && hasSiteReference else { return false }
+
+        // Only prompt for genuinely complex multi-step workflows (transactions, forms, multi-page).
+        // Simple search/lookup tasks should just execute immediately without asking.
+        let complexBrowserIndicators = [
+            "fill", "submit", "log in", "login", "sign in", "sign up", "register",
+            "checkout", "check out", "purchase", "buy", "add to cart", "payment",
+            "book ", "booking", "automate", "form", "multi-page", "multiple pages",
+            "download", "upload",
+        ]
+        return complexBrowserIndicators.contains(where: { lower.contains($0) })
     }
 
     /// Called when user picks Watch or Background from the browser choice buttons.
@@ -263,6 +416,11 @@ class AppState: ObservableObject {
 
     func submitCommand(_ command: String) {
         guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        // Clear previous browser trail on new command
+        Task { @MainActor in
+            BrowserTrailStore.shared.currentTrail = []
+        }
 
         // Handle internal commands (not user-facing)
         if command.hasPrefix("__internal_") {
@@ -290,7 +448,7 @@ class AppState: ObservableObject {
             return
         }
 
-        // If it looks like a browser task, ask user if they want to watch
+        // If it looks like a complex browser task, ask user if they want to watch
         if !isFollowUp && looksLikeBrowserTask(resolvedCommand) {
             inputBarState = .browserChoice(query: resolvedCommand)
             return
@@ -431,9 +589,25 @@ class AppState: ObservableObject {
         }
     }
 
+    /// Execute a command directly via the AgentLoop, bypassing research/browser/local routing.
+    /// Used for internal command sources (coworking suggestions, scheduled tasks) where the
+    /// command is already a well-formed multi-step instruction for the agent.
+    func executeDirectCommand(_ command: String) {
+        guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        Task { @MainActor in
+            BrowserTrailStore.shared.currentTrail = []
+        }
+        lastSubmittedPrompt = command
+        inputBarState = .processing
+        executeCommand(command)
+    }
+
     private func executeCommand(_ resolvedCommand: String, isFollowUp: Bool = false) {
         currentTask?.cancel()
         let previousMessages = isFollowUp ? conversationMessages : []
+
+        // Foveal Attention: determine stage based on follow-up status + complexity
+        let stage = FovealRouter.stageForUserCommand(isFollowUp: isFollowUp, command: resolvedCommand)
 
         // Inject attached file contents into the command
         let fileContext = attachedFiles.map { $0.formattedForPrompt }.joined(separator: "\n\n")
@@ -448,30 +622,69 @@ class AppState: ObservableObject {
             fullCommand = resolvedCommand
         }
 
+        // Route to Computer Use Agent for tasks requiring autonomous screen control
+        if ComputerUseDetector.shouldUseComputerControl(fullCommand) {
+            let currentApp = NSWorkspace.shared.frontmostApplication?.localizedName
+            let config: ComputerUseAgent.Config
+
+            // Check for specialized task profiles first
+            if let profile = TaskProfileRouter.route(command: fullCommand, currentApp: currentApp) {
+                config = profile.config
+                print("[AppState] Using task profile: \(profile.name)")
+            } else {
+                let perceptionMode = ComputerUseDetector.perceptionMode(for: fullCommand)
+                config = ComputerUseAgent.Config(
+                    maxIterations: 50,
+                    perceptionMode: perceptionMode,
+                    useVisionLLM: perceptionMode == .axPlusScreenshot || perceptionMode == .screenshotOnly
+                )
+            }
+
+            ComputerUseAgent.shared.start(
+                goal: fullCommand,
+                config: config,
+                onStateChange: { [weak self] state in
+                    self?.inputBarState = state
+                },
+                onComplete: { [weak self] result in
+                    self?.inputBarState = .result(message: result)
+                    self?.resultText = result
+                    self?.lastCommandTime = Date()
+                    CommandHistory.shared.add(command: resolvedCommand, result: result)
+                },
+                onError: { [weak self] errorMessage in
+                    self?.inputBarState = .error(message: errorMessage)
+                    self?.resultText = errorMessage
+                }
+            )
+            return
+        }
+
         currentTask = agentLoop.execute(
             fullCommand: fullCommand,
             resolvedCommand: resolvedCommand,
             previousMessages: previousMessages,
             agent: currentAgent.id == "general" ? nil : currentAgent,
+            stage: stage,
             onStateChange: { [weak self] state in
                 self?.inputBarState = state
             },
-            onComplete: { [weak self] displayMessage, filteredText, messages in
+            onComplete: { [weak self] displayMessage, filteredText, messages, trace in
                 // Parse for structured display (dates, events, news, lists)
                 let parsed = ResponseParser.parse(displayMessage)
                 switch parsed {
                 case .text:
-                    self?.inputBarState = .result(message: displayMessage)
+                    self?.inputBarState = .result(message: displayMessage, trace: trace)
                 default:
-                    self?.inputBarState = .richResult(result: parsed, rawMessage: displayMessage)
+                    self?.inputBarState = .richResult(result: parsed, rawMessage: displayMessage, trace: trace)
                 }
                 self?.resultText = filteredText
                 self?.conversationMessages = messages
                 self?.lastCommandTime = Date()
                 CommandHistory.shared.add(command: resolvedCommand, result: filteredText)
             },
-            onError: { [weak self] errorMessage in
-                self?.inputBarState = .error(message: errorMessage)
+            onError: { [weak self] errorMessage, trace in
+                self?.inputBarState = .error(message: errorMessage, trace: trace)
                 self?.resultText = errorMessage
             }
         )

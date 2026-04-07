@@ -75,29 +75,24 @@ class ThoughtRecallService {
         return recall
     }
 
-    // MARK: - Generate Completion
+    // MARK: - Build Finish Task Prompt
 
-    func generateCompletion(for recall: ThoughtRecall) async -> String? {
-        // Get fuller text from DB
-        guard let thought = db.mostRecentForApp(bundleId: recall.appBundleId) else { return nil }
-        let text = String(thought.textContent.prefix(2000))
+    /// Builds a rich task description for the AgentLoop so it can use tools to finish the user's work.
+    func buildFinishTaskPrompt(for recall: ThoughtRecall) -> String {
+        let thought = db.mostRecentForApp(bundleId: recall.appBundleId)
+        let text = thought.map { String($0.textContent.prefix(2000)) } ?? recall.textPreview
+        let windowContext = recall.windowTitle.map { " (window: \($0))" } ?? ""
 
-        let prompt = "Continue and complete the following text that the user was writing in \(recall.appName). Return ONLY the continuation text, nothing else:\n\n\(text)"
+        return """
+        [finish task] The user was working in \(recall.appName)\(windowContext) and left this unfinished. \
+        Open \(recall.appName), navigate to where they left off, and complete the task using the appropriate tools. \
+        Do NOT just generate text — actually interact with the app to finish the work.
 
-        do {
-            let messages = [
-                ChatMessage(role: "user", content: prompt)
-            ]
-            let response = try await LLMServiceManager.shared.currentService.sendChatRequest(
-                messages: messages,
-                tools: nil,
-                maxTokens: 500
-            )
-            return response.text
-        } catch {
-            print("[ThoughtRecall] Completion failed: \(error)")
-            return nil
-        }
+        What they were doing: \(recall.summary)
+
+        Their work so far:
+        \(text)
+        """
     }
 
     // MARK: - Mark Complete

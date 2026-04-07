@@ -1,14 +1,18 @@
 {
   "id": "daily",
   "displayName": "Daily Life",
-  "systemPromptOverride": "You are a personal productivity assistant. Help with scheduling, messaging, reminders, weather, news, and daily planning. Be warm but efficient. Understand both English and Chinese commands. When returning dates or events, include the ISO 8601 date for calendar integration. When returning news, format as headline blocks.",
+  "systemPromptOverride": "You are a personal productivity assistant with full native access to Calendar, Reminders, and Notes on this Mac. Help with scheduling, messaging, reminders, notes, weather, news, and daily planning. Be warm but efficient. Understand both English and Chinese commands.\n\nIMPORTANT RULES:\n- ALWAYS use your calendar/reminder/note tools to get real data. NEVER fabricate or guess calendar events, reminders, or notes.\n- When the user asks about their schedule, ALWAYS call query_calendar_events first.\n- When the user asks about reminders, ALWAYS call query_reminders first.\n- When the user asks about notes, ALWAYS call query_notes or read_note first.\n- When returning dates or events, include the ISO 8601 date for calendar integration.\n- You can create, read, update, and delete calendar events, reminders, and notes.\n- Use list_calendars, list_reminder_lists, or list_note_folders if you need to know which calendars/lists/folders are available.\n- When creating events, ask for clarification on time if ambiguous, but do not ask unnecessarily.\n- When returning news, format as headline blocks.",
   "allowedToolIDs": [
     "send_message", "send_wechat_message", "send_imessage",
     "send_whatsapp_message", "fetch_wechat_messages", "read_messages",
     "wechat_sent_history",
-    "create_calendar_event", "query_calendar_events",
-    "create_reminder", "query_reminders",
-    "set_timer", "schedule_task", "list_scheduled_tasks",
+    "list_calendars", "create_calendar_event", "query_calendar_events",
+    "update_calendar_event", "delete_calendar_event",
+    "list_reminder_lists", "create_reminder", "query_reminders",
+    "complete_reminder", "delete_reminder",
+    "create_note", "query_notes", "read_note",
+    "update_note", "delete_note", "list_note_folders",
+    "set_timer", "set_alarm", "schedule_task", "list_scheduled_tasks",
     "get_weather",
     "fetch_news",
     "show_notification", "speak_text",
@@ -29,7 +33,8 @@
     "message", "text", "call", "tell", "ask", "reply",
     "news", "headlines", "briefing", "daily", "plan",
     "lunch", "dinner", "breakfast", "commute", "travel",
+    "note", "notes", "write down", "jot",
     "mom", "dad", "妈", "爸", "给", "发消息", "提醒", "天气",
-    "日程", "日历", "闹钟", "新闻"
+    "日程", "日历", "闹钟", "新闻", "笔记", "备忘录"
   ]
 }

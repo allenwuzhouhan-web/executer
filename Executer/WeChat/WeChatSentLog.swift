@@ -15,7 +15,7 @@ class WeChatSentLog {
     private var entries: [Entry] = []
 
     private let storageURL: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         let dir = appSupport.appendingPathComponent("Executer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("wechat_sent_log.json")

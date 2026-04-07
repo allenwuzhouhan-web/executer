@@ -5,6 +5,7 @@ struct ResultBubbleView: View {
     let message: String
     let isError: Bool
     let onDismiss: () -> Void
+    var trace: AgentTrace? = nil
 
     @State private var isSpeaking = false
     @State private var showCopied = false
@@ -12,6 +13,7 @@ struct ResultBubbleView: View {
     @State private var typewriterText = ""
     @State private var typewriterTimer: Timer?
     @State private var autoDismissTask: Task<Void, Never>?
+    @State private var showTraceSheet = false
 
     // Speech synthesizer for read-aloud (shared instance to avoid re-creation)
     private static let synthesizer = NSSpeechSynthesizer()
@@ -52,8 +54,36 @@ struct ResultBubbleView: View {
                 .frame(maxHeight: 200)
 
                 // Action buttons
-                if !isError {
-                    VStack(spacing: 4) {
+                VStack(spacing: 4) {
+                    // Dismiss
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 18, height: 18)
+                            .liquidGlassCircle()
+                    }
+                    .buttonStyle(.plain)
+                    .help("Dismiss")
+
+                    // View Details / trace info button
+                    if trace != nil {
+                        Button {
+                            showTraceSheet = true
+                        } label: {
+                            Image(systemName: isError ? "exclamationmark.magnifyingglass" : "info.circle")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(isError ? .red : .secondary)
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(isError ? "View error details" : "View execution trace")
+                    }
+
+                    if !isError {
                         // Read aloud
                         Button {
                             toggleSpeech(message)
@@ -81,16 +111,13 @@ struct ResultBubbleView: View {
                         .buttonStyle(.plain)
                         .help("Copy response")
                     }
-                    .padding(.top, 1)
                 }
+                .padding(.top, 1)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background {
-            VisualEffectBackground(material: .popover, blendingMode: .behindWindow)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .liquidGlass(cornerRadius: 12, tint: isError ? .red : nil)
         .overlay {
             // Rainbow glow border — outside clipShape so the glow bleeds outward
             if !isError {
@@ -98,8 +125,15 @@ struct ResultBubbleView: View {
                     .allowsHitTesting(false)
             }
         }
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
         .padding(.top, 6)
+        .sheet(isPresented: $showTraceSheet) {
+            if let trace = trace {
+                AgentTraceCard(trace: trace, onDismiss: { showTraceSheet = false })
+                    .frame(width: 400, height: 500)
+                    .padding()
+            }
+        }
         .onHover { hovering in
             isHoveringResult = hovering
         }

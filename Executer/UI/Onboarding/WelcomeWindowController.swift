@@ -5,7 +5,7 @@ class WelcomeWindowController {
     private var window: NSWindow?
 
     func show(completion: @escaping () -> Void) {
-        let view = WelcomeView(onComplete: { [weak self] in
+        let view = OnboardingView(onComplete: { [weak self] in
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.3
                 self?.window?.animator().alphaValue = 0
@@ -20,7 +20,7 @@ class WelcomeWindowController {
 
         let hostingView = NSHostingView(rootView: view)
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 520),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false

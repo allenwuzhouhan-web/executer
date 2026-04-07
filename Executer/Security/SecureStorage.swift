@@ -5,9 +5,11 @@ import CryptoKit
 enum SecureStorage {
     /// Cached key — avoids 5-10ms Keychain round-trip on every crypto operation.
     private static var cachedKey: SymmetricKey?
+    private static let keyLock = NSLock()
 
     /// Derive (or create) an AES-256 encryption key stored in Keychain.
     private static func getOrCreateKey() -> SymmetricKey {
+        keyLock.lock(); defer { keyLock.unlock() }
         if let cached = cachedKey { return cached }
         let keyLabel = "com.executer.storage-key"
         if let existing = KeychainHelper.load(key: keyLabel) {

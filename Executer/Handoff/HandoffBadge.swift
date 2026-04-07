@@ -23,7 +23,7 @@ struct HandoffBadge: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: visible)
-        .onChange(of: handoffService.lastSyncStatus) { newStatus in
+        .onChange(of: handoffService.lastSyncStatus) { _, newStatus in
             switch newStatus {
             case .synced, .savedLocally:
                 visible = true

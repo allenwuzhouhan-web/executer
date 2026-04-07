@@ -83,7 +83,7 @@ enum DeviceSerial {
         _ = KeychainHelper.save(key: keychainKey, data: data)
 
         // Store in encrypted file (secondary, for integrity verification)
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let fileURL = dir.appendingPathComponent(serialFileName)
@@ -93,7 +93,7 @@ enum DeviceSerial {
     }
 
     private static func loadFromEncryptedFile() -> String? {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer", isDirectory: true)
         let fileURL = dir.appendingPathComponent(serialFileName)
 

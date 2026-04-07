@@ -23,7 +23,7 @@ final class DesignRefinementStore {
     private static let maxRefinements = 50
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         storageURL = appSupport.appendingPathComponent("Executer/design_refinements.json")
         load()
     }

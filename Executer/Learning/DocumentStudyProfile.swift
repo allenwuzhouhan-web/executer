@@ -100,7 +100,7 @@ final class DocumentStudyStore {
     private(set) var profiles: [DocumentStudyProfile] = []
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupport = URL.applicationSupportDirectory
         storageDir = appSupport.appendingPathComponent("Executer/trained_documents", isDirectory: true)
         try? FileManager.default.createDirectory(at: storageDir, withIntermediateDirectories: true)
         loadAll()
@@ -164,7 +164,7 @@ final class DocumentStudyStore {
                 }
 
                 // Load design philosophy from design_language.json if available
-                let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                let appSupport = URL.applicationSupportDirectory
                 let execDir = appSupport.appendingPathComponent("Executer")
                 let globalDesign = execDir.appendingPathComponent("design_language.json")
                 if let data = try? Data(contentsOf: globalDesign),
@@ -195,11 +195,30 @@ final class DocumentStudyStore {
                             lines.append("- Shadows: \(shadowUse), Gradients: \(gradientUse)")
                         }
                     }
+
+                    // Inject visual effects details
+                    if let ve = json["visual_effects"] as? [String: Any] {
+                        if let hasShadows = ve["has_shadows"] as? Bool, hasShadows,
+                           let style = ve["shadow_style"] as? [String: Any] {
+                            let blur = style["blur_pt"] as? Double ?? 4
+                            let offset = style["offset_pt"] as? Double ?? 2
+                            let alpha = style["alpha_pct"] as? Double ?? 25
+                            lines.append("- Shadow style: blur \(blur)pt, offset \(offset)pt, \(alpha)% opacity — the engine reproduces this exactly")
+                        }
+                        if let hasRounded = ve["has_rounded_corners"] as? Bool, hasRounded,
+                           let radius = ve["corner_radius_pct"] as? Double {
+                            lines.append("- Corner radius: \(radius)% — rounded corners applied automatically by the engine")
+                        }
+                        if let angles = ve["gradient_angles"] as? [Int], !angles.isEmpty {
+                            lines.append("- Gradient direction: \(angles.map { "\($0)°" }.joined(separator: ", "))")
+                        }
+                    }
                 }
 
                 lines.append("\nWhen creating presentations, use create_presentation with the JSON spec format.")
-                lines.append("The PPT engine will auto-apply the saved design language (fonts, colors, layout).")
+                lines.append("The PPT engine will auto-apply the saved design language (fonts, colors, layout, shadows, corner radius).")
                 lines.append("CRITICAL: Match the user's design philosophy above. If they use minimal/clean design, do NOT over-decorate.")
+                lines.append("Think like Apple: every element serves a purpose. No decoration without function. Generous whitespace. Typography does the heavy lifting.")
             }
         }
 

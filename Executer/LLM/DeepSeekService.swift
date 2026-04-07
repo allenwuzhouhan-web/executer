@@ -13,12 +13,18 @@ struct ChatMessage: Codable {
     let tool_call_id: String?
     let reasoning_content: String?
 
-    init(role: String, content: String?, tool_calls: [ToolCall]? = nil, tool_call_id: String? = nil, reasoning_content: String? = nil) {
+    /// Multimodal content blocks for vision LLMs (text + image).
+    /// When set, AnthropicService uses these instead of plain `content`.
+    /// Not serialized — only used for in-memory message passing.
+    var contentBlocks: [[String: Any]]?
+
+    init(role: String, content: String?, tool_calls: [ToolCall]? = nil, tool_call_id: String? = nil, reasoning_content: String? = nil, contentBlocks: [[String: Any]]? = nil) {
         self.role = role
         self.content = content
         self.tool_calls = tool_calls
         self.tool_call_id = tool_call_id
         self.reasoning_content = reasoning_content
+        self.contentBlocks = contentBlocks
     }
 
     // Custom decoder: tolerate unknown fields, missing optional fields, and type mismatches.
@@ -38,6 +44,9 @@ struct ChatMessage: Codable {
 
         // reasoning_content: DeepSeek-specific, other APIs won't have it
         reasoning_content = try? container.decodeIfPresent(String.self, forKey: .reasoning_content)
+
+        // contentBlocks is not serialized — only used in-memory
+        contentBlocks = nil
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -183,7 +192,10 @@ class OpenAICompatibleService: LLMServiceProtocol {
             throw ExecuterError.apiError("No API key configured. Open Settings to enter your \(provider.config.displayName) API key.")
         }
 
-        var request = URLRequest(url: URL(string: baseURL)!)
+        guard let url = URL(string: baseURL) else {
+            throw ExecuterError.apiError("Invalid API URL for \(provider.config.displayName).")
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -248,6 +260,16 @@ class OpenAICompatibleService: LLMServiceProtocol {
             throw ExecuterError.apiError("No response choices")
         }
 
+        // Track API usage for cost budgeting
+        if let usage = decoded.usage {
+            CostTracker.shared.record(
+                provider: provider.rawValue,
+                inputTokens: usage.prompt_tokens,
+                outputTokens: usage.completion_tokens,
+                agentId: CostTracker.shared.activeAgentId
+            )
+        }
+
         // Use content if available; fall back to reasoning_content for thinking models (DeepSeek-R1, Kimi)
         let text = (choice.message.content?.isEmpty == false ? choice.message.content : nil)
             ?? choice.message.reasoning_content
@@ -263,10 +285,18 @@ class OpenAICompatibleService: LLMServiceProtocol {
         AsyncThrowingStream { [self] continuation in
             Task {
                 do {
-                    var request = URLRequest(url: URL(string: provider.config.baseURL)!)
+                    guard let apiKey = APIKeyManager.shared.getKey(for: provider) else {
+                        continuation.finish(throwing: ExecuterError.apiError("No API key configured for \(provider.config.displayName)."))
+                        return
+                    }
+                    guard let url = URL(string: provider.config.baseURL) else {
+                        continuation.finish(throwing: ExecuterError.apiError("Invalid API URL for \(provider.config.displayName)."))
+                        return
+                    }
+                    var request = URLRequest(url: url)
                     request.httpMethod = "POST"
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    request.setValue("Bearer \(APIKeyManager.shared.getKey(for: provider) ?? "")", forHTTPHeaderField: "Authorization")
+                    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
                     request.timeoutInterval = 120
                     if provider == .kimiCN || provider == .kimi {
                         request.setValue("claude-code/1.0", forHTTPHeaderField: "User-Agent")

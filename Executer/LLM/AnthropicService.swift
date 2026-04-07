@@ -16,7 +16,10 @@ class AnthropicService: LLMServiceProtocol {
             throw ExecuterError.apiError("No API key configured. Open Settings to enter your Claude API key.")
         }
 
-        var request = URLRequest(url: URL(string: baseURL)!)
+        guard let url = URL(string: baseURL) else {
+            throw ExecuterError.apiError("Invalid Anthropic API URL.")
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue(anthropicVersion, forHTTPHeaderField: "anthropic-version")
@@ -133,8 +136,13 @@ class AnthropicService: LLMServiceProtocol {
                 continue
             }
 
-            // Regular user message
-            anthropicMessages.append(["role": msg.role, "content": msg.content ?? ""])
+            // Regular user message — check for multimodal content blocks
+            if let blocks = msg.contentBlocks, !blocks.isEmpty {
+                // Multimodal message with text + image
+                anthropicMessages.append(["role": msg.role, "content": blocks])
+            } else {
+                anthropicMessages.append(["role": msg.role, "content": msg.content ?? ""])
+            }
             i += 1
         }
 

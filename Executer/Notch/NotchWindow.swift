@@ -8,9 +8,12 @@ class NotchWindow: NSPanel {
     private var glowView: NotchGlowView!
     private var isHovered = false
     private var learningDot: LearningDotView!
+    private var suggestionDot: SuggestionDotView!
     private var isDragHovered = false
     private var originalFrame: CGRect = .zero
     private let filletRadius: CGFloat = 6
+    /// Extra width on each side of the physical notch to house indicator dots
+    private let dotSideExtend: CGFloat = 10
 
     init(onClick: (() -> Void)? = nil) {
         self.onClick = onClick
@@ -63,11 +66,30 @@ class NotchWindow: NSPanel {
         learningDot.alphaValue = 0
         container.addSubview(learningDot)
 
+        // Coworking suggestion indicator: amber dot on left side of notch
+        suggestionDot = SuggestionDotView(frame: CGRect(x: 0, y: 0, width: 6, height: 6))
+        suggestionDot.alphaValue = 0
+        container.addSubview(suggestionDot)
+
         // Observe learning state
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(learningStateChanged(_:)),
             name: .learningStateChanged,
+            object: nil
+        )
+
+        // Observe coworking suggestion state
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(coworkingSuggestionChanged(_:)),
+            name: .coworkingSuggestionAvailable,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(coworkingSuggestionDismissed(_:)),
+            name: .coworkingSuggestionDismissed,
             object: nil
         )
 
@@ -86,19 +108,49 @@ class NotchWindow: NSPanel {
             orderOut(nil)
             return
         }
-        setFrame(notchRect, display: true)
 
-        // Learning dot: right side of notch, vertically centered, outside the Apple notch cutout
+        // Extend the window on both sides to create space for indicator dots.
+        // The fillet ears need space too, so total extension = dotSideExtend + filletRadius per side.
+        let fr = filletRadius
+        let extendedFrame = CGRect(
+            x: notchRect.origin.x - dotSideExtend - fr,
+            y: notchRect.origin.y,
+            width: notchRect.width + (dotSideExtend + fr) * 2,
+            height: notchRect.height
+        )
+        setFrame(extendedFrame, display: true)
+
+        // Always show the black notch shape so the side extensions are visible
+        blackView.alphaValue = 1
+
+        // Position dots concentric with the bottom rounded corners of the notch shape.
+        // The notch shape's bottom-left arc center is at (fr + cr, cr) in view coords,
+        // and bottom-right arc center is at (width - fr - cr, cr).
         let dotSize: CGFloat = 6
+        let bottomRadius: CGFloat = 14
+        let cr = min(bottomRadius, extendedFrame.height / 2, (extendedFrame.width - fr * 2) / 2)
+        let arcCenterY = cr
+
+        // Suggestion dot (left): concentric with left bottom rounded corner
+        let leftArcCenterX = fr + cr
+        suggestionDot.frame = CGRect(
+            x: leftArcCenterX - dotSize / 2,
+            y: arcCenterY - dotSize / 2,
+            width: dotSize,
+            height: dotSize
+        )
+
+        // Learning dot (right): concentric with right bottom rounded corner
+        let rightArcCenterX = extendedFrame.width - fr - cr
         learningDot.frame = CGRect(
-            x: notchRect.width - dotSize - 8,
-            y: (notchRect.height - dotSize) / 2,
+            x: rightArcCenterX - dotSize / 2,
+            y: arcCenterY - dotSize / 2,
             width: dotSize,
             height: dotSize
         )
 
         if !isHovered {
-            originalFrame = notchRect
+            originalFrame = extendedFrame
         }
     }
 
@@ -107,17 +159,16 @@ class NotchWindow: NSPanel {
         isHovered = hovering
 
         if hovering {
-            // Expand: sides by 5px, down by 5px, extra width for fillet ears
+            blackView.cancelRetraction()
+
+            // Expand further from the already-extended base frame
             let expand: CGFloat = 5
-            let fr = filletRadius
             let expanded = CGRect(
-                x: originalFrame.origin.x - expand - fr,
+                x: originalFrame.origin.x - expand,
                 y: originalFrame.origin.y - expand,
-                width: originalFrame.width + (expand + fr) * 2,
+                width: originalFrame.width + expand * 2,
                 height: originalFrame.height + expand
             )
-
-            blackView.alphaValue = 1
 
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.3
@@ -125,13 +176,12 @@ class NotchWindow: NSPanel {
                 animator().setFrame(expanded, display: true)
             }
         } else {
-            // Shrink first, THEN fade black — never show transparent expanded notch
+            // Animate back to the base (dot-extended) frame.
+            // BlackView stays visible; its shape mask updates via layout.
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.25
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 animator().setFrame(originalFrame, display: true)
-            } completionHandler: { [weak self] in
-                self?.blackView.alphaValue = 0
             }
         }
     }
@@ -141,17 +191,17 @@ class NotchWindow: NSPanel {
         isDragHovered = hovering
 
         if hovering {
-            // Expand notch and show rainbow glow silhouette
+            blackView.cancelRetraction()
+
+            // Expand further from the base frame and show rainbow glow
             let expand: CGFloat = 8
-            let fr = filletRadius
             let expanded = CGRect(
-                x: originalFrame.origin.x - expand - fr,
+                x: originalFrame.origin.x - expand,
                 y: originalFrame.origin.y - expand,
-                width: originalFrame.width + (expand + fr) * 2,
+                width: originalFrame.width + expand * 2,
                 height: originalFrame.height + expand
             )
 
-            blackView.alphaValue = 1
             glowView.alphaValue = 1
             glowView.startPulsing()
 
@@ -167,7 +217,6 @@ class NotchWindow: NSPanel {
                 context.duration = 0.25
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 animator().setFrame(originalFrame, display: true)
-                blackView.animator().alphaValue = 0
                 glowView.animator().alphaValue = 0
             }
         }
@@ -185,6 +234,20 @@ class NotchWindow: NSPanel {
         }
     }
 
+    @objc private func coworkingSuggestionChanged(_ notification: Notification) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.5
+            suggestionDot.animator().alphaValue = 1.0
+        }
+    }
+
+    @objc private func coworkingSuggestionDismissed(_ notification: Notification) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.3
+            suggestionDot.animator().alphaValue = 0.0
+        }
+    }
+
     override var canBecomeKey: Bool { false }
 
     deinit {
@@ -197,17 +260,99 @@ class NotchWindow: NSPanel {
 class NotchShapeView: NSView {
     private let bottomRadius: CGFloat = 14
     private let filletRadius: CGFloat = 6
+    private let shapeMask = CAShapeLayer()
+    private var isAnimatingMask = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
+        layer?.mask = shapeMask
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override func layout() {
         super.layout()
+        if !isAnimatingMask {
+            updateShapeMask()
+        }
+    }
+
+    /// Generate the notch-shaped path within the given rect.
+    func notchPath(in rect: CGRect) -> CGPath {
+        let w = rect.width
+        let h = rect.height
+        let cr = min(bottomRadius, h / 2, (w - filletRadius * 2) / 2)
+        let fr = filletRadius
+
+        let bodyLeft = rect.minX + fr
+        let bodyRight = rect.maxX - fr
+        let bottom = rect.minY
+        let top = rect.maxY
+
+        let path = CGMutablePath()
+
+        path.move(to: CGPoint(x: bodyLeft, y: bottom + cr))
+
+        path.addArc(
+            center: CGPoint(x: bodyLeft + cr, y: bottom + cr),
+            radius: cr, startAngle: .pi, endAngle: 3 * .pi / 2, clockwise: false
+        )
+
+        path.addLine(to: CGPoint(x: bodyRight - cr, y: bottom))
+
+        path.addArc(
+            center: CGPoint(x: bodyRight - cr, y: bottom + cr),
+            radius: cr, startAngle: 3 * .pi / 2, endAngle: 0, clockwise: false
+        )
+
+        path.addLine(to: CGPoint(x: bodyRight, y: top - fr))
+
+        path.addArc(
+            center: CGPoint(x: rect.maxX, y: top - fr),
+            radius: fr, startAngle: .pi, endAngle: .pi / 2, clockwise: true
+        )
+
+        path.addLine(to: CGPoint(x: rect.minX, y: top))
+
+        path.addArc(
+            center: CGPoint(x: rect.minX, y: top - fr),
+            radius: fr, startAngle: .pi / 2, endAngle: 0, clockwise: true
+        )
+
+        path.addLine(to: CGPoint(x: bodyLeft, y: bottom + cr))
+
+        path.closeSubpath()
+        return path
+    }
+
+    /// Animate the mask from current full-bounds shape to a collapsed rect.
+    func animateRetraction(to collapsedRect: CGRect, duration: CFTimeInterval, completion: @escaping () -> Void) {
+        let fromPath = notchPath(in: bounds)
+        let toPath = notchPath(in: collapsedRect)
+
+        isAnimatingMask = true
+        shapeMask.path = toPath
+
+        let anim = CABasicAnimation(keyPath: "path")
+        anim.fromValue = fromPath
+        anim.duration = duration
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            self?.isAnimatingMask = false
+            completion()
+        }
+        shapeMask.add(anim, forKey: "retract")
+        CATransaction.commit()
+    }
+
+    /// Cancel any running mask retraction and reset to full bounds.
+    func cancelRetraction() {
+        shapeMask.removeAnimation(forKey: "retract")
+        isAnimatingMask = false
         updateShapeMask()
     }
 
@@ -215,63 +360,7 @@ class NotchShapeView: NSView {
         let w = bounds.width
         let h = bounds.height
         guard w > 0, h > 0 else { return }
-
-        let cr = min(bottomRadius, h / 2, (w - filletRadius * 2) / 2)
-        let fr = filletRadius
-
-        // The body (main rectangle) is inset from each side by the fillet radius.
-        // The fillets at the top extend to the full view width.
-        let bodyLeft = fr
-        let bodyRight = w - fr
-
-        let path = CGMutablePath()
-
-        // Start at bottom-left of body, above the corner
-        path.move(to: CGPoint(x: bodyLeft, y: cr))
-
-        // Bottom-left convex rounded corner
-        path.addArc(
-            center: CGPoint(x: bodyLeft + cr, y: cr),
-            radius: cr, startAngle: .pi, endAngle: 3 * .pi / 2, clockwise: false
-        )
-
-        // Bottom edge
-        path.addLine(to: CGPoint(x: bodyRight - cr, y: 0))
-
-        // Bottom-right convex rounded corner
-        path.addArc(
-            center: CGPoint(x: bodyRight - cr, y: cr),
-            radius: cr, startAngle: 3 * .pi / 2, endAngle: 0, clockwise: false
-        )
-
-        // Right side going up to where the fillet starts
-        path.addLine(to: CGPoint(x: bodyRight, y: h - fr))
-
-        // Top-right concave fillet (outward ear)
-        // Curves from (bodyRight, h - fr) outward to (w, h)
-        path.addArc(
-            center: CGPoint(x: w, y: h - fr),
-            radius: fr, startAngle: .pi, endAngle: .pi / 2, clockwise: true
-        )
-
-        // Top edge (flush with screen top)
-        path.addLine(to: CGPoint(x: 0, y: h))
-
-        // Top-left concave fillet (outward ear)
-        // Curves from (0, h) inward to (bodyLeft, h - fr)
-        path.addArc(
-            center: CGPoint(x: 0, y: h - fr),
-            radius: fr, startAngle: .pi / 2, endAngle: 0, clockwise: true
-        )
-
-        // Left side going down
-        path.addLine(to: CGPoint(x: bodyLeft, y: cr))
-
-        path.closeSubpath()
-
-        let mask = CAShapeLayer()
-        mask.path = path
-        layer?.mask = mask
+        shapeMask.path = notchPath(in: bounds)
     }
 }
 
@@ -438,6 +527,42 @@ class LearningDotView: NSView {
         pulse.values = [0.5, 1.0, 0.5]
         pulse.keyTimes = [0, 0.5, 1.0]
         pulse.duration = 3.0
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        pulse.repeatCount = .infinity
+        dotLayer.add(pulse, forKey: "pulse")
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        dotLayer.frame = bounds
+    }
+}
+
+// MARK: - Coworking suggestion indicator dot (warm amber, left side)
+
+class SuggestionDotView: NSView {
+    private let dotLayer = CALayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+
+        // Warm amber color — visually distinct from teal learning dot
+        dotLayer.backgroundColor = NSColor(hue: 0.08, saturation: 0.5, brightness: 1.0, alpha: 0.8).cgColor
+        dotLayer.cornerRadius = 3
+        dotLayer.shadowColor = NSColor(hue: 0.08, saturation: 0.6, brightness: 1.0, alpha: 1.0).cgColor
+        dotLayer.shadowRadius = 4
+        dotLayer.shadowOpacity = 0.6
+        dotLayer.shadowOffset = .zero
+        layer?.addSublayer(dotLayer)
+
+        // Gentle pulse (slightly faster than learning dot to draw attention)
+        let pulse = CAKeyframeAnimation(keyPath: "opacity")
+        pulse.values = [0.4, 1.0, 0.4]
+        pulse.keyTimes = [0, 0.5, 1.0]
+        pulse.duration = 2.0
         pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         pulse.repeatCount = .infinity
         dotLayer.add(pulse, forKey: "pulse")

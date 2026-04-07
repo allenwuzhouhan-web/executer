@@ -13,11 +13,13 @@ def discover_swift_files():
     """Walk Executer/ and return (relative_path, group_name) for every .swift file."""
     result = []
     base = "Executer"
+    # Directories to exclude: unfinished/WIP code not ready for compilation
+    exclude_dirs = {'.', 'ObservationEngine'}
     for dirpath, dirnames, filenames in os.walk(base):
-        # Skip hidden dirs and build artifacts
-        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+        dirnames[:] = [d for d in dirnames if d not in exclude_dirs and not d.startswith('.')]
+        exclude_files = {'PillarIntegration.swift'}
         for f in sorted(filenames):
-            if f.endswith(".swift"):
+            if f.endswith(".swift") and f not in exclude_files:
                 full = os.path.join(dirpath, f)
                 rel = os.path.relpath(full, base)  # e.g. "App/AppDelegate.swift"
                 # Group = first directory component, or "App" for top-level files
@@ -257,6 +259,18 @@ TARGET_RELEASE = gen_id("config_target_release")
 PROJECT_CONFIG_LIST = gen_id("configlist_project")
 TARGET_CONFIG_LIST = gen_id("configlist_target")
 
+# Local Swift Package references
+local_packages = [
+    ("ComputerLib", "../computer"),  # (product_name, relative_path)
+]
+pkg_ref_ids = {}
+pkg_product_ids = {}
+pkg_build_ids = {}
+for pkg_name, _ in local_packages:
+    pkg_ref_ids[pkg_name] = gen_id(f"pkgref_{pkg_name}")
+    pkg_product_ids[pkg_name] = gen_id(f"pkgproduct_{pkg_name}")
+    pkg_build_ids[pkg_name] = gen_id(f"pkgbuild_{pkg_name}")
+
 # Framework references and build files
 frameworks = [
     ("EventKit.framework", "System/Library/Frameworks"),
@@ -266,6 +280,7 @@ frameworks = [
     ("IOBluetooth.framework", "System/Library/Frameworks"),
     ("AVFoundation.framework", "System/Library/Frameworks"),
     ("Vision.framework", "System/Library/Frameworks"),
+    ("Speech.framework", "System/Library/Frameworks"),
 ]
 fw_refs = {}
 fw_builds = {}
@@ -295,6 +310,8 @@ for path, group in resource_files:
     lines.append(f'\t\t{json_builds[path]} /* {name} in Resources */ = {{isa = PBXBuildFile; fileRef = {json_refs[path]} /* {name} */; }};')
 for fw_name, _ in frameworks:
     lines.append(f'\t\t{fw_builds[fw_name]} /* {fw_name} in Frameworks */ = {{isa = PBXBuildFile; fileRef = {fw_refs[fw_name]} /* {fw_name} */; }};')
+for pkg_name, _ in local_packages:
+    lines.append(f'\t\t{pkg_build_ids[pkg_name]} /* {pkg_name} in Frameworks */ = {{isa = PBXBuildFile; productRef = {pkg_product_ids[pkg_name]} /* {pkg_name} */; }};')
 lines.append('/* End PBXBuildFile section */')
 
 # PBXFileReference
@@ -324,6 +341,8 @@ lines.append('\t\t\tbuildActionMask = 2147483647;')
 lines.append('\t\t\tfiles = (')
 for fw_name, _ in frameworks:
     lines.append(f'\t\t\t\t{fw_builds[fw_name]} /* {fw_name} in Frameworks */,')
+for pkg_name, _ in local_packages:
+    lines.append(f'\t\t\t\t{pkg_build_ids[pkg_name]} /* {pkg_name} in Frameworks */,')
 lines.append('\t\t\t);')
 lines.append('\t\t\trunOnlyForDeploymentPostprocessing = 0;')
 lines.append('\t\t};')
@@ -482,6 +501,11 @@ lines.append('\t\t\t);')
 lines.append('\t\t\tdependencies = (')
 lines.append('\t\t\t);')
 lines.append('\t\t\tname = Executer;')
+if local_packages:
+    lines.append('\t\t\tpackageProductDependencies = (')
+    for pkg_name, _ in local_packages:
+        lines.append(f'\t\t\t\t{pkg_product_ids[pkg_name]} /* {pkg_name} */,')
+    lines.append('\t\t\t);')
 lines.append('\t\t\tproductName = Executer;')
 lines.append(f'\t\t\tproductReference = {PRODUCT_REF} /* Executer.app */;')
 lines.append('\t\t\tproductType = "com.apple.product-type.application";')
@@ -502,6 +526,11 @@ lines.append('\t\t\t\ten,')
 lines.append('\t\t\t\tBase,')
 lines.append('\t\t\t);')
 lines.append(f'\t\t\tmainGroup = {groups["root"]};')
+if local_packages:
+    lines.append('\t\t\tpackageReferences = (')
+    for pkg_name, _ in local_packages:
+        lines.append(f'\t\t\t\t{pkg_ref_ids[pkg_name]} /* XCLocalSwiftPackageReference "{pkg_name}" */,')
+    lines.append('\t\t\t);')
 lines.append(f'\t\t\tproductRefGroup = {groups["Products"]} /* Products */;')
 lines.append('\t\t\tprojectDirPath = "";')
 lines.append('\t\t\tprojectRoot = "";')
@@ -667,6 +696,28 @@ lines.append('\t\t\tdefaultConfigurationIsVisible = 0;')
 lines.append('\t\t\tdefaultConfigurationName = Release;')
 lines.append('\t\t};')
 lines.append('/* End XCConfigurationList section */')
+
+# XCLocalSwiftPackageReference
+if local_packages:
+    lines.append('')
+    lines.append('/* Begin XCLocalSwiftPackageReference section */')
+    for pkg_name, pkg_path in local_packages:
+        lines.append(f'\t\t{pkg_ref_ids[pkg_name]} /* XCLocalSwiftPackageReference "{pkg_name}" */ = {{')
+        lines.append('\t\t\tisa = XCLocalSwiftPackageReference;')
+        lines.append(f'\t\t\trelativePath = {pkg_path};')
+        lines.append('\t\t};')
+    lines.append('/* End XCLocalSwiftPackageReference section */')
+
+# XCSwiftPackageProductDependency
+if local_packages:
+    lines.append('')
+    lines.append('/* Begin XCSwiftPackageProductDependency section */')
+    for pkg_name, _ in local_packages:
+        lines.append(f'\t\t{pkg_product_ids[pkg_name]} /* {pkg_name} */ = {{')
+        lines.append('\t\t\tisa = XCSwiftPackageProductDependency;')
+        lines.append(f'\t\t\tproductName = {pkg_name};')
+        lines.append('\t\t};')
+    lines.append('/* End XCSwiftPackageProductDependency section */')
 
 lines.append('\t};')
 lines.append(f'\trootObject = {PROJECT_ID} /* Project object */;')

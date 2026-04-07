@@ -19,7 +19,7 @@ enum WeeklyDigestGenerator {
     static func generate(endDate: Date = Date()) -> WeeklySummary? {
         let calendar = Calendar.current
         let fm = FileManager.default
-        let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer/daily_summaries", isDirectory: true)
 
         let dateFormatter = DateFormatter()

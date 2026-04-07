@@ -49,11 +49,11 @@ extension InputBarView {
             return partial
         case .thoughtRecall:
             return humor.isEnabled ? "Oh hey, you're back!" : "Welcome back"
-        case .result(let msg):
+        case .result(let msg, _):
             return humor.isEnabled ? humor.funnyResult(msg) : msg
-        case .richResult(_, let raw):
+        case .richResult(_, let raw, _):
             return humor.isEnabled ? humor.funnyResult(raw) : raw
-        case .error(let msg): return msg
+        case .error(let msg, _): return msg
         case .healthCard(let msg): return msg
         default: return ""
         }
@@ -75,6 +75,7 @@ extension InputBarView {
         case .error: return "xmark.circle.fill"
         case .healthCard: return "heart.circle.fill"
         case .newsBriefing: return "newspaper.fill"
+        case .coworkingSuggestion: return "person.2.fill"
         case .idle: return "sparkle"
         }
     }

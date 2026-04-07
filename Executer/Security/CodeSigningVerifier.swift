@@ -56,6 +56,11 @@ enum CodeSigningVerifier {
         let signingIdentity = signingInfo["id"] as? String
 
         // Check team ID if we have an expected one
+        #if !DEBUG
+        if expectedTeamID == nil {
+            print("[Security] WARNING: expectedTeamID is nil — team ID verification is disabled in release build")
+        }
+        #endif
         if let expected = expectedTeamID {
             if teamID != expected {
                 return Result(valid: false, teamID: teamID, signingIdentity: signingIdentity,

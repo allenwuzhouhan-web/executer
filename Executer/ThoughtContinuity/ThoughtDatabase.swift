@@ -20,7 +20,7 @@ final class ThoughtDatabase {
     private let queue = DispatchQueue(label: "com.executer.thoughtdb", qos: .utility)
 
     private init() {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = URL.applicationSupportDirectory
             .appendingPathComponent("Executer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dbPath = dir.appendingPathComponent("thoughts.db").path

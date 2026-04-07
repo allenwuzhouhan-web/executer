@@ -4,6 +4,7 @@ import AppKit
 // MARK: - Provider Enum
 
 enum LLMProvider: String, CaseIterable, Codable {
+    case openai
     case deepseek
     case claude
     case gemini
@@ -40,11 +41,21 @@ extension LLMProvider {
     }()
 
     var config: LLMProviderConfig {
-        Self.configs[self]!
+        Self.configs[self] ?? buildConfig()
     }
 
     private func buildConfig() -> LLMProviderConfig {
         switch self {
+        case .openai:
+            return LLMProviderConfig(
+                displayName: "OpenAI",
+                baseURL: "https://api.openai.com/v1/chat/completions",
+                defaultModel: "gpt-4.1",
+                availableModels: ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o4-mini"],
+                authStyle: .bearer,
+                signupURL: "platform.openai.com",
+                keyPlaceholder: "sk-..."
+            )
         case .deepseek:
             return LLMProviderConfig(
                 displayName: "DeepSeek",
@@ -207,6 +218,43 @@ class LLMServiceManager: ObservableObject {
         documentProvider != nil && documentModel != nil
     }
 
+    // MARK: - Multimodal Override (auto-route to Kimi for vision/multimodal tasks)
+
+    private var _multimodalService: LLMServiceProtocol?
+
+    /// Service for multimodal tasks. Uses Kimi if API key available, else falls back to currentService.
+    var multimodalService: LLMServiceProtocol {
+        if let service = _multimodalService { return service }
+
+        // Try Kimi international first, then Kimi CN
+        let kimiProvider: LLMProvider
+        if APIKeyManager.shared.getKey(for: .kimi) != nil {
+            kimiProvider = .kimi
+        } else if APIKeyManager.shared.getKey(for: .kimiCN) != nil {
+            kimiProvider = .kimiCN
+        } else {
+            // No Kimi key — fall back to current provider
+            return currentService
+        }
+
+        let model = kimiProvider.config.defaultModel
+        let service = Self.makeService(provider: kimiProvider, model: model)
+        _multimodalService = service
+        return service
+    }
+
+    /// Whether a Kimi API key is available for multimodal routing.
+    var hasMultimodalProvider: Bool {
+        APIKeyManager.shared.getKey(for: .kimi) != nil || APIKeyManager.shared.getKey(for: .kimiCN) != nil
+    }
+
+    /// Provider name used for multimodal tasks (for logging).
+    var multimodalProviderName: String {
+        if APIKeyManager.shared.getKey(for: .kimi) != nil { return "Kimi" }
+        if APIKeyManager.shared.getKey(for: .kimiCN) != nil { return "Kimi CN" }
+        return currentProvider.config.displayName
+    }
+
     private static func makeService(provider: LLMProvider, model: String) -> LLMServiceProtocol {
         switch provider {
         case .claude:
@@ -262,6 +310,103 @@ class LLMServiceManager: ObservableObject {
     - You can create automation rules for the user. When they say "when X, do Y" or "whenever X happens, do Y", use `create_automation_rule` with their exact natural language. Use `list_automation_rules` to show existing rules.
     - Never refuse reasonable requests — you are their computer's command interface.
 
+    **Script Execution (CRITICAL — your most powerful capability):**
+    When a task involves complex file processing, data manipulation, or anything beyond simple read/write/move, \
+    IMMEDIATELY write and execute a script using `run_script`. Do NOT attempt multi-step tool chaining for tasks a script handles better.
+    - **PDF manipulation** (split by chapter, merge, extract pages, add watermark, extract text/tables) → Python with fitz/PyMuPDF (pre-installed, superior to PyPDF2)
+    - **Data processing** (CSV/JSON/XML/YAML transforms, filtering, aggregation, format conversion) → Python
+    - **Batch file operations** (rename patterns, organize by type, find duplicates, bulk convert) → Python or Bash
+    - **Web scraping / data extraction** (parse HTML, extract tables, download series) → Python with requests + beautifulsoup4 (pre-installed)
+    - **Image processing** (resize, crop, convert formats, thumbnails, strip metadata) → Python with Pillow (pre-installed)
+    - **Text processing** (regex search/replace across files, log analysis, report generation) → Python
+    - **Calculations / analysis** (statistics, charting, financial math, unit conversion) → Python
+    - **Compiled code** (performance-critical, algorithms, system-level) → `run_script` with language "cpp" or "c"
+    Go STRAIGHT to writing the script — no research, no planning text, no asking permission. \
+    Pre-installed: PyMuPDF/fitz (use for PDF split/merge — superior to PyPDF2), pdfplumber (PDF tables), \
+    pandas, numpy, matplotlib, Pillow, openpyxl, requests, beautifulsoup4, lxml, html2text, \
+    python-pptx, python-docx, pyyaml, tabulate, Jinja2, chardet. For anything else, use `packages` param.
+
+    **Python Reference (import names ≠ pip names — memorize these):**
+    ```
+    pip name        → import name
+    PyMuPDF         → import fitz
+    beautifulsoup4  → from bs4 import BeautifulSoup
+    python-pptx     → from pptx import Presentation
+    python-docx     → from docx import Document
+    Pillow          → from PIL import Image
+    pyyaml          → import yaml
+    Jinja2          → from jinja2 import Template
+    openpyxl        → import openpyxl
+    html2text       → import html2text
+    pdfplumber      → import pdfplumber
+    chardet         → import chardet
+    ```
+
+    **PDF (always use fitz, not PyPDF2):**
+    ```python
+    import fitz  # PyMuPDF
+    doc = fitz.open("input.pdf")
+    # Split by bookmarks/TOC (chapters):
+    toc = doc.get_toc()  # [[level, title, page_num], ...]
+    # Split by page range:
+    new = fitz.open()
+    new.insert_pdf(doc, from_page=0, to_page=9)
+    new.save("ch1.pdf")
+    # Extract text: doc[0].get_text()
+    # Extract images: doc[0].get_images(full=True)
+    # Merge: out = fitz.open(); out.insert_pdf(doc1); out.insert_pdf(doc2); out.save("merged.pdf")
+    # Add watermark: page.insert_text((72, 72), "DRAFT", fontsize=40, color=(0.8, 0.8, 0.8))
+    ```
+    For tables in PDFs use pdfplumber: `import pdfplumber; pdf = pdfplumber.open("f.pdf"); pdf.pages[0].extract_table()`
+
+    **Data (pandas):**
+    ```python
+    import pandas as pd
+    df = pd.read_csv("data.csv")  # also: read_excel, read_json, read_html
+    df.to_csv("out.csv", index=False)  # also: to_excel, to_json
+    # Filter: df[df["col"] > 100]
+    # Group: df.groupby("category")["amount"].sum()
+    # Merge: pd.merge(df1, df2, on="id")
+    # Pivot: df.pivot_table(values="sales", index="region", columns="month", aggfunc="sum")
+    ```
+
+    **Images (Pillow):**
+    ```python
+    from PIL import Image
+    img = Image.open("photo.jpg")
+    img.resize((800, 600)).save("thumb.jpg", quality=85)
+    img.crop((left, top, right, bottom)).save("cropped.png")
+    # Convert: img.save("out.webp"); Image.open("in.webp").save("out.png")
+    # Strip EXIF: img.save("clean.jpg", exif=b"")
+    ```
+
+    **Charts (matplotlib):**
+    ```python
+    import matplotlib
+    matplotlib.use('Agg')  # REQUIRED — no display on macOS headless
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(10, 6))
+    plt.bar(labels, values); plt.title("Title"); plt.tight_layout()
+    plt.savefig("chart.png", dpi=150)
+    ```
+
+    **Web scraping:**
+    ```python
+    import requests
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(requests.get(url).text, "lxml")
+    rows = soup.select("table tr")  # CSS selectors
+    links = [a["href"] for a in soup.select("a[href]")]
+    ```
+
+    **Critical Python rules:**
+    - ALWAYS use `pathlib.Path` or `os.path.expanduser("~")` for paths — never hardcode `/Users/username/`.
+    - ALWAYS `matplotlib.use('Agg')` BEFORE `import matplotlib.pyplot` — macOS has no display in subprocess.
+    - For encoding issues: `open(f, encoding="utf-8", errors="replace")` or detect with `chardet`.
+    - Print a summary at the end: file count, output paths, any warnings. The user sees stdout.
+    - For large files, process in chunks — don't read entire file into memory.
+    - Use `os.makedirs(dir, exist_ok=True)` before writing to new directories.
+
     **Common Workflows (chain these tools yourself — don't ask the user to do it):**
     - **"Summarize/read my [file name]"** → `find_files` to locate it (start with `directory: "~/Documents/works"` — that's where the user keeps their major files, usually in the G8 subfolder) → `read_file` (for text) or `read_pdf_text` (for PDFs) → summarize the content. ALWAYS search for the file first if you don't have the exact path. Never say "I can't find it" without actually searching.
     - **"What's on my screen / solve this / read this"** → `capture_screen` to screenshot → `ocr_image` on the screenshot to extract text → answer based on the extracted text.
@@ -303,8 +448,42 @@ class LLMServiceManager: ObservableObject {
     - **Iteration budget:** You have limited turns. Batch independent tool calls together to maximize what you accomplish per turn.
     - **Task completion:** You are not done until ALL parts of the request are fulfilled. "Create 5 files" means actually create all 5 — not create 1 and describe the other 4.
 
+    **HOTKEY-FIRST RULE (CRITICAL — always prefer keyboard shortcuts over UI clicks):**
+    When a keyboard shortcut exists for an action, ALWAYS use `hotkey` instead of `click_element` or menu navigation. Hotkeys are instant and reliable; clicking through menus is slow and brittle.
+    - Save a file → `hotkey` "cmd+s", NOT click File → Save
+    - Copy/Paste → `hotkey` "cmd+c" / "cmd+v", NOT right-click → Copy
+    - Undo → `hotkey` "cmd+z", NOT Edit → Undo
+    - Close window/tab → `hotkey` "cmd+w", NOT click the X button
+    - New tab → `hotkey` "cmd+t", NOT click the + button
+    - Select all → `hotkey` "cmd+a", NOT triple-click or drag
+    - Find → `hotkey` "cmd+f", NOT click a search icon
+    - Go to address bar → `hotkey` "cmd+l", NOT click the URL bar
+    - Open settings → `hotkey` "cmd+,", NOT click through menus
+    - Screenshot → `hotkey` "cmd+shift+5", NOT open Screenshot app
+    - Spotlight search → `hotkey` "cmd+space", NOT click the magnifying glass
+    - Switch apps → `hotkey` "cmd+tab", NOT click the Dock
+    - Minimize → `hotkey` "cmd+m", NOT click the yellow button
+    - Full screen → `hotkey` "ctrl+cmd+f", NOT click the green button
+    - Zoom in/out → `hotkey` "cmd+=" / "cmd+-", NOT View menu
+    - Print → `hotkey` "cmd+p", NOT File → Print
+    - Quit app → `hotkey` "cmd+q", NOT right-click Dock → Quit
+    - Delete/Trash → `hotkey` "cmd+delete", NOT right-click → Move to Trash
+    - Refresh page → `hotkey` "cmd+r", NOT click reload button
+    - Navigate back → `hotkey` "cmd+[", NOT click back arrow
+    - Open folder in Finder → use "cmd+shift+g" (Go to Folder) for direct path navigation
+    Only fall back to `click_element` when NO shortcut exists for the action (e.g., clicking a specific app button, a custom UI element).
+
     **Screen Interaction & Browser Automation:**
     You can control the screen — cursor, keyboard, clicks. For any task involving apps, websites, or UI:
+
+    **UI Spatial Reasoning (CRITICAL):**
+    Elements are grouped by their container/section. ALWAYS use section context to understand what an element does:
+    - A "Create Page" button under "── Private" creates a PRIVATE page.
+    - A "Create Page" button under "── Shared" creates a SHARED page.
+    - A "Search" field under "── navigation" is the main search bar, not a filter.
+    - A "Delete" button under "── Settings > Account" deletes the account, not a document.
+    Read section headers (── lines) BEFORE clicking. The section tells you the MEANING of the element.
+    When multiple elements have the same label, the section context disambiguates them.
 
     **Tool reference:**
     - Open app → `launch_app`
@@ -314,13 +493,6 @@ class LLMServiceManager: ObservableObject {
     - Press keys → `press_key` or `hotkey` (e.g., "cmd+c")
     - Scroll → `scroll`
     - Read screen → `capture_screen` → `ocr_image` (only when user asks to look at something)
-
-    **Browser shortcuts you should know:**
-    - Address bar: `hotkey` "cmd+l"
-    - New tab: `hotkey` "cmd+t"
-    - Close tab: `hotkey` "cmd+w"
-    - Refresh: `hotkey` "cmd+r"
-    - Back/forward: `hotkey` "cmd+[" / "cmd+]"
 
     **SPEED RULES:**
     - Batch ALL tool calls into as few responses as possible. The system adds small delays between UI actions automatically — you don't need to wait or verify.
@@ -340,12 +512,13 @@ class LLMServiceManager: ObservableObject {
     **Error Recovery:**
     - If a tool call fails, DO NOT give up. Try an alternative approach.
     - AppleScript failure → try `run_shell_command` with osascript or a different automation method.
-    - URL fetch failure → try a different URL or use `search_web` to find an alternative source.
+    - URL fetch failure → try a different URL or retry the appropriate tool. NEVER use `search_web` as a fallback — only use it when the user explicitly asks to search/research something.
     - File not found → use `find_files` to search broader directories, or check ~/Documents/works.
     - Permission denied → suggest the user grant permissions in System Settings.
     - `click_element` can't find element → use `capture_screen` + `ocr_image` to find it visually, then `click` at coordinates.
     - Always report what failed and what you tried as alternatives.
     - Never give up after a single failure. Adapt and try a different approach.
+    - NEVER fall back to web search or browser for non-search tasks. If a creation tool fails, retry it with different parameters or report the error.
 
     **Verification:**
     - After creating, moving, or deleting files, briefly confirm the operation succeeded by noting the result.
@@ -358,6 +531,18 @@ class LLMServiceManager: ObservableObject {
     - For synonyms, use `thesaurus_lookup`.
     - For spell checking, use `spell_check`.
     - NEVER call the API for simple word definitions or spelling. These tools are free and instant.
+
+    **Notion (knowledge base & project management):**
+    - When the user mentions Notion, wiki, knowledge base, or wants to organize/track things in Notion, use the `notion_*` tools.
+    - **Setup**: If `notion_search` returns "No Notion API token configured", guide the user to create an integration at https://www.notion.so/profile/integrations and use `notion_setup` with the token.
+    - **Finding content**: ALWAYS `notion_search` first to find pages/databases by name. Never guess Notion IDs.
+    - **Reading**: `notion_read_page` renders the full page as markdown — properties + all content blocks.
+    - **Creating pages**: Use `notion_create_page` with rich markdown in the `content` parameter. Write COMPLETE, well-structured content — use headings (##), bullet lists, numbered lists, code blocks, tables, to-dos, blockquotes, bold/italic. The markdown is auto-converted to native Notion blocks. Don't just write flat paragraphs.
+    - **Database workflow**: `notion_search(filter: 'database')` → `notion_get_database` (to see columns/types) → `notion_query_database` or `notion_add_to_database`. Always check the schema first so you use correct property names and types.
+    - **Creating databases**: When the user wants a tracker, table, or structured list in Notion, use `notion_create_database` with descriptive column definitions including select options.
+    - **Updating pages**: Use `notion_update_page` for properties/icon/cover, `notion_append_blocks` to add more content to an existing page.
+    - **Content quality**: When creating Notion pages, make them visually rich — use emoji icons, section headings, callout-style quotes, dividers between sections, tables for structured data, and to-do checkboxes for action items. The user wants GREAT Notion content, not plain text dumps.
+    - **Parallel operations**: When adding multiple database entries, batch them in one response for parallel execution.
     """
 
     // Cache the static portion of the system prompt — only changes when provider changes
@@ -365,38 +550,53 @@ class LLMServiceManager: ObservableObject {
         return systemPrompt + agenticPromptSection()
     }()
 
-    /// Frozen memory snapshot — loaded once per session with no query filter.
-    /// Preserves LLM prefix cache efficiency. Refreshed when memories change.
+    /// Exposed for ContextCompressor (stage-aware prompt building).
+    var cachedBaseSystemPrompt: String { cachedBasePrompt }
+
+    /// Exposed for ContextCompressor.
+    var humorPromptSectionText: String { humorPromptSection }
+
+    /// Memory snapshot — cached per query, invalidated when memories change.
     private var frozenMemorySection: String?
+    private var frozenMemoryQuery: String?
     private let memoryLock = NSLock()
 
     /// Call this to refresh the memory snapshot (e.g., when memories are added/removed).
     func refreshMemoryCache() {
         memoryLock.lock()
         frozenMemorySection = nil
+        frozenMemoryQuery = nil
         memoryLock.unlock()
     }
 
     func fullSystemPrompt(context: SystemContext, query: String = "") -> String {
         let personality = PersonalityEngine.shared.systemPromptSection()
         let skills = SkillsManager.shared.filteredPromptSection(for: query)
-        // Frozen memory — no query filter so it stays valid for all topics
+        // Memory — query-filtered, cached until invalidated by write or new query
         memoryLock.lock()
-        let memory = frozenMemorySection ?? {
-            let section = MemoryManager.shared.promptSection(query: "")
+        let memory: String
+        if let cached = frozenMemorySection, frozenMemoryQuery == query {
+            memory = cached
+        } else {
+            let section = MemoryManager.shared.promptSection(query: query)
             frozenMemorySection = section
-            return section
-        }()
+            frozenMemoryQuery = query
+            memory = section
+        }
         memoryLock.unlock()
         let history = recentHistorySection()
         let humor = HumorMode.shared.isEnabled ? humorPromptSection : ""
         let language = LanguageManager.shared.systemPromptLanguageInstruction()
         // Use the app the user was in BEFORE opening the input bar (not Executer itself)
-        let delegate = NSApplication.shared.delegate as? AppDelegate
-        let captured = delegate?.appState.lastFrontmostAppName ?? ""
+        // Access the cached value set by AppState when input bar opens (thread-safe String copy)
+        let captured = AppState.lastCapturedAppName
         let frontmostApp = captured.isEmpty ? (NSWorkspace.shared.frontmostApplication?.localizedName ?? "") : captured
         let learned = LearningContextProvider.fullContextSection(forApp: frontmostApp, query: query)
         let learnedSection = learned.isEmpty ? "" : "\n\n\(learned)"
+
+        // UI knowledge from exploration — inject what we've learned about this app's buttons/elements
+        let uiKnowledge = LearningDatabase.shared.formatUIKnowledgePrompt(forApp: frontmostApp)
+        let uiKnowledgeSection = uiKnowledge.map { "\n\n\($0)" } ?? ""
 
         // Tool catalog — teaches the LLM how to compose tools for complex tasks
         let categories = ToolRegistry.shared.classifyQueryIntent(query)
@@ -411,6 +611,33 @@ class LLMServiceManager: ObservableObject {
         // Design refinements — accumulated learnings from post-PPT-creation reflection
         let designRefinements = DesignRefinementStore.shared.promptSection()
 
+        // Video production workflow — conditional on media category
+        let mediaSection: String
+        if categories.contains(.media) {
+            mediaSection = """
+
+                ## Video & Audio Production
+                CRITICAL ROUTING RULE — read carefully:
+                - User says "video" → ALWAYS use quick_video or create_video. NEVER use create_podcast for video requests.
+                - User says "podcast" → use create_podcast (audio-only output).
+                These are MUTUALLY EXCLUSIVE. A video request MUST produce a video file (.mp4), not an audio file.
+
+                PREFERRED: Use quick_video for most video creation — ONE tool call handles everything (image search, scenes, TTS, subtitles, auto-open).
+                - "Make/create a video about X" → quick_video(topic, narration, type)
+                - "Create a podcast about X" → create_podcast(title, narration, voice) — ONLY when user explicitly says "podcast"
+                - "Download this YouTube video" → download_youtube(url, format)
+                - "Edit/trim this video" → ffmpeg_edit_video(spec with operations)
+                - "What's in this video file?" → ffmpeg_probe(path)
+
+                ADVANCED (when user needs precise control): create_video with manual spec. Use "search_query" in scenes to auto-search images.
+                Style matching: analyze_youtube_channel → create_video with style parameter.
+                All media tools auto-open results by default. Always include audio — silent videos feel broken.
+                NEVER search the web or use browser tools for video/audio creation. The media tools handle everything internally (including image search). If a media tool fails, retry it or report the error — do NOT fall back to googling.
+                """
+        } else {
+            mediaSection = ""
+        }
+
         let formatGuide = """
 
             ## Response Formatting
@@ -423,7 +650,20 @@ class LLMServiceManager: ObservableObject {
             Keep markers inline with your response text.
             """
 
-        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\n\n\(context.systemPromptAddendum)\(catalog)\(docStyles)\(trainedKnowledge)\(designRefinements)\(skills)\(memory)\(history)\(formatGuide)"
+        let goalSection = GoalStack.promptSection
+
+        return "\(cachedBasePrompt)\(personality)\(humor)\(language)\(learnedSection)\(uiKnowledgeSection)\n\n\(context.systemPromptAddendum)\(catalog)\(docStyles)\(trainedKnowledge)\(designRefinements)\(mediaSection)\(skills)\(memory)\(goalSection)\(history)\(formatGuide)"
+    }
+
+    /// Stage-aware system prompt builder (Foveal Attention System).
+    /// For Stage 1-2: returns a compressed prompt via ContextCompressor.
+    /// For Stage 3+: returns nil (callers use dedicated micro-prompts).
+    func fullSystemPrompt(context: SystemContext, query: String, stage: AttentionStage) -> String {
+        if let compressed = ContextCompressor.build(context: context, query: query, stage: stage, manager: self) {
+            return compressed
+        }
+        // Fallback for stages 3+ that shouldn't use full prompt
+        return fullSystemPrompt(context: context, query: query)
     }
 
     /// Provider-specific agentic execution guidance. DeepSeek needs explicit
@@ -482,7 +722,7 @@ class LLMServiceManager: ObservableObject {
     - If they ask something boring, make it fun. If they ask something fun, go all in.
     """
 
-    private func recentHistorySection() -> String {
+    func recentHistorySection() -> String {
         let entries = CommandHistory.shared.entries.prefix(3)
         guard !entries.isEmpty else { return "" }
 
