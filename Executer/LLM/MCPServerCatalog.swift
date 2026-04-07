@@ -112,8 +112,8 @@ enum MCPServerCatalog {
             icon: "chevron.left.forwardslash.chevron.right",
             category: .development,
             transport: .stdio,
-            command: "docker",
-            args: ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"],
+            command: "/opt/homebrew/bin/github-mcp-server",
+            args: ["stdio"],
             url: nil,
             credentials: [
                 MCPCredentialField(

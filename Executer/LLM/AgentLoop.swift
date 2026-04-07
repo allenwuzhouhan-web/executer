@@ -159,12 +159,30 @@ class AgentLoop {
 
     private static func isDocumentCreationCommand(_ command: String) -> Bool {
         let lower = command.lowercased()
-        let documentKeywords = [
-            "ppt", "powerpoint", "presentation", "slide", "deck",
-            "word", "docx", "document", "report", "essay", "memo", "letter",
-            "excel", "xlsx", "spreadsheet", "table", "data sheet",
+
+        // Processing verbs = manipulating an existing document, NOT creating one.
+        // These go through normal agent loop with run_script, not document service.
+        let processingVerbs = [
+            "split", "merge", "extract", "convert", "parse", "process",
+            "analyze", "transform", "separate", "combine", "compress",
+            "watermark", "ocr", "scrape", "batch", "rename", "organize",
+            "by chapter", "by section", "by page", "each page",
         ]
-        return documentKeywords.contains { lower.contains($0) }
+        if processingVerbs.contains(where: { lower.contains($0) }) { return false }
+
+        // Format-specific keywords are almost always creation
+        let formatKeywords = ["pptx", "docx", "xlsx", "powerpoint", "keynote"]
+        if formatKeywords.contains(where: { lower.contains($0) }) { return true }
+
+        // Generic keywords need a creation verb to confirm intent
+        let creationVerbs = ["create", "make", "write", "generate", "draft", "build", "design", "compose"]
+        let documentKeywords = [
+            "ppt", "presentation", "slide", "deck",
+            "word", "document", "report", "essay", "memo", "letter",
+            "excel", "spreadsheet", "table", "data sheet",
+        ]
+        return creationVerbs.contains(where: { lower.contains($0) })
+            && documentKeywords.contains(where: { lower.contains($0) })
     }
 
     // MARK: - Multimodal Task Detection
@@ -187,8 +205,8 @@ class AgentLoop {
 
         // Medium signals — only match when combined with an action verb suggesting understanding
         let mediumKeywords = ["textbook", "this pdf", "this document"]
-        let understandingVerbs = ["read", "understand", "analyze", "extract", "summarize", "explain",
-                                  "split", "separate", "chapter", "section", "parse", "process"]
+        let understandingVerbs = ["read", "understand", "analyze", "summarize", "explain",
+                                  "what does", "what is", "describe", "interpret", "translate"]
         for keyword in mediumKeywords {
             if lower.contains(keyword) && understandingVerbs.contains(where: { lower.contains($0) }) {
                 return true
@@ -196,6 +214,22 @@ class AgentLoop {
         }
 
         return false
+    }
+
+    // MARK: - Instruction Detection
+
+    /// Detect when the LLM returned step-by-step instructions instead of actually calling tools.
+    private static func looksLikeInstructions(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let patterns = [
+            "step 1", "step 2", "1. ", "2. ", "3. ",
+            "you can ", "you could ", "you'll need",
+            "first, ", "then, ", "next, ",
+            "open terminal", "run the following", "use the command",
+            "here's how", "here is how", "to do this",
+            "here are the steps", "follow these",
+        ]
+        return patterns.filter({ lower.contains($0) }).count >= 2
     }
 
     // MARK: - Complexity Classification
@@ -652,7 +686,22 @@ class AgentLoop {
                     ), durationMs: llmMs))
 
                     guard let toolCalls = response.toolCalls, !toolCalls.isEmpty else {
-                        finalText = response.text ?? "Done."
+                        let text = response.text ?? "Done."
+
+                        // Nudge: if early iteration and LLM gave step-by-step instructions instead of
+                        // calling tools, retry once with an explicit "execute, don't instruct" message.
+                        if iteration <= 1 && Self.looksLikeInstructions(text) {
+                            print("[Agent] LLM gave instructions instead of tool calls — nudging to use tools")
+                            messages.append(response.rawMessage)
+                            messages.append(ChatMessage(
+                                role: "user",
+                                content: "Do NOT give me instructions or steps. You have tools available — use them to execute this task directly. " +
+                                         "For file processing, data manipulation, or scripting tasks, call the run_script tool. Execute now."
+                            ))
+                            continue
+                        }
+
+                        finalText = text
                         print("[Agent] Final response received (\(finalText.count) chars)")
                         break
                     }

@@ -617,9 +617,14 @@ class LLMServiceManager: ObservableObject {
             mediaSection = """
 
                 ## Video & Audio Production
+                CRITICAL ROUTING RULE — read carefully:
+                - User says "video" → ALWAYS use quick_video or create_video. NEVER use create_podcast for video requests.
+                - User says "podcast" → use create_podcast (audio-only output).
+                These are MUTUALLY EXCLUSIVE. A video request MUST produce a video file (.mp4), not an audio file.
+
                 PREFERRED: Use quick_video for most video creation — ONE tool call handles everything (image search, scenes, TTS, subtitles, auto-open).
-                - "Make a video about X" → quick_video(topic, narration, type)
-                - "Create a podcast about X" → create_podcast(title, narration, voice)
+                - "Make/create a video about X" → quick_video(topic, narration, type)
+                - "Create a podcast about X" → create_podcast(title, narration, voice) — ONLY when user explicitly says "podcast"
                 - "Download this YouTube video" → download_youtube(url, format)
                 - "Edit/trim this video" → ffmpeg_edit_video(spec with operations)
                 - "What's in this video file?" → ffmpeg_probe(path)
