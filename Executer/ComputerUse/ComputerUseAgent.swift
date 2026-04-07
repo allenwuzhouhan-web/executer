@@ -60,7 +60,18 @@ class ComputerUseAgent {
     You are Executer in Computer Use mode. You can see the screen and control mouse/keyboard.
 
     Each turn you get the current screen state with @e references. WORKFLOW:
-    1. Read screen state. 2. Decide action. 3. Call tool(s). 4. Observe next screen.
+    1. Read screen state — pay attention to SECTION GROUPING (── lines).
+    2. Understand WHAT each element does based on its section context.
+    3. Decide action. 4. Call tool(s). 5. Observe next screen.
+
+    UI SPATIAL REASONING (CRITICAL):
+    Elements are grouped by their parent section/container with ── headers.
+    The section tells you the MEANING of the element:
+    - @e5 [button] "Create" under "── Private" → creates something private
+    - @e8 [button] "Create" under "── Team" → creates something for the team
+    - When elements share the same label, the section DISAMBIGUATES them.
+    - ALWAYS read the ── section header before clicking any element in it.
+    - Think: "This button is INSIDE [section], so clicking it will [action] in [section context]."
 
     RULES:
     - click_ref @eN for precise element targeting (preferred). Example: click_ref @e5
@@ -366,6 +377,7 @@ class ComputerUseAgent {
                 "browser_execute_js", "browser_read_dom", "browser_get_console",
                 "browser_inspect_element", "browser_click_element_css", "browser_type_in_element",
                 "browser_intercept_network",
+                "explore_ui",
             ])
         }
 
@@ -389,6 +401,11 @@ class ComputerUseAgent {
         // Inject confusion patterns from learning database
         if let confusions = bridge.confusionSummary() {
             messages[0] = ChatMessage(role: "system", content: (messages[0].content ?? "") + "\n\n" + confusions)
+        }
+
+        // Inject learned UI knowledge for the current app (from exploration)
+        if let uiKnowledge = LearningDatabase.shared.formatUIKnowledgePrompt(forApp: initialMap.focusedApp.name) {
+            messages[0] = ChatMessage(role: "system", content: (messages[0].content ?? "") + "\n\n" + uiKnowledge)
         }
 
         // Undo state

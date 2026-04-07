@@ -388,6 +388,32 @@ final class ToolCatalogManager {
             ]
         ),
 
+        // Python Scripting
+        ToolUsageGuide(
+            toolName: "run_script (Python scripting)",
+            category: "systemBash",
+            whenToUse: "When the task needs real computation: PDF processing, CSV/Excel transforms, batch file operations, data conversion, web scraping, image manipulation, or any automation requiring scripting.",
+            composesWellWith: ["find_files", "read_file", "open_file", "set_clipboard_text"],
+            examples: [
+                UsageExample(
+                    userRequest: "split this PDF into chapters",
+                    toolChain: ["find_files(name: '*.pdf')", "run_script(language: 'python', code: 'from PyPDF2 import ...', working_dir: '~/Desktop/chapters')"],
+                    explanation: "Find the PDF, write Python to split it with PyPDF2, save chapter files to working_dir."
+                ),
+                UsageExample(
+                    userRequest: "combine these CSVs into one Excel file",
+                    toolChain: ["run_script(language: 'python', code: 'import openpyxl; ...', working_dir: '~/Documents')"],
+                    explanation: "Use openpyxl (pre-installed) to read CSVs and write combined XLSX."
+                ),
+            ],
+            commonMistakes: [
+                "Don't describe what a script WOULD do — write and execute the actual code.",
+                "Don't use run_shell_command for multi-line Python — use run_script.",
+                "Print a clear summary as the last line so the user knows what happened.",
+                "Use working_dir to control where output files go.",
+            ]
+        ),
+
         // General: Parallel Execution
         ToolUsageGuide(
             toolName: "parallel execution",

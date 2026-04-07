@@ -72,6 +72,91 @@ enum ShellRunner {
     }
 }
 
+// MARK: - Async Shell Runner (pipe-safe + timeout)
+
+enum AsyncShellRunner {
+    struct Result {
+        let stdout: String
+        let stderr: String
+        let exitCode: Int32
+        let timedOut: Bool
+    }
+
+    /// Run an executable asynchronously with proper pipe handling and SIGTERM/SIGKILL timeout.
+    /// Pipe-safe: reads stdout/stderr BEFORE waitUntilExit to avoid deadlock on >64KB output.
+    static func run(
+        executable: String,
+        arguments: [String],
+        environment: [String: String]? = nil,
+        workingDirectory: String? = nil,
+        timeout: Int = 60
+    ) async throws -> Result {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                let stdoutPipe = Pipe()
+                let stderrPipe = Pipe()
+
+                process.executableURL = URL(fileURLWithPath: executable)
+                process.arguments = arguments
+                process.standardOutput = stdoutPipe
+                process.standardError = stderrPipe
+
+                // Merge environment: inherit current + add overrides
+                var env = ProcessInfo.processInfo.environment
+                if let extra = environment {
+                    env.merge(extra) { _, new in new }
+                }
+                process.environment = env
+
+                if let dir = workingDirectory {
+                    let expanded = NSString(string: dir).expandingTildeInPath
+                    process.currentDirectoryURL = URL(fileURLWithPath: expanded)
+                }
+
+                do {
+                    try process.run()
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                // Timeout: SIGTERM → 2s grace → SIGKILL
+                let pid = process.processIdentifier
+                var didTimeout = false
+                let timer = DispatchSource.makeTimerSource(queue: .global())
+                timer.schedule(deadline: .now() + .seconds(timeout))
+                timer.setEventHandler {
+                    if process.isRunning {
+                        didTimeout = true
+                        kill(pid, SIGTERM)
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                            if process.isRunning { kill(pid, SIGKILL) }
+                        }
+                    }
+                }
+                timer.resume()
+
+                // CRITICAL: Read pipes BEFORE waitUntilExit to avoid deadlock
+                let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                timer.cancel()
+
+                let out = String(data: outData, encoding: .utf8) ?? ""
+                let err = String(data: errData, encoding: .utf8) ?? ""
+
+                continuation.resume(returning: Result(
+                    stdout: out,
+                    stderr: err,
+                    exitCode: process.terminationStatus,
+                    timedOut: didTimeout
+                ))
+            }
+        }
+    }
+}
+
 enum ExecuterError: LocalizedError {
     case appleScript(String)
     case shellCommand(String)

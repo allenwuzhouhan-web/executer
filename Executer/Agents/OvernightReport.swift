@@ -13,6 +13,8 @@ struct OvernightReport: Codable {
     let agentChainsUsed: Int
     let estimatedTimeSavedMinutes: Int
     var jobResults: JobRunResult?       // Structured job results (email, files, calendar, research)
+    var synthesisInsights: [SynthesisInsight]?  // Cross-domain connections noticed
+    var explorationResult: ExplorationResultSummary?
 
     /// Generate a markdown report.
     func toMarkdown() -> String {
@@ -42,6 +44,35 @@ struct OvernightReport: Codable {
                 }
                 lines.append("")
             }
+        }
+
+        // Synthesis — cross-domain connections noticed
+        if let insights = synthesisInsights, !insights.isEmpty {
+            lines.append("## Connections Noticed")
+            for insight in insights {
+                lines.append("### \(insight.headline)")
+                lines.append(insight.explanation)
+                lines.append("*Across: \(insight.domains.joined(separator: ", "))*")
+                if let action = insight.actionSuggestion {
+                    lines.append("→ \(action)")
+                }
+                lines.append("")
+            }
+        }
+
+        // UI Exploration
+        if let exploration = explorationResult, !exploration.appsExplored.isEmpty {
+            lines.append("## UI Exploration")
+            lines.append("**\(exploration.totalElementsLearned) new UI behaviors learned** across \(exploration.appsExplored.count) apps (\(exploration.durationSeconds / 60) min)")
+            for app in exploration.appsExplored {
+                let sections = app.sectionsVisited.isEmpty ? "" : " — sections: \(app.sectionsVisited.prefix(5).joined(separator: ", "))"
+                lines.append("- **\(app.appName)**: \(app.elementsLearned) new elements\(sections) (\(app.stoppedReason))")
+            }
+            if !exploration.costYuan.isEmpty {
+                let costs = exploration.costYuan.map { "\($0.key): \(String(format: "%.2f", $0.value)) yuan" }
+                lines.append("*API cost: \(costs.joined(separator: ", "))*")
+            }
+            lines.append("")
         }
 
         // Completed
@@ -115,5 +146,34 @@ struct OvernightReport: Codable {
         if let data = try? JSONEncoder().encode(self) {
             try? data.write(to: historyURL, options: .atomic)
         }
+    }
+}
+
+// MARK: - Exploration Result Summary (Codable wrapper)
+
+/// Codable summary of UI exploration results for persistence in OvernightReport.
+struct ExplorationResultSummary: Codable {
+    struct AppSummary: Codable {
+        let appName: String
+        let elementsLearned: Int
+        let sectionsVisited: [String]
+        let stoppedReason: String
+    }
+
+    let appsExplored: [AppSummary]
+    let totalElementsLearned: Int
+    let durationSeconds: Int
+    let costYuan: [String: Double]  // provider → yuan
+
+    /// Create from UIExplorationOrchestrator result.
+    init(from result: UIExplorationOrchestrator.ExplorationResult) {
+        self.appsExplored = result.appsExplored.map {
+            AppSummary(appName: $0.appName, elementsLearned: $0.elementsLearned,
+                       sectionsVisited: $0.sectionsVisited, stoppedReason: $0.stoppedReason)
+        }
+        self.totalElementsLearned = result.totalElementsLearned
+        self.durationSeconds = result.durationSeconds
+        self.costYuan = Dictionary(result.costSummary.map { ($0.provider, $0.yuan) },
+                                   uniquingKeysWith: { _, last in last })
     }
 }

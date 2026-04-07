@@ -37,6 +37,12 @@ class OvernightAgent: ObservableObject {
     /// Results from the structured job runner (email, files, calendar, research).
     private var lastJobResult: JobRunResult?
 
+    /// Cross-domain connections found during synthesis pass.
+    private var lastSynthesisInsights: [SynthesisInsight] = []
+
+    /// UI exploration results from overnight app discovery.
+    private var lastExplorationResult: ExplorationResultSummary?
+
     // MARK: - Lifecycle
 
     /// Activate the overnight agent. Runs until `endTime` (default: 7 AM next day).
@@ -99,6 +105,24 @@ class OvernightAgent: ObservableObject {
         let jobResult = await OvernightJobRunner.runAllJobs()
         lastJobResult = jobResult
         print("[OvernightAgent] Jobs complete: \(jobResult.completedJobs)/\(jobResult.jobs.count) succeeded")
+
+        // Phase 1.5: Synthesis — find cross-domain connections from recent activity
+        lastSynthesisInsights = await SynthesisEngine.shared.runOvernightPass()
+        print("[OvernightAgent] Synthesis found \(lastSynthesisInsights.count) connections")
+
+        // Phase 3: UI Exploration — learn about installed apps while user sleeps
+        CostTracker.shared.startExplorationSession()
+        CostTracker.shared.activeAgentId = "overnight_exploration"
+        let explorationResult = await UIExplorationOrchestrator.runSession(
+            config: .init(
+                timeBudgetMinutes: 120,
+                deepseekBudgetYuan: 5.0,
+                kimiBudgetYuan: 5.0
+            )
+        )
+        CostTracker.shared.activeAgentId = "general"
+        lastExplorationResult = ExplorationResultSummary(from: explorationResult)
+        print("[OvernightAgent] Exploration: \(explorationResult.totalElementsLearned) elements learned across \(explorationResult.appsExplored.count) apps")
 
         // Phase 2: Discovery + task execution loop (runs for remaining time)
         while isActive && isWithinWindow() && !Task.isCancelled {
@@ -291,6 +315,8 @@ class OvernightAgent: ObservableObject {
             estimatedTimeSavedMinutes: queue.completedTasks().reduce(0) { $0 + $1.estimatedMinutes }
         )
         report.jobResults = lastJobResult
+        report.synthesisInsights = lastSynthesisInsights.isEmpty ? nil : lastSynthesisInsights
+        report.explorationResult = lastExplorationResult
         return report
     }
 

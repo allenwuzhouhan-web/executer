@@ -1,25 +1,28 @@
 import Foundation
 
 /// Finds analogous past situations using embeddings when facing novel scenarios.
+///
+/// Flash Attention-inspired: uses tiled batch similarity for cache-efficient
+/// comparisons and adaptive caching (recomputation trade-off) for embeddings.
 enum SimilarityReasoner {
 
     /// Find the most similar past session to the current situation.
+    /// Uses tiled batch similarity (Flash Attention IO-aware) for cache-efficient comparison.
     static func findSimilarSessions(to currentTopics: Set<String>, from pastSessions: [WorkSession], limit: Int = 5) -> [WorkSession] {
         let currentText = currentTopics.joined(separator: " ")
 
-        var scored: [(session: WorkSession, similarity: Double)] = []
+        // Use tiled batch similarity for cache-efficient comparison
+        let candidateTexts = pastSessions.map { $0.topics.joined(separator: " ") }
+        let tiledResults = TextEmbedder.tiledTextSimilarity(
+            query: currentText,
+            candidates: candidateTexts,
+            tileSize: 32
+        )
 
-        for session in pastSessions {
-            let pastText = session.topics.joined(separator: " ")
-            let sim = TextEmbedder.textSimilarity(currentText, pastText)
-            if sim > 0.3 {
-                scored.append((session, sim))
-            }
-        }
-
-        return scored.sorted { $0.similarity > $1.similarity }
+        return tiledResults
+            .filter { $0.similarity > 0.3 }
             .prefix(limit)
-            .map(\.session)
+            .map { pastSessions[$0.index] }
     }
 
     /// Find templates that were successful in similar situations.

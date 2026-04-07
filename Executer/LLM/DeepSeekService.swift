@@ -260,6 +260,16 @@ class OpenAICompatibleService: LLMServiceProtocol {
             throw ExecuterError.apiError("No response choices")
         }
 
+        // Track API usage for cost budgeting
+        if let usage = decoded.usage {
+            CostTracker.shared.record(
+                provider: provider.rawValue,
+                inputTokens: usage.prompt_tokens,
+                outputTokens: usage.completion_tokens,
+                agentId: CostTracker.shared.activeAgentId
+            )
+        }
+
         // Use content if available; fall back to reasoning_content for thinking models (DeepSeek-R1, Kimi)
         let text = (choice.message.content?.isEmpty == false ? choice.message.content : nil)
             ?? choice.message.reasoning_content

@@ -10,14 +10,37 @@ extension LocalCommandRouter {
            matches(words, required: ["resume", "music"]) || input == "unpause" || input == "unpause music" {
             return try? await MusicPlayTool().execute(arguments: "{}")
         }
-        // "play [song name]" — route to MusicPlaySongTool for specific songs
+
+        // "play [song/query]" — dynamic: handles multiple phrasings
         if input.hasPrefix("play ") && !input.hasPrefix("play music") {
-            let songQuery = String(input.dropFirst("play ".count)).trimmingCharacters(in: .whitespaces)
-            if !songQuery.isEmpty {
-                let jsonArg = "{\"query\": \"\(escapeJSON(songQuery))\"}"
+            let rest = String(input.dropFirst("play ".count)).trimmingCharacters(in: .whitespaces)
+            if !rest.isEmpty {
+                let query = Self.buildMusicQuery(rest)
+                let jsonArg = "{\"query\": \"\(escapeJSON(query))\"}"
                 return try? await MusicPlaySongTool().execute(arguments: jsonArg)
             }
         }
+
+        // "listen to [song/artist]"
+        if input.hasPrefix("listen to ") {
+            let rest = String(input.dropFirst("listen to ".count)).trimmingCharacters(in: .whitespaces)
+            if !rest.isEmpty {
+                let query = Self.buildMusicQuery(rest)
+                return try? await MusicPlaySongTool().execute(arguments: "{\"query\": \"\(escapeJSON(query))\"}")
+            }
+        }
+
+        // "put on [song/genre]" / "throw on [song]"
+        for prefix in ["put on ", "throw on "] as [String] {
+            if input.hasPrefix(prefix) {
+                let rest = String(input.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+                if !rest.isEmpty {
+                    let query = Self.buildMusicQuery(rest)
+                    return try? await MusicPlaySongTool().execute(arguments: "{\"query\": \"\(escapeJSON(query))\"}")
+                }
+            }
+        }
+
         if input == "next track" || input == "skip" || input == "next song" || input == "skip track" || input == "skip song" ||
            matches(words, required: ["next", "track"]) || matches(words, required: ["next", "song"]) ||
            input == "skip this" || input == "next" {
@@ -40,5 +63,42 @@ extension LocalCommandRouter {
         }
 
         return nil
+    }
+
+    // MARK: - Music Query Builder
+
+    /// Extracts a clean search query from natural language music requests.
+    /// "Shape of You by Ed Sheeran" → "Shape of You Ed Sheeran"
+    /// "the album Thriller" → "Thriller"
+    /// "my playlist Chill Vibes" → "Chill Vibes"
+    /// "some jazz" → "jazz"
+    private static func buildMusicQuery(_ raw: String) -> String {
+        var text = raw
+
+        // Strip "by" to flatten "Song by Artist" → "Song Artist" (tool handles both formats)
+        if let byRange = text.range(of: " by ", options: .caseInsensitive) {
+            text = String(text[text.startIndex..<byRange.lowerBound]) + " " +
+                   String(text[byRange.upperBound...])
+        }
+
+        // Strip leading qualifiers — the tool searches all types anyway
+        let stripPrefixes = ["the song ", "the album ", "the playlist ", "the artist ",
+                             "my playlist ", "the ep ", "album ", "playlist ", "song ",
+                             "some ", "a little ", "something by ", "something "]
+        for prefix in stripPrefixes {
+            if text.lowercased().hasPrefix(prefix) {
+                text = String(text.dropFirst(prefix.count))
+                break
+            }
+        }
+
+        // Strip trailing "on repeat" / "on shuffle"
+        for suffix in [" on repeat", " on shuffle", " on loop"] {
+            if text.lowercased().hasSuffix(suffix) {
+                text = String(text.dropLast(suffix.count))
+            }
+        }
+
+        return text.trimmingCharacters(in: .whitespaces)
     }
 }

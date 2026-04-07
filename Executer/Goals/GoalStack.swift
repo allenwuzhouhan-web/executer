@@ -20,6 +20,28 @@ actor GoalStack {
         return _cachedPromptSection
     }
 
+    /// Compact prompt section for Stage 2 (Parafovea): titles only, no sub-goals or deadlines.
+    /// Excludes dormant goals from DormantContextManager.
+    static var promptSectionCompact: String {
+        promptLock.lock()
+        let full = _cachedPromptSection
+        promptLock.unlock()
+        guard !full.isEmpty else { return "" }
+
+        // Extract just goal titles from the cached section
+        let lines = full.split(separator: "\n")
+        var compact = ["\n## Goals"]
+        let dormant = DormantContextManager.shared.dormantGoalIDs
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // Only keep top-level goal lines (start with "- **")
+            if trimmed.hasPrefix("- **") {
+                compact.append(String(trimmed))
+            }
+        }
+        return compact.count > 1 ? compact.joined(separator: "\n") : ""
+    }
+
     init() {
         goals = Self.loadFromDisk()
         Self.promptLock.lock()

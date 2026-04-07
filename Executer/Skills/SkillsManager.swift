@@ -835,7 +835,6 @@ RULES:
             description: "Create a PowerPoint presentation from the user's description. Applies saved style if available.",
             exampleTriggers: ["create a presentation", "make slides", "powerpoint about", "create a deck", "make a pptx"],
             steps: [
-                "Check if python-pptx is installed: call `setup_python_docs` if needed.",
                 "Check available styles with `list_document_styles`. If the user has a saved style, use it.",
                 "Plan the slide structure from the user's description: title slide, content slides with bullets, conclusion slide.",
                 "Call `create_document` with format='pptx', the planned content JSON, and style_profile if available.",
@@ -859,7 +858,6 @@ RULES:
             description: "Read and summarize a Word, PowerPoint, or Excel file.",
             exampleTriggers: ["read this pptx", "summarize this word doc", "what's in this spreadsheet", "open and read this document"],
             steps: [
-                "Call `setup_python_docs` if needed (first time only).",
                 "Call `read_document` with the file path and format='structure' for full content.",
                 "Summarize the content: for PPTX list slide titles and key points, for DOCX summarize sections, for XLSX describe sheets and data.",
                 "Copy the summary to clipboard with `set_clipboard_text`."
@@ -870,7 +868,6 @@ RULES:
             description: "Create a Word document with formatted sections, headings, and bullets.",
             exampleTriggers: ["create a word doc", "write a document", "make a docx", "create a report"],
             steps: [
-                "Check if python-docx is installed: call `setup_python_docs` if needed.",
                 "Check available styles with `list_document_styles`. If the user has a saved DOCX style, use it.",
                 "Plan the document structure: sections with headings, body paragraphs, and bullet points.",
                 "Call `create_document` with format='docx', the planned content JSON, and style_profile if available.",
@@ -883,7 +880,6 @@ RULES:
             description: "Create an Excel spreadsheet with structured data.",
             exampleTriggers: ["create a spreadsheet", "make an excel", "create xlsx", "make a data table"],
             steps: [
-                "Check if openpyxl is installed: call `setup_python_docs` if needed.",
                 "Plan the spreadsheet structure: sheet names, header rows, and data rows.",
                 "Call `create_document` with format='xlsx' and the planned content JSON.",
                 "Open the created file with `open_file`.",

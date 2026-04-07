@@ -10,7 +10,14 @@ final class PredictionEngine {
 
     private init() {}
 
+    /// Softcap for bounding prediction confidence from individual sources.
+    /// Inspired by Flash Attention 3's softcapping: prevents any single signal
+    /// (temporal, sequence, goal) from dominating the combined prediction set.
+    private let predictionSoftcap = 0.9
+
     /// Generate predictions based on current state.
+    /// Applies softcapping (Flash Attention 3-inspired) to confidence scores
+    /// before combining, preventing any single source from dominating.
     func predict() -> [Prediction] {
         var predictions: [Prediction] = []
 
@@ -21,10 +28,12 @@ final class PredictionEngine {
             if routine.triggerType == .timeOfDay {
                 let routineHour = Int(routine.triggerValue.prefix(2)) ?? -1
                 if routineHour == hour, let app = routine.targetApp {
+                    // Softcap the confidence to prevent temporal signals from dominating
+                    let cappedConfidence = FlashAttentionUtils.softcap(routine.confidence, cap: predictionSoftcap)
                     predictions.append(Prediction(
                         action: routine.actionDescription,
                         app: app,
-                        confidence: routine.confidence,
+                        confidence: cappedConfidence,
                         reasoning: routine.description,
                         source: .temporal
                     ))
@@ -39,10 +48,12 @@ final class PredictionEngine {
             for (action, prob) in seqPredictions where prob > 0.3 {
                 let parts = action.split(separator: ":").map(String.init)
                 let app = parts.count > 1 ? parts[1] : ""
+                // Softcap sequence prediction confidence
+                let cappedProb = FlashAttentionUtils.softcap(prob, cap: predictionSoftcap)
                 predictions.append(Prediction(
                     action: "Next: \(action)",
                     app: app.isEmpty ? nil : app,
-                    confidence: prob,
+                    confidence: cappedProb,
                     reasoning: "Based on action sequence pattern",
                     source: .sequence
                 ))
@@ -55,9 +66,10 @@ final class PredictionEngine {
             if let deadline = goal.deadline {
                 let hoursLeft = deadline.timeIntervalSince(now) / 3600
                 if hoursLeft < 4 && hoursLeft > 0 {
+                    let cappedConfidence = FlashAttentionUtils.softcap(0.8, cap: predictionSoftcap)
                     predictions.append(Prediction(
                         action: "Focus on \(goal.topic) — deadline approaching",
-                        confidence: 0.8,
+                        confidence: cappedConfidence,
                         reasoning: "Goal deadline in \(Int(hoursLeft)) hours",
                         source: .goal
                     ))

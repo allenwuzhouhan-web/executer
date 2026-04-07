@@ -13,6 +13,8 @@ import AppKit
 /// - CursorCommandMatcher.swift — click, scroll, move cursor
 /// - KeyboardCommandMatcher.swift — type, press key, hotkeys
 /// - DictionaryCommandMatcher.swift — define, synonyms, spell check
+/// - WindowCommandMatcher.swift — fullscreen, tile, minimize, arrange windows
+/// - FileCommandMatcher.swift — find, open, trash files; create folders; power/system commands
 /// - CommandParsingHelpers.swift — shared utilities
 class LocalCommandRouter {
     static let shared = LocalCommandRouter()
@@ -22,6 +24,10 @@ class LocalCommandRouter {
     func tryLocalExecution(_ command: String) async -> String? {
         let input = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let words = Set(input.split(separator: " ").map { String($0) })
+
+        // Long multi-sentence commands are complex agent instructions — bag-of-words
+        // matching produces false positives (e.g. "tile" + "right" in a paragraph).
+        guard words.count <= 20 else { return nil }
 
         // --- Prefix/pattern-based matching ---
 
@@ -33,6 +39,9 @@ class LocalCommandRouter {
         if let result = await tryCursorCommand(input, words: words) { return result }
         if let result = await tryKeyboardCommand(input) { return result }
         if let result = await tryDictionaryCommand(input) { return result }
+        if let result = await tryWindowCommand(input, words: words) { return result }
+        if let result = await tryFileCommand(input, words: words) { return result }
+        if let result = await trySystemCommand(input, words: words) { return result }
         if let result = await tryTranslation(input) { return result }
         if let result = await tryMessagingCommand(command) { return result }
 

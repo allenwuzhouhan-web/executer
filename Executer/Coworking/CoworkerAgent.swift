@@ -77,6 +77,9 @@ class CoworkerAgent: ObservableObject {
             await self?.evaluationLoop()
         }
 
+        // Start the synthesis engine (cross-domain connection finder)
+        Task { await SynthesisEngine.shared.startDaytime() }
+
         NotificationCenter.default.post(name: .coworkerAgentStateChanged, object: nil,
                                         userInfo: ["isActive": true])
         print("[CoworkerAgent] Started — coworking mode active")
@@ -102,6 +105,9 @@ class CoworkerAgent: ObservableObject {
             }
             consumerRegistered = false
         }
+
+        // Stop the synthesis engine
+        Task { await SynthesisEngine.shared.stop() }
 
         currentSuggestion = nil
         NotificationCenter.default.post(name: .coworkerAgentStateChanged, object: nil,
@@ -195,9 +201,15 @@ class CoworkerAgent: ObservableObject {
     // MARK: - User Interaction
 
     /// User accepted the current suggestion.
+    /// No-arg version reads from `currentSuggestion` (may be nil if expired).
     func acceptSuggestion() {
         guard let suggestion = currentSuggestion else { return }
+        acceptSuggestion(suggestion)
+    }
 
+    /// Accept a specific suggestion — avoids the race where `currentSuggestion`
+    /// is nil'd by the evaluation loop while the card is still visible.
+    func acceptSuggestion(_ suggestion: CoworkingSuggestion) {
         Task {
             await CoworkingSuggestionPipeline.shared.recordFeedback(accepted: true, type: suggestion.type)
         }
@@ -215,6 +227,14 @@ class CoworkerAgent: ObservableObject {
     /// User dismissed the current suggestion.
     func dismissSuggestion() {
         guard let suggestion = currentSuggestion else { return }
+
+        // Notify bridge so this pattern is never re-suggested
+        if suggestion.type == .workflowAutomation,
+           let command = suggestion.actionCommand,
+           command.hasPrefix("__compress_workflow:"),
+           let uuid = UUID(uuidString: String(command.dropFirst("__compress_workflow:".count))) {
+            Task { await WorkflowCompressionBridge.shared.dismissPattern(uuid) }
+        }
 
         Task {
             await CoworkingSuggestionPipeline.shared.recordFeedback(accepted: false, type: suggestion.type)
@@ -234,9 +254,19 @@ class CoworkerAgent: ObservableObject {
     // MARK: - Command Execution
 
     private func submitCommand(_ command: String) {
-        // Access AppState on MainActor to submit the command
-        if let appState = NSApp.delegate as? AppDelegate {
-            appState.appState.submitCommand(command)
+        // Handle workflow compression acceptance
+        if command.hasPrefix("__compress_workflow:") {
+            let patternId = String(command.dropFirst("__compress_workflow:".count))
+            if let uuid = UUID(uuidString: patternId) {
+                Task { await WorkflowCompressionBridge.shared.acceptPattern(uuid) }
+            }
+            return
+        }
+
+        // Bypass research/browser/local routing — coworking action commands are
+        // multi-step agent instructions, not short user queries.
+        if let appDelegate = NSApp.delegate as? AppDelegate {
+            appDelegate.appState.executeDirectCommand(command)
         }
     }
 }

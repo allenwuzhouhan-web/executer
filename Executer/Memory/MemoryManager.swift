@@ -202,24 +202,35 @@ class MemoryManager {
     // MARK: - System Prompt Injection
 
     /// Build a memory section for the system prompt, scoped by namespace.
+    /// Supports excluding dormant IDs (Foveal Attention Stage 5) and limiting count.
+    func promptSection(query: String, excludingIDs: Set<UUID> = [], limit: Int? = nil, namespace: String = "general") -> String {
+        return _buildPromptSection(query: query, excludingIDs: excludingIDs, limit: limit, namespace: namespace)
+    }
+
+    /// Build a memory section for the system prompt, scoped by namespace.
     /// Includes general preferences + namespace-specific memories.
-    func promptSection(query: String, namespace: String = "general") -> String {
+    private func _buildPromptSection(query: String, excludingIDs: Set<UUID> = [], limit: Int? = nil, namespace: String = "general") -> String {
         // Snapshot state under lock, then process outside
         let (generalPrefs, allMemories): (ArraySlice<Memory>, [Memory]) = queue.sync {
             let prefs = (memoriesByNamespace["general"] ?? [])
-                .filter { $0.category == .preference }
+                .filter { $0.category == .preference && !excludingIDs.contains($0.id) }
                 .prefix(20)
             let nsMemories = namespace == "general" ? [] : (memoriesByNamespace[namespace] ?? [])
-            let all = (memoriesByNamespace["general"] ?? []) + nsMemories
+            // Exclude dormant items (Foveal Attention Stage 5)
+            let all = ((memoriesByNamespace["general"] ?? []) + nsMemories)
+                .filter { !excludingIDs.contains($0.id) }
             return (prefs, all)
         }
         guard !allMemories.isEmpty else { return "" }
+
+        let maxIncluded = limit ?? 13  // Default: 10 scored + 3 recent (same as before)
 
         var included: [Memory] = []
         var includedIDs = Set<UUID>()
 
         // Always include preferences from general
         for mem in generalPrefs {
+            guard included.count < maxIncluded else { break }
             included.append(mem)
             includedIDs.insert(mem.id)
         }
@@ -231,17 +242,19 @@ class MemoryManager {
             score(memory: a, queryWords: queryWords) > score(memory: b, queryWords: queryWords)
         }
 
-        // Add top 10 scored
-        for mem in scored.prefix(10) {
+        // Add top scored (respecting limit)
+        let scoredLimit = max(0, maxIncluded - included.count - 3)  // Reserve 3 for recent
+        for mem in scored.prefix(scoredLimit) {
             if !includedIDs.contains(mem.id) {
                 included.append(mem)
                 includedIDs.insert(mem.id)
             }
         }
 
-        // Add 3 most recent (deduped)
+        // Add most recent (deduped, if under limit)
+        let recentLimit = max(0, maxIncluded - included.count)
         let recent = allMemories.sorted { $0.lastAccessedAt > $1.lastAccessedAt }
-        for mem in recent.prefix(3) {
+        for mem in recent.prefix(recentLimit) {
             if !includedIDs.contains(mem.id) {
                 included.append(mem)
                 includedIDs.insert(mem.id)
@@ -273,6 +286,103 @@ class MemoryManager {
             result = String(result.prefix(2000)) + "\n(truncated)"
         }
         return result
+    }
+
+    // MARK: - Grouped-Query Recall (Flash Attention GQA-inspired)
+
+    /// Recall memories relevant to multiple queries at once, scoring candidates only once.
+    /// Like GQA: shared KV heads (candidate memories) serve multiple Q heads (queries).
+    func recallGrouped(
+        queries: [String],
+        namespace: String = "general",
+        limitPerQuery: Int = 5
+    ) async -> [String: [Memory]] {
+        let allCandidates: [Memory] = queue.sync {
+            memoriesByNamespace[namespace] ?? []
+        }
+        return await SemanticMemoryScorer.shared.scoreGrouped(
+            queries: queries,
+            sharedCandidates: allCandidates,
+            limitPerQuery: limitPerQuery
+        )
+    }
+
+    // MARK: - Paged Memory Cache (Flash Attention KV Cache-inspired)
+
+    /// Block-table based memory page cache for O(1) lookup by ID.
+    /// Inspired by Flash Attention's paged KV cache with block_table.
+    private var pageTable: [UUID: Int] = [:]  // Memory ID → page index
+    private var pages: [[Memory]] = []        // Fixed-size pages of memories
+    private let pageSize = 16                 // Memories per page
+    private var pageTableBuilt = false
+
+    /// Build or rebuild the page table index for fast lookups.
+    func buildPageTable(namespace: String = "general") {
+        queue.sync {
+            let memories = memoriesByNamespace[namespace] ?? []
+            pageTable.removeAll(keepingCapacity: true)
+            pages.removeAll(keepingCapacity: true)
+
+            var currentPage: [Memory] = []
+            currentPage.reserveCapacity(pageSize)
+
+            for (idx, memory) in memories.enumerated() {
+                currentPage.append(memory)
+                pageTable[memory.id] = pages.count
+
+                if currentPage.count == pageSize {
+                    pages.append(currentPage)
+                    currentPage = []
+                    currentPage.reserveCapacity(pageSize)
+                }
+            }
+
+            if !currentPage.isEmpty {
+                pages.append(currentPage)
+            }
+
+            pageTableBuilt = true
+        }
+    }
+
+    /// O(1) memory lookup by ID using the page table.
+    func lookupPaged(id: UUID) -> Memory? {
+        return queue.sync {
+            guard let pageIdx = pageTable[id], pageIdx < pages.count else { return nil }
+            return pages[pageIdx].first { $0.id == id }
+        }
+    }
+
+    /// Batch lookup: retrieve multiple memories by ID using page table.
+    func lookupPagedBatch(ids: [UUID]) -> [Memory] {
+        return queue.sync {
+            ids.compactMap { id in
+                guard let pageIdx = pageTable[id], pageIdx < pages.count else { return nil }
+                return pages[pageIdx].first { $0.id == id }
+            }
+        }
+    }
+
+    /// Evict a single page (LRU-style), removing its memories from the index.
+    func evictPage(at pageIndex: Int, namespace: String = "general") {
+        queue.sync {
+            guard pageIndex < pages.count else { return }
+            let page = pages[pageIndex]
+            for memory in page {
+                pageTable.removeValue(forKey: memory.id)
+                memoriesByNamespace[namespace]?.removeAll { $0.id == memory.id }
+            }
+            pages.remove(at: pageIndex)
+
+            // Rebuild page indices after removal
+            for (newIdx, page) in pages.enumerated() {
+                for memory in page {
+                    pageTable[memory.id] = newIdx
+                }
+            }
+
+            save(namespace: namespace)
+        }
     }
 
     // MARK: - Helpers

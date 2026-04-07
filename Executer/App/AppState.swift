@@ -80,6 +80,8 @@ class AppState: ObservableObject {
         // Restore conversation from last session (enables follow-ups after restart)
         restoreLastSession()
 
+        AutonomousPillarBootstrap.initialize()
+
         print("[AppState] setup() complete")
     }
 
@@ -252,7 +254,12 @@ class AppState: ObservableObject {
     }
 
     /// Thread-safe static copy for cross-thread access (read by LLMProvider from background).
-    nonisolated(unsafe) static var lastCapturedAppName: String = ""
+    private nonisolated(unsafe) static let _lastCapturedAppNameLock = NSLock()
+    private nonisolated(unsafe) static var _lastCapturedAppName: String = ""
+    nonisolated(unsafe) static var lastCapturedAppName: String {
+        get { _lastCapturedAppNameLock.lock(); defer { _lastCapturedAppNameLock.unlock() }; return _lastCapturedAppName }
+        set { _lastCapturedAppNameLock.lock(); defer { _lastCapturedAppNameLock.unlock() }; _lastCapturedAppName = newValue }
+    }
 
     func showInputBar() {
         guard !inputBarVisible else { return }
@@ -370,6 +377,8 @@ class AppState: ObservableObject {
         "go to ", "navigate to ", "browse to ", "open ",
     ]
 
+    /// Detects browser tasks that are complex enough to warrant asking Watch/Background.
+    /// Simple browser tasks (search, navigate+search, open a site) just execute immediately as visible.
     private func looksLikeBrowserTask(_ command: String) -> Bool {
         let lower = command.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -382,7 +391,18 @@ class AppState: ObservableObject {
         let hasSiteReference = lower.contains(".com") || lower.contains(".org") || lower.contains(".net")
             || lower.contains("http") || lower.contains("website") || lower.contains("site")
             || lower.contains("browser") || lower.contains("online")
-        return hasLookupKeyword && hasSiteReference
+
+        guard hasLookupKeyword && hasSiteReference else { return false }
+
+        // Only prompt for genuinely complex multi-step workflows (transactions, forms, multi-page).
+        // Simple search/lookup tasks should just execute immediately without asking.
+        let complexBrowserIndicators = [
+            "fill", "submit", "log in", "login", "sign in", "sign up", "register",
+            "checkout", "check out", "purchase", "buy", "add to cart", "payment",
+            "book ", "booking", "automate", "form", "multi-page", "multiple pages",
+            "download", "upload",
+        ]
+        return complexBrowserIndicators.contains(where: { lower.contains($0) })
     }
 
     /// Called when user picks Watch or Background from the browser choice buttons.
@@ -428,7 +448,7 @@ class AppState: ObservableObject {
             return
         }
 
-        // If it looks like a browser task, ask user if they want to watch
+        // If it looks like a complex browser task, ask user if they want to watch
         if !isFollowUp && looksLikeBrowserTask(resolvedCommand) {
             inputBarState = .browserChoice(query: resolvedCommand)
             return
@@ -569,9 +589,25 @@ class AppState: ObservableObject {
         }
     }
 
+    /// Execute a command directly via the AgentLoop, bypassing research/browser/local routing.
+    /// Used for internal command sources (coworking suggestions, scheduled tasks) where the
+    /// command is already a well-formed multi-step instruction for the agent.
+    func executeDirectCommand(_ command: String) {
+        guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        Task { @MainActor in
+            BrowserTrailStore.shared.currentTrail = []
+        }
+        lastSubmittedPrompt = command
+        inputBarState = .processing
+        executeCommand(command)
+    }
+
     private func executeCommand(_ resolvedCommand: String, isFollowUp: Bool = false) {
         currentTask?.cancel()
         let previousMessages = isFollowUp ? conversationMessages : []
+
+        // Foveal Attention: determine stage based on follow-up status + complexity
+        let stage = FovealRouter.stageForUserCommand(isFollowUp: isFollowUp, command: resolvedCommand)
 
         // Inject attached file contents into the command
         let fileContext = attachedFiles.map { $0.formattedForPrompt }.joined(separator: "\n\n")
@@ -629,6 +665,7 @@ class AppState: ObservableObject {
             resolvedCommand: resolvedCommand,
             previousMessages: previousMessages,
             agent: currentAgent.id == "general" ? nil : currentAgent,
+            stage: stage,
             onStateChange: { [weak self] state in
                 self?.inputBarState = state
             },

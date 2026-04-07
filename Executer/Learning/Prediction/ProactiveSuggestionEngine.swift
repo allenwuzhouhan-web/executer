@@ -27,6 +27,11 @@ actor ProactiveSuggestionEngine {
 
     // MARK: - Suggestion Generation
 
+    /// Softcap value for bounding confidence scores before combining.
+    /// Prevents any single source (temporal, calendar, repetition) from dominating.
+    /// Inspired by Flash Attention 3's softcapping: softcap * tanh(score / softcap).
+    private let confidenceSoftcap = 0.85
+
     func generateSuggestions() async -> [WorkflowSuggestion] {
         var suggestions: [WorkflowSuggestion] = []
 
@@ -39,14 +44,26 @@ actor ProactiveSuggestionEngine {
         let repetitionSuggestions = await generateRepetitionSuggestions()
         suggestions.append(contentsOf: repetitionSuggestions)
 
-        suggestions = suggestions.filter { suggestion in
-            guard suggestion.confidence >= minConfidence else { return false }
+        // Apply softcapping to bound confidence scores (Flash Attention 3-inspired).
+        // This prevents any single source from producing runaway confidence values
+        // that would drown out other suggestion types.
+        suggestions = suggestions.compactMap { suggestion in
+            guard suggestion.confidence >= minConfidence else { return nil }
             let key = suggestion.typeKey
             if let lastTime = lastSuggestionTime[key],
                Date().timeIntervalSince(lastTime) < suggestionCooldown {
-                return false
+                return nil
             }
-            return true
+
+            // Softcap: cap * tanh(confidence / cap)
+            let cappedConfidence = FlashAttentionUtils.softcap(suggestion.confidence, cap: confidenceSoftcap)
+            return WorkflowSuggestion(
+                type: suggestion.type,
+                workflow: suggestion.workflow,
+                message: suggestion.message,
+                confidence: cappedConfidence,
+                reason: suggestion.reason
+            )
         }
 
         suggestions.sort { $0.confidence > $1.confidence }

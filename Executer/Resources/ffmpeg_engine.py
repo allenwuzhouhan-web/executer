@@ -93,7 +93,7 @@ def _build_multi_xfade(ffmpeg, inputs, trans_dur, output_path):
         cmd += ["-i", inp]
 
     # Build filter graph
-    durations = [_get_duration(cmd[0].replace(ffmpeg, ffmpeg), inp) for inp in inputs]
+    durations = [_get_duration(ffmpeg, inp) for inp in inputs]
 
     filter_parts = []
     offsets = []
@@ -405,7 +405,7 @@ def run_edit(spec, ffmpeg, ffprobe, output_path, temp_dir):
                 if len(params) == 4:
                     cmd = builder_fn(ffmpeg, current_input, step_output, op)
                 else:
-                    cmd = builder_fn(ffmpeg, current_input, step_output, op)
+                    cmd = builder_fn(ffmpeg, current_input, step_output, op, temp_dir)
             else:
                 log(f"[ffmpeg_engine] Unknown operation: {op_type}, skipping")
                 continue
@@ -464,6 +464,8 @@ def run_create(spec, ffmpeg, ffprobe, output_path, temp_dir, style_path=None):
         scene_clips = []
         narration_texts = []
         scene_durations = []
+        failed_images = 0
+        warnings = []
 
         for i, scene in enumerate(scenes):
             log(f"[ffmpeg_engine] Generating scene {i+1}/{len(scenes)}: {scene.get('type', 'unknown')}")
@@ -476,6 +478,9 @@ def run_create(spec, ffmpeg, ffprobe, output_path, temp_dir, style_path=None):
                 _create_title_card(ffmpeg, clip_path, scene, width, height, fps, duration)
             elif scene_type == "image":
                 _create_image_scene(ffmpeg, clip_path, scene, width, height, fps, duration, temp_dir)
+                if scene.get("_image_failed"):
+                    failed_images += 1
+                    warnings.append(f"Scene {i+1}: image not found, used black frame")
             elif scene_type == "video":
                 _create_video_scene(ffmpeg, clip_path, scene, width, height, fps, duration)
             elif scene_type == "color_card":
@@ -546,12 +551,16 @@ def run_create(spec, ffmpeg, ffprobe, output_path, temp_dir, style_path=None):
             return {"success": False, "error": "Final video assembly failed"}
 
         duration = _get_duration(ffmpeg, final_path)
-        return {
+        result = {
             "success": True,
             "path": str(Path(final_path).resolve()),
             "duration_seconds": duration,
-            "scenes": len(scene_clips)
+            "scenes": len(scene_clips),
+            "failed_images": failed_images,
         }
+        if warnings:
+            result["warnings"] = warnings
+        return result
 
     except subprocess.CalledProcessError as e:
         stderr = e.stderr[:500] if e.stderr else str(e)
@@ -621,8 +630,14 @@ def _create_image_scene(ffmpeg, output, scene, w, h, fps, duration, temp_dir):
     """Generate a scene from an image with Ken Burns animation."""
     source = scene.get("source", "")
     resolved = resolve_image(source, temp_dir)
+    # Fallback: try search_query as a URL/path if source failed
     if not resolved:
-        log(f"[ffmpeg_engine] Image not found: {source}, using black frame")
+        fallback = scene.get("search_query", "")
+        if fallback:
+            resolved = resolve_image(fallback, temp_dir)
+    if not resolved:
+        log(f"[ffmpeg_engine] ERROR: Image not found for scene — source={source!r}, search_query={scene.get('search_query', '')!r}. Using black frame.")
+        scene["_image_failed"] = True
         _create_color_card(ffmpeg, output, "#000000", w, h, fps, duration)
         return
 

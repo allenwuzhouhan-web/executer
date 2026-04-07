@@ -192,7 +192,7 @@ struct HotkeyTool: ToolDefinition {
         let parts = combo.split(separator: "+").map { String($0).trimmingCharacters(in: .whitespaces) }
         guard !parts.isEmpty else { return "Invalid combo." }
 
-        let key = parts.last!
+        guard let key = parts.last else { return "Invalid combo." }
         let modifierNames = Array(parts.dropLast())
 
         guard let keyCode = keyCodeMap[key] else {

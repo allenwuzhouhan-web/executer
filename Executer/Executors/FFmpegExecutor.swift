@@ -41,7 +41,6 @@ enum FFmpegExecutor {
         whichProcess.standardOutput = pipe
         whichProcess.standardError = FileHandle.nullDevice
         try? whichProcess.run()
-        whichProcess.waitUntilExit()
 
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -78,7 +77,6 @@ enum FFmpegExecutor {
         whichProcess.standardOutput = pipe
         whichProcess.standardError = FileHandle.nullDevice
         try? whichProcess.run()
-        whichProcess.waitUntilExit()
 
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -280,13 +278,15 @@ struct SetupFFmpegTool: ToolDefinition {
                 process.standardOutput = pipe
                 process.standardError = errPipe
                 try process.run()
+                let outData = pipe.fileHandleForReading.readDataToEndOfFile()
+                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
 
                 if process.terminationStatus == 0 {
                     // Clear cache so next find picks it up
                     return "FFmpeg installed successfully via Homebrew. Ready to use."
                 } else {
-                    let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                    let err = String(data: errData, encoding: .utf8) ?? ""
                     return "Failed to install FFmpeg via Homebrew: \(err.prefix(300))\nPlease install manually: brew install ffmpeg"
                 }
             }
@@ -605,11 +605,15 @@ struct CreateVideoTool: ToolDefinition {
         }
 
         // Auto-search: resolve search_query fields to real image URLs
+        var searchFailures = 0
         for i in 0..<scenes.count {
             if let query = scenes[i]["search_query"] as? String, scenes[i]["source"] == nil {
                 let results = await ImageSearchService.search(query: query, count: 3, orientation: "landscape")
                 if let best = results.first {
                     scenes[i]["source"] = best.url
+                    scenes[i].removeValue(forKey: "search_query")
+                } else {
+                    searchFailures += 1
                 }
             }
         }
@@ -650,9 +654,18 @@ struct CreateVideoTool: ToolDefinition {
                 let path = json["path"] as? String ?? outputPath
                 let duration = json["duration_seconds"] as? Double
                 let sceneCount = json["scenes"] as? Int
+                let engineFailed = json["failed_images"] as? Int ?? 0
+                let engineWarnings = json["warnings"] as? [String] ?? []
                 var msg = "Video created: \(path)"
                 if let dur = duration { msg += " (\(String(format: "%.1f", dur))s)" }
                 if let sc = sceneCount { msg += ", \(sc) scenes" }
+                let totalFailed = searchFailures + engineFailed
+                if totalFailed > 0 {
+                    msg += "\n⚠️ WARNING: \(totalFailed) image scene(s) could not find images and used black frames instead. The video may appear to be audio-only. Try providing direct image URLs or different search terms."
+                }
+                if !engineWarnings.isEmpty {
+                    msg += "\nEngine warnings: " + engineWarnings.joined(separator: "; ")
+                }
                 if autoOpen { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
                 return msg
             } else {
@@ -1207,6 +1220,21 @@ struct QuickVideoTool: ToolDefinition {
             scenes.append(scene)
         }
 
+        // Resolve any remaining search_query fields that weren't resolved above
+        var failedSearches = 0
+        for i in 0..<scenes.count {
+            if scenes[i]["search_query"] is String && scenes[i]["source"] == nil {
+                let query = scenes[i]["search_query"] as! String
+                let results = await ImageSearchService.search(query: query, count: 3, orientation: "landscape")
+                if let best = results.first {
+                    scenes[i]["source"] = best.url
+                    scenes[i].removeValue(forKey: "search_query")
+                } else {
+                    failedSearches += 1
+                }
+            }
+        }
+
         // Outro title card
         let (bg2, fg2) = colors[1]
         scenes.append([
@@ -1252,10 +1280,19 @@ struct QuickVideoTool: ToolDefinition {
             if success {
                 let path = json["path"] as? String ?? outputPath
                 let duration = json["duration_seconds"] as? Double
+                let engineFailed = json["failed_images"] as? Int ?? 0
+                let warnings = json["warnings"] as? [String] ?? []
                 NSWorkspace.shared.open(URL(fileURLWithPath: path))
                 var msg = "Video created and opened: \(path)"
                 if let dur = duration { msg += " (\(String(format: "%.1f", dur))s)" }
                 msg += ", \(scenes.count) scenes"
+                let totalFailed = failedSearches + engineFailed
+                if totalFailed > 0 {
+                    msg += "\n⚠️ WARNING: \(totalFailed) image scene(s) could not find images and used black frames instead. The video may appear to be audio-only. Try providing direct image URLs or different search terms."
+                }
+                if !warnings.isEmpty {
+                    msg += "\nEngine warnings: " + warnings.joined(separator: "; ")
+                }
                 return msg
             } else {
                 return "Video creation failed: \(json["error"] as? String ?? "Unknown error")"

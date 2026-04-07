@@ -94,7 +94,7 @@ struct ChromeCDPLauncher {
     }
 
     /// Check if CDP is reachable by probing the /json/version endpoint.
-    private static func isCDPReachable() async -> Bool {
+    static func isCDPReachable() async -> Bool {
         guard let url = URL(string: "\(cdpURL)/json/version") else { return false }
         var request = URLRequest(url: url)
         request.timeoutInterval = 2

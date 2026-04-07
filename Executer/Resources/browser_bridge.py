@@ -702,7 +702,9 @@ async def handle_read_elements(params: dict) -> dict:
     include_iframes = params.get("include_iframes", True)
 
     # Comprehensive element reader — includes disabled/checked/readonly state,
-    # visibility verification, iframe traversal, and form values.
+    # visibility verification, iframe traversal, form values, and SECTION CONTEXT.
+    # Each element includes its nearest labeled container ancestor so the LLM
+    # understands spatial hierarchy (e.g., "Create Page" under "Private" section).
     js = """(function() {
         var root = document.querySelector('%s');
         if (!root) return JSON.stringify({error: 'Scope not found'});
@@ -718,6 +720,50 @@ async def handle_read_elements(params: dict) -> dict:
             if (parseFloat(style.opacity) < 0.1) return false;
             if (style.pointerEvents === 'none' && el.tagName !== 'LABEL') return false;
             return true;
+        }
+
+        // Walk up DOM to find labeled container ancestors (sections, nav, groups, menus).
+        // Returns ancestry path like "Sidebar > Private" so agent knows the context.
+        function getSectionPath(el) {
+            var labels = [];
+            var p = el.parentElement;
+            var depth = 0;
+            while (p && p !== document.body && depth < 8) {
+                var role = p.getAttribute('role') || '';
+                var tag = p.tagName.toLowerCase();
+                var isContainer = (
+                    role === 'navigation' || role === 'menu' || role === 'menubar' ||
+                    role === 'toolbar' || role === 'tablist' || role === 'dialog' ||
+                    role === 'group' || role === 'region' || role === 'complementary' ||
+                    role === 'banner' || role === 'main' || role === 'contentinfo' ||
+                    tag === 'nav' || tag === 'section' || tag === 'aside' ||
+                    tag === 'header' || tag === 'footer' || tag === 'main' ||
+                    tag === 'form' || tag === 'fieldset' || tag === 'menu' ||
+                    tag === 'details' || tag === 'dialog'
+                );
+                if (isContainer) {
+                    var lbl = p.getAttribute('aria-label') || p.getAttribute('title') ||
+                              p.getAttribute('aria-labelledby');
+                    if (lbl && p.getAttribute('aria-labelledby')) {
+                        var lblEl = document.getElementById(lbl);
+                        lbl = lblEl ? (lblEl.innerText || '').trim().substring(0, 40) : lbl;
+                    }
+                    // Fallback: check for a heading or legend child as the section label
+                    if (!lbl) {
+                        var heading = p.querySelector(':scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > legend, :scope > [role="heading"]');
+                        if (heading) lbl = (heading.innerText || '').trim().substring(0, 40);
+                    }
+                    if (lbl) {
+                        labels.push(lbl);
+                    } else if (role) {
+                        labels.push(role);
+                    }
+                }
+                p = p.parentElement;
+                depth++;
+            }
+            labels.reverse();
+            return labels.length > 0 ? labels.join(' > ') : '';
         }
 
         function processElements(doc, prefix) {
@@ -748,9 +794,12 @@ async def handle_read_elements(params: dict) -> dict:
                     val = (el.options[el.selectedIndex].text || '').substring(0, 40);
                 }
 
+                // Section context — where this element lives in the page hierarchy
+                var section = getSectionPath(el);
+
                 el.setAttribute('data-exec-idx', idx);
                 var pos = Math.round(rect.left) + ',' + Math.round(rect.top) + ',' + Math.round(rect.width) + 'x' + Math.round(rect.height);
-                results.push({i: idx, tag: tag, type: type, text: text, pos: pos, flags: flags.join(','), val: val, prefix: prefix || ''});
+                results.push({i: idx, tag: tag, type: type, text: text, pos: pos, flags: flags.join(','), val: val, prefix: prefix || '', section: section});
                 idx++;
             }
         }
@@ -794,17 +843,32 @@ async def handle_read_elements(params: dict) -> dict:
 
     output = [f"Page: {page_title} ({page_url})"]
     output.append(f"Interactive elements ({len(elements)}):")
-    output.append("idx | tag    | type   | text                         | state       | value")
-    output.append("--- | ------ | ------ | ---------------------------- | ----------- | -----")
+
+    # Group elements by section for spatial context
+    from collections import OrderedDict
+    sections = OrderedDict()
     for el in elements:
-        prefix = el.get("prefix", "")
-        idx_str = (prefix + str(el["i"])).ljust(3)
-        tag = el["tag"][:6].ljust(6)
-        tp = el["type"][:6].ljust(6)
-        text = el["text"][:28].ljust(28)
-        flags = el.get("flags", "")[:11].ljust(11)
-        val = el.get("val", "")[:20]
-        output.append(f"{idx_str} | {tag} | {tp} | {text} | {flags} | {val}")
+        section = el.get("section", "") or ""
+        if section not in sections:
+            sections[section] = []
+        sections[section].append(el)
+
+    for section, els in sections.items():
+        if section:
+            output.append(f"── {section}")
+            indent = "   "
+        else:
+            indent = ""
+
+        for el in els:
+            prefix = el.get("prefix", "")
+            idx_str = (prefix + str(el["i"])).ljust(3)
+            tag = el["tag"][:6].ljust(6)
+            tp = el["type"][:6].ljust(6)
+            text = el["text"][:28].ljust(28)
+            flags = el.get("flags", "")[:11].ljust(11)
+            val = el.get("val", "")[:20]
+            output.append(f"{indent}{idx_str} | {tag} | {tp} | {text} | {flags} | {val}")
 
     return {"content": [{"type": "text", "text": "\n".join(output)}], "isError": False}
 
@@ -841,8 +905,13 @@ async def handle_click_element(params: dict) -> dict:
         // 4. Scroll into view and click with full event chain
         el.scrollIntoView({block: 'center', behavior: 'instant'});
         el.focus();
+        // Recapture rect AFTER scroll — old rect has stale coordinates
+        rect = el.getBoundingClientRect();
         var cx = rect.left + rect.width / 2;
         var cy = rect.top + rect.height / 2;
+        // Dispatch mousemove/pointermove first so the browser registers cursor position
+        el.dispatchEvent(new PointerEvent('pointermove', {bubbles: true, clientX: cx, clientY: cy}));
+        el.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: cx, clientY: cy}));
         el.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, clientX: cx, clientY: cy}));
         el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, clientX: cx, clientY: cy}));
         el.dispatchEvent(new PointerEvent('pointerup', {bubbles: true, clientX: cx, clientY: cy}));

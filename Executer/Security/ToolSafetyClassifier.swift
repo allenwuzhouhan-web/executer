@@ -39,6 +39,8 @@ enum ToolSafetyClassifier {
         "recall_memories": .safe,
         "semantic_scholar_search": .safe, "get_paper_details": .safe,
         "browser_screenshot": .safe,
+        "synthesize_activity": .safe, "synthesize_research": .safe, "synthesize_project": .safe,
+        "prepare_meeting": .safe, "meeting_status": .safe,
 
         // TIER 0: SAFE — System Bash (read-only scoped shell tools)
         "get_network_info": .safe, "get_disk_usage": .safe,

@@ -24,6 +24,8 @@ struct CoworkingSuggestion: Identifiable, Sendable {
         case contextualHelp      // "Looks like you're stuck on a compile error."
         case routine             // "You usually check email around now."
         case deadlineAlert       // "Assignment due in 4 hours."
+        case synthesis           // Cross-domain connection: "Your research connects to Thursday's deadline"
+        case workspaceFocus      // Organize windows + list productivity actions
     }
 
     init(

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Executes JavaScript in the current Safari tab and returns the result.
-private func safariJS(_ js: String) throws -> String {
+func safariJS(_ js: String) throws -> String {
     let escaped = js
         .replacingOccurrences(of: "\\", with: "\\\\")
         .replacingOccurrences(of: "\"", with: "\\\"")

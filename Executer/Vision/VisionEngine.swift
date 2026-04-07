@@ -63,8 +63,18 @@ class VisionEngine {
 
         // Try AX tree first
         let axResult = tryAXPerception()
-        let axElements = axResult?.elements ?? []
-        let axSufficient = axResult?.sufficient ?? false
+        var axElements = axResult?.elements ?? []
+        var axSufficient = axResult?.sufficient ?? false
+
+        // For browsers, AX only sees chrome UI (tabs, address bar) — not web page content.
+        // Fuse in DOM elements from Safari (AppleScript) or Chrome (CDP) when available.
+        let appBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        if Self.browserBundleIDs.contains(appBundleID) {
+            if let domElements = await tryBrowserDOMPerception(bundleID: appBundleID) {
+                axElements.append(contentsOf: domElements)
+                axSufficient = true
+            }
+        }
 
         var ocrText: String? = nil
         var screenshotBase64: String? = nil
@@ -318,6 +328,170 @@ class VisionEngine {
             hash = ((hash << 5) &+ hash) &+ UInt64(byte)
         }
         return String(format: "e%04x", hash & 0xFFFF)
+    }
+
+    // MARK: - Browser DOM Perception
+
+    private static let browserBundleIDs: Set<String> = [
+        "com.apple.Safari",
+        "com.google.Chrome",
+        "com.microsoft.edgemac",
+        "company.thebrowser.Browser",   // Arc
+        "com.brave.Browser",
+        "org.chromium.Chromium",
+        "com.vivaldi.Vivaldi",
+        "org.mozilla.firefox",
+    ]
+
+    /// Attempts to read interactive DOM elements from the frontmost browser.
+    /// Returns nil on any failure (permissions, no CDP, etc.) — caller falls back to AX+OCR.
+    private func tryBrowserDOMPerception(bundleID: String) async -> [PerceptualElement]? {
+        if bundleID == "com.apple.Safari" {
+            return trySafariDOMRead()
+        } else {
+            return await tryChromiumDOMRead()
+        }
+    }
+
+    /// Read elements from Safari via AppleScript + JS (same JS as SafariReadElementsTool).
+    private func trySafariDOMRead() -> [PerceptualElement]? {
+        let js = """
+        (function() {
+            var root = document.body;
+            if (!root) return '';
+            var els = root.querySelectorAll('button, input, select, textarea, a[href], [role="button"], [role="option"], [role="menuitem"], [role="radio"], [role="checkbox"], [role="link"], [onclick], [tabindex="0"], label[for]');
+            var results = [];
+            for (var i = 0; i < els.length && i < 80; i++) {
+                var el = els[i];
+                var rect = el.getBoundingClientRect();
+                if (rect.width === 0 && rect.height === 0) continue;
+                if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+                var text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || el.title || '').trim().substring(0, 100);
+                var tag = el.tagName.toLowerCase();
+                var type = el.type || el.getAttribute('role') || '';
+                results.push(i + '|' + tag + '|' + type + '|' + text + '|' + Math.round(rect.left) + ',' + Math.round(rect.top) + ',' + Math.round(rect.width) + 'x' + Math.round(rect.height));
+            }
+            return results.join('\\n');
+        })()
+        """
+
+        guard let raw = try? safariJS(js), !raw.isEmpty, !raw.hasPrefix("ERR:") else { return nil }
+
+        // Get browser window position for viewport → screen coordinate conversion
+        let windowOrigin = browserWindowOrigin()
+
+        var elements: [PerceptualElement] = []
+        for line in raw.split(separator: "\n") {
+            let parts = line.split(separator: "|", maxSplits: 4).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count >= 5 else { continue }
+            let tag = parts[1]
+            let type = parts[2]
+            let text = parts[3]
+            let role = "DOM:\(tag)" + (type.isEmpty ? "" : "[\(type)]")
+
+            // Parse position: "left,top,widthxheight"
+            let clickPoint: CGPoint?
+            let bounds: CGRect?
+            if let rect = parseDOMRect(parts[4], windowOrigin: windowOrigin) {
+                bounds = rect
+                clickPoint = CGPoint(x: rect.midX, y: rect.midY)
+            } else {
+                bounds = nil
+                clickPoint = nil
+            }
+
+            let id = stableID(role: role, label: text, position: clickPoint)
+            elements.append(PerceptualElement(
+                id: id, role: role, label: text, value: "",
+                clickPoint: clickPoint, bounds: bounds,
+                isInteractive: true, depth: 1, parentID: nil
+            ))
+        }
+        return elements.isEmpty ? nil : elements
+    }
+
+    /// Read elements from Chromium-based browsers via CDP (if connected).
+    private func tryChromiumDOMRead() async -> [PerceptualElement]? {
+        guard await ChromeCDPLauncher.isCDPReachable() else { return nil }
+
+        guard let raw = try? await BrowserService.shared.callBridgeTool(
+            name: "browser_read_elements", arguments: "{}"
+        ) else { return nil }
+
+        // The result is a text table or JSON — parse lines for element info.
+        // browser_read_elements returns lines like: "0 button  Sign in  120,40,80x30"
+        let windowOrigin = browserWindowOrigin()
+        var elements: [PerceptualElement] = []
+
+        for line in raw.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // Skip header/divider lines
+            if trimmed.isEmpty || trimmed.hasPrefix("idx") || trimmed.hasPrefix("---") || trimmed.hasPrefix("Interactive") { continue }
+
+            // Parse pipe-delimited format: "idx | tag | type | text | pos"
+            let parts = trimmed.split(separator: "|", maxSplits: 4).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count >= 5 else { continue }
+            let tag = parts[1]
+            let type = parts[2]
+            let text = parts[3]
+            let role = "DOM:\(tag)" + (type.isEmpty ? "" : "[\(type)]")
+
+            let clickPoint: CGPoint?
+            let bounds: CGRect?
+            if let rect = parseDOMRect(parts[4], windowOrigin: windowOrigin) {
+                bounds = rect
+                clickPoint = CGPoint(x: rect.midX, y: rect.midY)
+            } else {
+                bounds = nil
+                clickPoint = nil
+            }
+
+            let id = stableID(role: role, label: text, position: clickPoint)
+            elements.append(PerceptualElement(
+                id: id, role: role, label: text, value: "",
+                clickPoint: clickPoint, bounds: bounds,
+                isInteractive: true, depth: 1, parentID: nil
+            ))
+        }
+        return elements.isEmpty ? nil : elements
+    }
+
+    /// Get the frontmost browser window's screen origin (for viewport→screen conversion).
+    private func browserWindowOrigin() -> CGPoint {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return .zero }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var windowValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowValue) == .success else {
+            return .zero
+        }
+        let windowAX = windowValue as! AXUIElement
+        var posValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(windowAX, kAXPositionAttribute as CFString, &posValue) == .success else {
+            return .zero
+        }
+        var point = CGPoint.zero
+        AXValueGetValue(posValue as! AXValue, .cgPoint, &point)
+
+        // Offset for browser chrome (toolbar/tab bar ~80px)
+        return CGPoint(x: point.x, y: point.y + 80)
+    }
+
+    /// Parse "left,top,widthxheight" from DOM bounding rect, offset by window origin.
+    private func parseDOMRect(_ raw: String, windowOrigin: CGPoint) -> CGRect? {
+        // Format: "120,40,80x30"
+        let cleaned = raw.trimmingCharacters(in: .whitespaces)
+        let parts = cleaned.split(whereSeparator: { $0 == "," || $0 == "x" })
+        guard parts.count == 4,
+              let left = Double(parts[0]),
+              let top = Double(parts[1]),
+              let width = Double(parts[2]),
+              let height = Double(parts[3]) else { return nil }
+        return CGRect(
+            x: windowOrigin.x + left,
+            y: windowOrigin.y + top,
+            width: width,
+            height: height
+        )
     }
 
     private func contentHash(for elements: [PerceptualElement]) -> UInt64 {

@@ -41,7 +41,7 @@ extension LLMProvider {
     }()
 
     var config: LLMProviderConfig {
-        Self.configs[self]!
+        Self.configs[self] ?? buildConfig()
     }
 
     private func buildConfig() -> LLMProviderConfig {

@@ -10,10 +10,11 @@ final class ClipboardObserver {
     var onClipboardFlow: ((ClipboardFlow) -> Void)?
 
     private var timer: Timer?
-    private var lastChangeCount: Int = 0
-    private var lastCopyApp: String?
-    private var lastCopyTime: Date?
-    private var isRunning = false
+    // All state below is accessed only on the main thread.
+    @MainActor private var lastChangeCount: Int = 0
+    @MainActor private var lastCopyApp: String?
+    @MainActor private var lastCopyTime: Date?
+    @MainActor private var isRunning = false
 
     struct ClipboardFlow {
         let sourceApp: String       // App where content was copied
@@ -33,15 +34,22 @@ final class ClipboardObserver {
 
     private init() {}
 
+    /// Starts clipboard monitoring. Safe to call from any thread.
     func start() {
+        DispatchQueue.main.async { [weak self] in
+            self?.startOnMain()
+        }
+    }
+
+    @MainActor
+    private func startOnMain() {
         guard !isRunning else { return }
         isRunning = true
         lastChangeCount = NSPasteboard.general.changeCount
 
-        // Must schedule on main RunLoop — start() may be called from a Task/actor context
-        // whose thread has no active RunLoop, causing the timer to silently never fire.
-        DispatchQueue.main.async { [weak self] in
-            self?.timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            // Timer fires on main run loop; use assumeIsolated to satisfy the compiler.
+            MainActor.assumeIsolated {
                 self?.checkClipboard()
             }
         }
@@ -49,13 +57,22 @@ final class ClipboardObserver {
         print("[ClipboardObserver] Started monitoring clipboard flows")
     }
 
+    /// Stops clipboard monitoring. Safe to call from any thread.
     func stop() {
+        DispatchQueue.main.async { [weak self] in
+            self?.stopOnMain()
+        }
+    }
+
+    @MainActor
+    private func stopOnMain() {
         isRunning = false
         timer?.invalidate()
         timer = nil
         print("[ClipboardObserver] Stopped")
     }
 
+    @MainActor
     private func checkClipboard() {
         let currentCount = NSPasteboard.general.changeCount
         guard currentCount != lastChangeCount else { return }

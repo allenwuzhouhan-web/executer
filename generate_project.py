@@ -13,11 +13,13 @@ def discover_swift_files():
     """Walk Executer/ and return (relative_path, group_name) for every .swift file."""
     result = []
     base = "Executer"
+    # Directories to exclude: unfinished/WIP code not ready for compilation
+    exclude_dirs = {'.', 'ObservationEngine'}
     for dirpath, dirnames, filenames in os.walk(base):
-        # Skip hidden dirs and build artifacts
-        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+        dirnames[:] = [d for d in dirnames if d not in exclude_dirs and not d.startswith('.')]
+        exclude_files = {'PillarIntegration.swift'}
         for f in sorted(filenames):
-            if f.endswith(".swift"):
+            if f.endswith(".swift") and f not in exclude_files:
                 full = os.path.join(dirpath, f)
                 rel = os.path.relpath(full, base)  # e.g. "App/AppDelegate.swift"
                 # Group = first directory component, or "App" for top-level files

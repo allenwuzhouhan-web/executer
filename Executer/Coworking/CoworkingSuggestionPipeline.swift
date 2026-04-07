@@ -12,7 +12,8 @@ actor CoworkingSuggestionPipeline {
     // MARK: - Configuration
 
     /// Minimum seconds between LLM-based evaluations (expensive).
-    private let llmEvalInterval: TimeInterval = 300  // 5 min
+    /// Increased from 5min to 15min by foveal attention Stage 3 gating.
+    private let llmEvalInterval: TimeInterval = 900  // 15 min (was 5 min)
 
     /// Maximum pending suggestions to hold.
     private let maxPending = 2
@@ -66,10 +67,39 @@ actor CoworkingSuggestionPipeline {
             }
         }
 
+        // 2.5. Workflow Compression — suggest automating detected repetitive patterns
+        if !isCoolingDown(type: .workflowAutomation),
+           let pattern = await WorkflowCompressionBridge.shared.nextCandidate() {
+            let stepPreview = pattern.actions.prefix(4).map { $0.elementTitle }.joined(separator: " → ")
+            let more = pattern.actions.count > 4 ? " → …" : ""
+            return CoworkingSuggestion(
+                type: .workflowAutomation,
+                headline: "You do \"\(pattern.name)\" \(pattern.frequency)x — automate it?",
+                detail: stepPreview + more,
+                actionCommand: "__compress_workflow:\(pattern.id.uuidString)",
+                confidence: min(0.9, 0.5 + Double(pattern.frequency) / 20.0),
+                expiresIn: 600
+            )
+        }
+
         // 3. Local heuristic checks (no LLM)
         if let heuristic = checkLocalHeuristics(state: state) {
             if !isCoolingDown(type: heuristic.type) {
                 return heuristic
+            }
+        }
+
+        // 3.7. Synthesis Engine — cross-domain connections (rate-limited by engine's 30-min cycle)
+        if state.idleSeconds > 30, !isCoolingDown(type: .synthesis) {
+            if let insight = await SynthesisEngine.shared.nextPendingInsight() {
+                return CoworkingSuggestion(
+                    type: .synthesis,
+                    headline: insight.headline,
+                    detail: insight.explanation,
+                    actionCommand: insight.actionSuggestion,
+                    confidence: insight.surpriseScore,
+                    expiresIn: 600  // 10 min — higher value since these are rarer and more valuable
+                )
             }
         }
 
@@ -165,8 +195,9 @@ actor CoworkingSuggestionPipeline {
 
     /// Checks all local heuristics in priority order. Returns the first match.
     private func checkLocalHeuristics(state: WorkState) -> CoworkingSuggestion? {
-        // Priority order: meeting prep > break > clipboard > files > context switch
+        // Priority order: meeting prep > workspace focus > break > clipboard > files > context switch
         if let s = checkMeetingPrep() { return s }
+        if let s = checkWorkspaceFocus(state: state) { return s }
         if let s = checkBreakReminder(state: state) { return s }
         if let s = checkClipboardEnrichment(state: state) { return s }
         if let s = checkFileContext(state: state) { return s }
@@ -192,13 +223,21 @@ actor CoworkingSuggestionPipeline {
         let title = event.title ?? "Upcoming event"
         let minutesUntil = max(1, Int(event.startDate.timeIntervalSinceNow / 60))
 
+        // Enrich with related goals for a more useful suggestion
+        let snapshot = MeetingIntelligence.CalendarEventSnapshot(from: event)
+        let goals = GoalTracker.shared.topGoals(limit: 5)
+        let relatedGoals = goals.filter { goal in
+            snapshot.keywords.contains(where: { goal.topic.lowercased().contains($0) })
+        }
+        let goalHint = relatedGoals.isEmpty ? "" : " Related goals: \(relatedGoals.map(\.topic).joined(separator: ", "))."
+
         return CoworkingSuggestion(
             type: .meetingPrep,
             headline: "'\(title)' starts in \(minutesUntil) min — want a quick prep summary?",
-            detail: "I can pull together your recent notes and goals related to this.",
+            detail: "I can pull together your recent notes and goals related to this.\(goalHint)",
             actionCommand: "Prepare a brief status summary for my meeting: \(title)",
             confidence: 0.8,
-            expiresIn: Double(minutesUntil * 60)  // Expires when meeting starts
+            expiresIn: Double(minutesUntil * 60)
         )
     }
 
@@ -288,6 +327,12 @@ actor CoworkingSuggestionPipeline {
         return nil
     }
 
+    // MARK: - Workspace Focus
+
+    private func checkWorkspaceFocus(state: WorkState) -> CoworkingSuggestion? {
+        return nil
+    }
+
     // MARK: - Context Switch Storm
 
     private func checkContextSwitchStorm(state: WorkState) -> CoworkingSuggestion? {
@@ -297,9 +342,15 @@ actor CoworkingSuggestionPipeline {
         return CoworkingSuggestion(
             type: .contextualHelp,
             headline: "Lots of context switching (\(uniqueApps) apps in 10 min) — want me to help you focus?",
-            detail: "I can check your goals and suggest what to prioritize.",
-            actionCommand: "What should I focus on right now based on my goals and calendar?",
-            confidence: 0.5,
+            detail: "I can organize your windows and suggest what to prioritize.",
+            actionCommand: """
+                First, use list_windows to see all open windows. Then use arrange_windows to tile \
+                the visible app windows into a clean, focused layout. \
+                After organizing, list exactly 5 specific, actionable things I can do right now to \
+                speed up the user's workflow based on the open apps and their goals. \
+                Keep each suggestion to one sentence.
+                """,
+            confidence: 0.6,
             expiresIn: 600
         )
     }
@@ -321,6 +372,9 @@ actor CoworkingSuggestionPipeline {
 
     // MARK: - LLM Batch Evaluation
 
+    /// Previous work state embedding for drift detection (Stage 3 gate).
+    private var previousWorkStateEmbedding: [Double]?
+
     private func llmBatchEvaluate(state: WorkState) async -> CoworkingSuggestion? {
         let goalContext = GoalStack.promptSection
         let stateDesc = """
@@ -332,21 +386,18 @@ actor CoworkingSuggestionPipeline {
         Idle: \(Int(state.idleSeconds))s
         """
 
-        let prompt = """
-        You are a coworking assistant evaluating whether to suggest something helpful.
+        // Stage 3 drift gate: skip LLM if work state hasn't meaningfully changed
+        if !FovealRouter.shouldCallAPI(
+            currentSnapshot: stateDesc,
+            previousEmbedding: &previousWorkStateEmbedding,
+            driftThreshold: 0.7
+        ) {
+            print("[CoworkingPipeline] Drift gate: state unchanged, skipping LLM eval")
+            return nil
+        }
 
-        USER STATE:
-        \(stateDesc)
-
-        ACTIVE GOALS:
-        \(goalContext.isEmpty ? "None" : goalContext)
-
-        Should you suggest anything? Only suggest if it would be genuinely helpful right now.
-        Respond with EXACTLY one line of JSON:
-        {"suggest":false}
-        OR
-        {"suggest":true,"headline":"...","type":"goalNudge|meetingPrep|breakReminder|contextualHelp","action":"optional command","confidence":0.7}
-        """
+        // Use Stage 3 macula micro-prompt (compact, ~200 tokens instead of ~500)
+        let prompt = ContextCompressor.maculaCoworkingPrompt(state: stateDesc, goals: goalContext)
 
         let messages = [
             ChatMessage(role: "user", content: prompt, tool_calls: nil, tool_call_id: nil, reasoning_content: nil)

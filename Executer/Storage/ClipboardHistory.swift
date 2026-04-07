@@ -13,6 +13,7 @@ class ClipboardHistoryManager {
     static let shared = ClipboardHistoryManager()
 
     private var entries: [ClipboardEntry] = []
+    private let entriesLock = NSLock()
     private var timer: Timer?
     private var lastChangeCount: Int = 0
     private var lastSaveTime: Date = .distantPast
@@ -51,7 +52,10 @@ class ClipboardHistoryManager {
         guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
 
         // Skip if identical to last entry
-        if let last = entries.first, last.text == text { return }
+        entriesLock.lock()
+        let lastText = entries.first?.text
+        entriesLock.unlock()
+        if lastText == text { return }
 
         let sourceApp = NSWorkspace.shared.frontmostApplication?.localizedName
 
@@ -62,10 +66,12 @@ class ClipboardHistoryManager {
             sourceApp: sourceApp
         )
 
+        entriesLock.lock()
         entries.insert(entry, at: 0)
         if entries.count > maxEntries {
             entries = Array(entries.prefix(maxEntries))
         }
+        entriesLock.unlock()
 
         guard Date().timeIntervalSince(lastSaveTime) > 10 else { return }
         saveToDisk()
@@ -76,7 +82,10 @@ class ClipboardHistoryManager {
     // MARK: - Query
 
     func getHistory(limit: Int = 20, minutesAgo: Int? = nil) -> [ClipboardEntry] {
-        var filtered = entries
+        entriesLock.lock()
+        let snapshot = entries
+        entriesLock.unlock()
+        var filtered = snapshot
         if let minutes = minutesAgo {
             let cutoff = Date().addingTimeInterval(-Double(minutes) * 60)
             filtered = filtered.filter { $0.timestamp >= cutoff }
@@ -86,12 +95,17 @@ class ClipboardHistoryManager {
 
     func search(query: String, limit: Int = 10) -> [ClipboardEntry] {
         let lower = query.lowercased()
-        let matches = entries.filter { $0.text.lowercased().contains(lower) }
+        entriesLock.lock()
+        let snapshot = entries
+        entriesLock.unlock()
+        let matches = snapshot.filter { $0.text.lowercased().contains(lower) }
         return Array(matches.prefix(limit))
     }
 
     func clearAll() {
+        entriesLock.lock()
         entries.removeAll()
+        entriesLock.unlock()
         saveToDisk()
         print("[ClipboardHistory] History cleared")
     }
@@ -104,8 +118,11 @@ class ClipboardHistoryManager {
             let data = try Data(contentsOf: storageURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            entries = try decoder.decode([ClipboardEntry].self, from: data)
-            print("[ClipboardHistory] Loaded \(entries.count) entries from disk")
+            let loaded = try decoder.decode([ClipboardEntry].self, from: data)
+            entriesLock.lock()
+            entries = loaded
+            entriesLock.unlock()
+            print("[ClipboardHistory] Loaded \(loaded.count) entries from disk")
         } catch {
             print("[ClipboardHistory] Failed to load: \(error)")
         }
@@ -116,7 +133,10 @@ class ClipboardHistoryManager {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = .prettyPrinted
-            let data = try encoder.encode(entries)
+            entriesLock.lock()
+            let snapshot = entries
+            entriesLock.unlock()
+            let data = try encoder.encode(snapshot)
             try data.write(to: storageURL, options: .atomic)
         } catch {
             print("[ClipboardHistory] Failed to save: \(error)")

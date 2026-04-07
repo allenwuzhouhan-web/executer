@@ -12,6 +12,8 @@ class NotchWindow: NSPanel {
     private var isDragHovered = false
     private var originalFrame: CGRect = .zero
     private let filletRadius: CGFloat = 6
+    /// Extra width on each side of the physical notch to house indicator dots
+    private let dotSideExtend: CGFloat = 10
 
     init(onClick: (() -> Void)? = nil) {
         self.onClick = onClick
@@ -106,27 +108,49 @@ class NotchWindow: NSPanel {
             orderOut(nil)
             return
         }
-        setFrame(notchRect, display: true)
 
-        // Learning dot: right side of notch, below the physical notch cutout
+        // Extend the window on both sides to create space for indicator dots.
+        // The fillet ears need space too, so total extension = dotSideExtend + filletRadius per side.
+        let fr = filletRadius
+        let extendedFrame = CGRect(
+            x: notchRect.origin.x - dotSideExtend - fr,
+            y: notchRect.origin.y,
+            width: notchRect.width + (dotSideExtend + fr) * 2,
+            height: notchRect.height
+        )
+        setFrame(extendedFrame, display: true)
+
+        // Always show the black notch shape so the side extensions are visible
+        blackView.alphaValue = 1
+
+        // Position dots concentric with the bottom rounded corners of the notch shape.
+        // The notch shape's bottom-left arc center is at (fr + cr, cr) in view coords,
+        // and bottom-right arc center is at (width - fr - cr, cr).
         let dotSize: CGFloat = 6
-        learningDot.frame = CGRect(
-            x: notchRect.width - dotSize - 8,
-            y: 4,
+        let bottomRadius: CGFloat = 14
+        let cr = min(bottomRadius, extendedFrame.height / 2, (extendedFrame.width - fr * 2) / 2)
+        let arcCenterY = cr
+
+        // Suggestion dot (left): concentric with left bottom rounded corner
+        let leftArcCenterX = fr + cr
+        suggestionDot.frame = CGRect(
+            x: leftArcCenterX - dotSize / 2,
+            y: arcCenterY - dotSize / 2,
             width: dotSize,
             height: dotSize
         )
 
-        // Suggestion dot: left side of notch, below the physical notch cutout
-        suggestionDot.frame = CGRect(
-            x: 8,
-            y: 4,
+        // Learning dot (right): concentric with right bottom rounded corner
+        let rightArcCenterX = extendedFrame.width - fr - cr
+        learningDot.frame = CGRect(
+            x: rightArcCenterX - dotSize / 2,
+            y: arcCenterY - dotSize / 2,
             width: dotSize,
             height: dotSize
         )
 
         if !isHovered {
-            originalFrame = notchRect
+            originalFrame = extendedFrame
         }
     }
 
@@ -137,17 +161,14 @@ class NotchWindow: NSPanel {
         if hovering {
             blackView.cancelRetraction()
 
-            // Expand: sides by 5px, down by 5px, extra width for fillet ears
+            // Expand further from the already-extended base frame
             let expand: CGFloat = 5
-            let fr = filletRadius
             let expanded = CGRect(
-                x: originalFrame.origin.x - expand - fr,
+                x: originalFrame.origin.x - expand,
                 y: originalFrame.origin.y - expand,
-                width: originalFrame.width + (expand + fr) * 2,
+                width: originalFrame.width + expand * 2,
                 height: originalFrame.height + expand
             )
-
-            blackView.alphaValue = 1
 
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.3
@@ -155,21 +176,12 @@ class NotchWindow: NSPanel {
                 animator().setFrame(expanded, display: true)
             }
         } else {
-            // Animate the mask path from expanded to collapsed — all edges of the
-            // notch shape converge simultaneously instead of the bottom lagging.
-            let expand: CGFloat = 5
-            let fr = filletRadius
-            let collapsedRect = CGRect(
-                x: expand + fr,
-                y: expand,
-                width: originalFrame.width,
-                height: originalFrame.height
-            )
-
-            blackView.animateRetraction(to: collapsedRect, duration: 0.25) { [weak self] in
-                guard let self = self else { return }
-                self.blackView.alphaValue = 0
-                self.setFrame(self.originalFrame, display: true)
+            // Animate back to the base (dot-extended) frame.
+            // BlackView stays visible; its shape mask updates via layout.
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.25
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                animator().setFrame(originalFrame, display: true)
             }
         }
     }
@@ -181,17 +193,15 @@ class NotchWindow: NSPanel {
         if hovering {
             blackView.cancelRetraction()
 
-            // Expand notch and show rainbow glow silhouette
+            // Expand further from the base frame and show rainbow glow
             let expand: CGFloat = 8
-            let fr = filletRadius
             let expanded = CGRect(
-                x: originalFrame.origin.x - expand - fr,
+                x: originalFrame.origin.x - expand,
                 y: originalFrame.origin.y - expand,
-                width: originalFrame.width + (expand + fr) * 2,
+                width: originalFrame.width + expand * 2,
                 height: originalFrame.height + expand
             )
 
-            blackView.alphaValue = 1
             glowView.alphaValue = 1
             glowView.startPulsing()
 
@@ -207,7 +217,6 @@ class NotchWindow: NSPanel {
                 context.duration = 0.25
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 animator().setFrame(originalFrame, display: true)
-                blackView.animator().alphaValue = 0
                 glowView.animator().alphaValue = 0
             }
         }

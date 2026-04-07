@@ -213,6 +213,39 @@ final class LearningDatabase {
         }
     }
 
+    func highFrequencyPatterns(minFrequency: Int = 5, limit: Int = 10) -> [WorkflowPattern] {
+        queue.sync {
+            let sql = "SELECT id, app_name, name, actions_json, frequency, first_seen, last_seen FROM patterns WHERE frequency >= ? ORDER BY frequency DESC LIMIT ?"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+
+            sqlite3_bind_int(stmt, 1, Int32(minFrequency))
+            sqlite3_bind_int(stmt, 2, Int32(limit))
+
+            var results: [WorkflowPattern] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) ?? UUID()
+                let app = String(cString: sqlite3_column_text(stmt, 1))
+                let name = String(cString: sqlite3_column_text(stmt, 2))
+                let actionsJSON = String(cString: sqlite3_column_text(stmt, 3))
+                let frequency = Int(sqlite3_column_int(stmt, 4))
+                let firstSeen = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 5))
+                let lastSeen = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6))
+
+                let actions: [WorkflowPattern.PatternAction]
+                if let data = actionsJSON.data(using: .utf8) {
+                    actions = (try? JSONDecoder().decode([WorkflowPattern.PatternAction].self, from: data)) ?? []
+                } else {
+                    actions = []
+                }
+
+                results.append(WorkflowPattern(id: id, appName: app, name: name, actions: actions, frequency: frequency, firstSeen: firstSeen, lastSeen: lastSeen))
+            }
+            return results
+        }
+    }
+
     func replacePatterns(forApp appName: String, patterns: [WorkflowPattern]) {
         queue.sync {
             sqlite3_exec(db, "BEGIN TRANSACTION", nil, nil, nil)
@@ -489,6 +522,131 @@ final class LearningDatabase {
                 try? FileManager.default.removeItem(at: url)
             }
         }
+    }
+
+    // MARK: - UI Knowledge (Exploration Learning)
+
+    struct UIKnowledgeEntry {
+        let appName: String
+        let sectionPath: String
+        let elementLabel: String
+        let elementRole: String
+        let actionType: String
+        let resultDescription: String
+        let timesConfirmed: Int
+    }
+
+    /// Store or update a learned UI element behavior.
+    /// Uses UPSERT: if the same app+section+element+action exists, updates the result and bumps confirmation count.
+    func upsertUIKnowledge(
+        appName: String,
+        appBundleID: String? = nil,
+        sectionPath: String,
+        elementLabel: String,
+        elementRole: String,
+        actionType: String = "click",
+        resultDescription: String,
+        screenshotBefore: String? = nil,
+        screenshotAfter: String? = nil
+    ) {
+        queue.sync {
+            let now = Date().timeIntervalSince1970
+            let sql = """
+            INSERT INTO ui_knowledge (app_name, app_bundle_id, section_path, element_label, element_role, action_type, result_description, screenshot_before, screenshot_after, confidence, times_confirmed, created_at, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, 1, ?, ?)
+            ON CONFLICT(app_name, section_path, element_label, action_type)
+            DO UPDATE SET
+                result_description = excluded.result_description,
+                screenshot_after = excluded.screenshot_after,
+                times_confirmed = times_confirmed + 1,
+                last_seen = excluded.last_seen,
+                confidence = MIN(1.0, confidence + 0.1)
+            """
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                print("[LearningDB] upsertUIKnowledge prepare failed")
+                return
+            }
+            sqlite3_bind_text(stmt, 1, (appName as NSString).utf8String, -1, nil)
+            if let bid = appBundleID {
+                sqlite3_bind_text(stmt, 2, (bid as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, 2)
+            }
+            sqlite3_bind_text(stmt, 3, (sectionPath as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 4, (elementLabel as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 5, (elementRole as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 6, (actionType as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 7, (resultDescription as NSString).utf8String, -1, nil)
+            if let sb = screenshotBefore {
+                sqlite3_bind_text(stmt, 8, (sb as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, 8)
+            }
+            if let sa = screenshotAfter {
+                sqlite3_bind_text(stmt, 9, (sa as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(stmt, 9)
+            }
+            sqlite3_bind_double(stmt, 10, now)
+            sqlite3_bind_double(stmt, 11, now)
+
+            if sqlite3_step(stmt) != SQLITE_DONE {
+                print("[LearningDB] upsertUIKnowledge failed: \(String(cString: sqlite3_errmsg(db)))")
+            }
+        }
+    }
+
+    /// Query learned UI knowledge for a specific app.
+    /// Returns knowledge entries sorted by confirmation count (most reliable first).
+    func queryUIKnowledge(forApp appName: String, limit: Int = 30) -> [UIKnowledgeEntry] {
+        queue.sync {
+            let sql = """
+            SELECT app_name, section_path, element_label, element_role, action_type, result_description, times_confirmed
+            FROM ui_knowledge
+            WHERE app_name = ?
+            ORDER BY times_confirmed DESC, last_seen DESC
+            LIMIT ?
+            """
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+            sqlite3_bind_text(stmt, 1, (appName as NSString).utf8String, -1, nil)
+            sqlite3_bind_int(stmt, 2, Int32(limit))
+
+            var results: [UIKnowledgeEntry] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                results.append(UIKnowledgeEntry(
+                    appName: String(cString: sqlite3_column_text(stmt, 0)),
+                    sectionPath: String(cString: sqlite3_column_text(stmt, 1)),
+                    elementLabel: String(cString: sqlite3_column_text(stmt, 2)),
+                    elementRole: String(cString: sqlite3_column_text(stmt, 3)),
+                    actionType: String(cString: sqlite3_column_text(stmt, 4)),
+                    resultDescription: String(cString: sqlite3_column_text(stmt, 5)),
+                    timesConfirmed: Int(sqlite3_column_int(stmt, 6))
+                ))
+            }
+            return results
+        }
+    }
+
+    /// Format UI knowledge as a prompt section for the LLM.
+    /// Example output:
+    /// ## Known UI Elements for Notion:
+    /// - "Create Page" in "Sidebar > Private" → Creates a new private page
+    /// - "Search" in "navigation" → Opens the search modal (confirmed 5x)
+    func formatUIKnowledgePrompt(forApp appName: String) -> String? {
+        let entries = queryUIKnowledge(forApp: appName, limit: 20)
+        guard !entries.isEmpty else { return nil }
+
+        var lines: [String] = ["## Known UI Elements for \(appName) (learned from exploration):"]
+        for e in entries {
+            let section = e.sectionPath.isEmpty ? "" : " in \"\(e.sectionPath)\""
+            let confirmed = e.timesConfirmed > 1 ? " (confirmed \(e.timesConfirmed)x)" : ""
+            lines.append("- \(e.actionType) \"\(e.elementLabel)\"\(section) → \(e.resultDescription)\(confirmed)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     deinit {

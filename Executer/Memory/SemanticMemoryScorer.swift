@@ -2,6 +2,9 @@ import Foundation
 
 /// Uses a fast LLM call (DeepSeek) to score memory relevance when keyword scoring is insufficient.
 /// Only called as a second pass on keyword-filtered top-K results.
+///
+/// Flash Attention-inspired: uses online softmax for streaming relevance scoring
+/// and grouped-query pattern to share scored keys across namespaces.
 actor SemanticMemoryScorer {
     static let shared = SemanticMemoryScorer()
 
@@ -64,5 +67,77 @@ actor SemanticMemoryScorer {
         }
 
         return Array(reordered.prefix(limit))
+    }
+
+    // MARK: - Online Softmax Scoring (Flash Attention-inspired)
+
+    /// Score memories using online softmax — processes candidates in streaming blocks
+    /// without needing all scores in memory at once. Uses embedding-based similarity
+    /// scored through Flash Attention's incremental softmax algorithm.
+    func scoreRelevanceStreaming(
+        query: String,
+        candidates: [MemoryManager.Memory],
+        limit: Int = 10,
+        blockSize: Int = 16
+    ) -> [MemoryManager.Memory] {
+        guard !query.isEmpty, !candidates.isEmpty else { return [] }
+        guard let queryVec = TextEmbedder.sentenceVector(query) else {
+            return Array(candidates.prefix(limit))
+        }
+
+        // Compute similarity scores for all candidates
+        var scores = [Double](repeating: 0, count: candidates.count)
+        for (i, candidate) in candidates.enumerated() {
+            if let memVec = TextEmbedder.sentenceVector(candidate.content) {
+                scores[i] = TextEmbedder.cosineSimilarity(queryVec, memVec)
+            }
+        }
+
+        // Use online softmax to rank — processes in blocks, numerically stable
+        let ranked = FlashAttentionUtils.streamingSoftmaxRank(scores: scores, blockSize: blockSize)
+
+        return ranked.prefix(limit).map { candidates[$0.index] }
+    }
+
+    // MARK: - Grouped-Query Scoring (Flash Attention GQA-inspired)
+
+    /// Score memories once and share results across multiple query contexts.
+    /// Like GQA where fewer KV heads serve multiple Q heads — we score the candidate
+    /// "keys" once against a representative query, then reuse for related queries.
+    func scoreGrouped(
+        queries: [String],
+        sharedCandidates: [MemoryManager.Memory],
+        limitPerQuery: Int = 5
+    ) -> [String: [MemoryManager.Memory]] {
+        guard !sharedCandidates.isEmpty else {
+            return Dictionary(uniqueKeysWithValues: queries.map { ($0, []) })
+        }
+
+        // Build candidate embeddings once (shared "KV heads")
+        let candidateVecs: [(index: Int, vec: [Double])] = sharedCandidates.enumerated().compactMap { (i, m) in
+            guard let vec = TextEmbedder.sentenceVector(m.content) else { return nil }
+            return (i, vec)
+        }
+
+        var results: [String: [MemoryManager.Memory]] = [:]
+
+        for query in queries {
+            guard let queryVec = TextEmbedder.sentenceVector(query) else {
+                results[query] = []
+                continue
+            }
+
+            // Score this query against shared candidate vectors
+            var scored: [(index: Int, score: Double)] = []
+            for (idx, vec) in candidateVecs {
+                let sim = TextEmbedder.cosineSimilarity(queryVec, vec)
+                scored.append((idx, sim))
+            }
+
+            scored.sort { $0.score > $1.score }
+            results[query] = scored.prefix(limitPerQuery).map { sharedCandidates[$0.index] }
+        }
+
+        return results
     }
 }

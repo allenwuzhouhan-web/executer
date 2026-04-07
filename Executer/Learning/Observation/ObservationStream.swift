@@ -180,6 +180,42 @@ actor ObservationStream {
         notificationObservers.append(obs4)
     }
 
+    // MARK: - ObservationEngine Wiring
+
+    func wireObservationEngine() {
+        let cont = self.continuation
+        URLObserver.shared.onURLEvent = { [weak self] urlEvent in
+            let result = cont?.yield(.oeURLEvent(urlEvent))
+            Task { await self?.recordYield(result, source: .observationEngine) }
+            ObservationStore.shared.record(.url(urlEvent))
+        }
+        ActivityObserver.shared.onActivityEvent = { [weak self] activityEvent in
+            let result = cont?.yield(.oeActivityEvent(activityEvent))
+            Task { await self?.recordYield(result, source: .observationEngine) }
+            ObservationStore.shared.record(.activity(activityEvent))
+        }
+        TransitionObserver.shared.onTransitionEvent = { [weak self] transitionEvent in
+            let result = cont?.yield(.oeTransitionEvent(transitionEvent))
+            Task { await self?.recordYield(result, source: .observationEngine) }
+            ObservationStore.shared.record(.transition(transitionEvent))
+        }
+        TransitionObserver.shared.onAppEvent = { [weak self] appEvent in
+            let result = cont?.yield(.oeAppEvent(appEvent))
+            Task { await self?.recordYield(result, source: .observationEngine) }
+            ObservationStore.shared.record(.app(appEvent))
+        }
+        let origFileHandler = FileMonitor.shared.onFileEvent
+        FileMonitor.shared.onFileEvent = { fileEvent in
+            origFileHandler?(fileEvent)
+            let oeFile = OEFileEvent(
+                timestamp: fileEvent.timestamp, fileExtension: fileEvent.fileExtension,
+                directory: fileEvent.directory,
+                eventType: ObservedFileEventType(rawValue: fileEvent.eventType.rawValue) ?? .modified,
+                appBundleId: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+            ObservationStore.shared.record(.file(oeFile))
+        }
+    }
+
     // MARK: - Stats Tracking
 
     private func recordYield(

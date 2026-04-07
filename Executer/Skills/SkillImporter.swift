@@ -121,7 +121,7 @@ enum SkillImporter {
             // Description line (first non-header, non-step line after name)
             else if currentName != nil && currentDescription == nil && !trimmed.isEmpty
                     && !trimmed.hasPrefix("-") && !trimmed.hasPrefix("*")
-                    && !trimmed.first!.isNumber {
+                    && !(trimmed.first?.isNumber == true) {
                 currentDescription = trimmed
             }
             // Triggers line

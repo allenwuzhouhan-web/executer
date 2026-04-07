@@ -82,6 +82,8 @@ actor ObservationThrottler {
         case .clipboardFlow, .systemEvent:
             // Clipboard flows and system events are always passed through — they're low frequency.
             pass(event)
+        case .oeAppEvent, .oeURLEvent, .oeActivityEvent, .oeTransitionEvent, .oeFileEvent:
+            pass(event)
         }
     }
 

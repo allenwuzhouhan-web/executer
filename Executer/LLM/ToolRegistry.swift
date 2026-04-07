@@ -22,6 +22,8 @@ class ToolRegistry {
     private var toolCategories: [String: ToolCategory]
     // Pre-built per-category schema cache
     private var schemasByCategory: [ToolCategory: [[String: AnyCodable]]]
+    // Lock for synchronizing reads/writes to mutable dictionaries above
+    private let lock = NSLock()
 
     private init() {
         var allTools: [any ToolDefinition] = [
@@ -347,6 +349,13 @@ class ToolRegistry {
             GetUserGoalsTool(),
             GetCurrentIntentTool(),
 
+            // Synthesis (cross-app intelligence)
+            SynthesizeActivityTool(),
+            SynthesizeResearchTool(),
+            SynthesizeProjectTool(),
+            PrepareMeetingTool(),
+            MeetingStatusTool(),
+
             // Overnight Agent
             StartOvernightAgentTool(),
             OvernightAgentStatusTool(),
@@ -624,6 +633,9 @@ class ToolRegistry {
             "recall_work_context": .memory, "get_daily_summary": .memory,
             "get_user_goals": .memory,
             "get_current_intent": .memory,
+            // Synthesis
+            "synthesize_activity": .memory, "synthesize_research": .memory, "synthesize_project": .memory,
+            "prepare_meeting": .memory, "meeting_status": .memory,
             "get_predictions": .memory,
             "get_routines": .memory,
             "list_workflow_templates": .memory,
@@ -695,14 +707,18 @@ class ToolRegistry {
 
     /// Returns all tool definitions formatted for the DeepSeek API (OpenAI function calling format).
     func toolDefinitions() -> [[String: AnyCodable]] {
-        cachedSchemas
+        lock.lock(); defer { lock.unlock() }
+        return cachedSchemas
     }
 
     /// Returns tool schemas filtered by an explicit allowlist of tool names.
     /// Used by ComputerUseAgent task profiles to restrict available tools.
     func filteredToolDefinitions(allowlist: Set<String>) -> [[String: AnyCodable]] {
+        lock.lock()
+        let toolsCopy = tools
+        lock.unlock()
         let schemas = allowlist.compactMap { name -> [String: AnyCodable]? in
-            guard let tool = tools[name] else { return nil }
+            guard let tool = toolsCopy[name] else { return nil }
             return tool.toAPISchema()
         }
         print("[ToolRegistry] Filtered to \(schemas.count) tools by allowlist")
@@ -712,9 +728,12 @@ class ToolRegistry {
     /// Returns tool schemas filtered by explicit category set.
     /// Used by AppAgent for per-app tool scoping.
     func filteredToolDefinitions(categories: Set<ToolCategory>) -> [[String: AnyCodable]] {
+        lock.lock()
+        let byCatCopy = schemasByCategory
+        lock.unlock()
         var schemas: [[String: AnyCodable]] = []
         for cat in categories {
-            if let catSchemas = schemasByCategory[cat] {
+            if let catSchemas = byCatCopy[cat] {
                 schemas.append(contentsOf: catSchemas)
             }
         }
@@ -732,19 +751,23 @@ class ToolRegistry {
     /// Reduces from 220+ tools to ~30-40, saving ~15K tokens per API call.
     func filteredToolDefinitions(for query: String) -> [[String: AnyCodable]] {
         let categories = classifyQueryIntent(query)
+        lock.lock()
+        let byCatCopy = schemasByCategory
+        let totalCount = cachedSchemas.count
+        lock.unlock()
         var schemas: [[String: AnyCodable]] = []
         for cat in categories {
-            if let catSchemas = schemasByCategory[cat] {
+            if let catSchemas = byCatCopy[cat] {
                 schemas.append(contentsOf: catSchemas)
             }
         }
         let count = schemas.count
-        print("[ToolRegistry] Filtered to \(count) tools (from \(cachedSchemas.count)) for query")
+        print("[ToolRegistry] Filtered to \(count) tools (from \(totalCount)) for query")
         // If filtering produced very few tools, expand with common utility categories instead of ALL tools
         if count < 3 {
             let utilityCategories: [ToolCategory] = [.files, .fileContent, .terminal, .appControl, .systemBash]
             for cat in utilityCategories {
-                if let catSchemas = schemasByCategory[cat], !categories.contains(cat) {
+                if let catSchemas = byCatCopy[cat], !categories.contains(cat) {
                     schemas.append(contentsOf: catSchemas)
                 }
             }
@@ -757,15 +780,21 @@ class ToolRegistry {
     /// Agent filtering narrows first, then intent filtering narrows further.
     func filteredToolDefinitions(for query: String, agent: AgentProfile) -> [[String: AnyCodable]] {
         // Step 1: If agent has an allowedToolIDs whitelist, restrict to those tools
+        lock.lock()
+        let toolsCopy = tools
+        let cachedSchemasCopy = cachedSchemas
+        let toolCategoriesCopy = toolCategories
+        lock.unlock()
+
         let agentSchemas: [[String: AnyCodable]]
         if let allowed = agent.allowedToolIDs {
             agentSchemas = allowed.compactMap { name in
-                guard let tool = tools[name] else { return nil }
+                guard let tool = toolsCopy[name] else { return nil }
                 return tool.toAPISchema()
             }
             print("[ToolRegistry] Agent '\(agent.id)' whitelist: \(agentSchemas.count) tools")
         } else {
-            agentSchemas = cachedSchemas
+            agentSchemas = cachedSchemasCopy
         }
 
         // Step 2: Apply intent-based category filtering on the agent-scoped set
@@ -773,7 +802,7 @@ class ToolRegistry {
         let filtered = agentSchemas.filter { schema in
             guard let fn = schema["function"]?.value as? [String: AnyCodable],
                   let name = fn["name"]?.value as? String,
-                  let cat = toolCategories[name] else {
+                  let cat = toolCategoriesCopy[name] else {
                 return true  // Keep tools without a category mapping
             }
             return categories.contains(cat)
@@ -903,6 +932,7 @@ class ToolRegistry {
 
     /// Register MCP-discovered tools into the registry (called after server connection).
     func registerMCPTools(_ mcpTools: [any ToolDefinition]) {
+        lock.lock()
         for tool in mcpTools {
             tools[tool.name] = tool
             toolCategories[tool.name] = .mcp
@@ -915,12 +945,15 @@ class ToolRegistry {
             byCategory[cat, default: []].append(tool.toAPISchema())
         }
         schemasByCategory = byCategory
-        print("[ToolRegistry] Registered \(mcpTools.count) MCP tools, total: \(tools.count)")
+        let total = tools.count
+        lock.unlock()
+        print("[ToolRegistry] Registered \(mcpTools.count) MCP tools, total: \(total)")
     }
 
     /// Remove all MCP tools for a given server (called when a server is disconnected at runtime).
     func unregisterMCPTools(forServer serverName: String) {
         let prefix = "mcp_\(serverName)_"
+        lock.lock()
         let toRemove = tools.keys.filter { $0.hasPrefix(prefix) }
         for key in toRemove {
             tools.removeValue(forKey: key)
@@ -934,14 +967,19 @@ class ToolRegistry {
             byCategory[cat, default: []].append(tool.toAPISchema())
         }
         schemasByCategory = byCategory
+        let total = tools.count
+        lock.unlock()
         if !toRemove.isEmpty {
-            print("[ToolRegistry] Unregistered \(toRemove.count) MCP tools for \(serverName), total: \(tools.count)")
+            print("[ToolRegistry] Unregistered \(toRemove.count) MCP tools for \(serverName), total: \(total)")
         }
     }
 
     /// Execute a tool by name with the given JSON arguments string.
     func execute(toolName: String, arguments: String) async throws -> String {
-        guard let tool = tools[toolName] else {
+        lock.lock()
+        let tool = tools[toolName]
+        lock.unlock()
+        guard let tool else {
             throw ExecuterError.toolNotFound(toolName)
         }
         return try await tool.execute(arguments: arguments)
@@ -949,7 +987,8 @@ class ToolRegistry {
 
     /// Get a tool by name.
     func tool(named name: String) -> ToolDefinition? {
-        tools[name]
+        lock.lock(); defer { lock.unlock() }
+        return tools[name]
     }
 
     /// Execute a tool directly by name — used by SecurityGateway after permission checks.
@@ -959,17 +998,21 @@ class ToolRegistry {
 
     /// Returns the API schema for a single tool, or nil if not found.
     func singleToolSchema(_ name: String) -> [[String: AnyCodable]]? {
-        guard let tool = tools[name] else { return nil }
+        lock.lock()
+        let tool = tools[name]
+        lock.unlock()
+        guard let tool else { return nil }
         return [tool.toAPISchema()]
     }
 
     /// Returns all registered tool names.
     func allToolNames() -> [String] {
+        lock.lock(); defer { lock.unlock() }
         return Array(tools.keys).sorted()
     }
 
     /// Total number of registered tools.
-    var count: Int { tools.count }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return tools.count }
 }
 
 /// Meta-tool: request additional tools mid-conversation.

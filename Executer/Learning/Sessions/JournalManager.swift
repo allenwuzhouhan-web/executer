@@ -141,6 +141,8 @@ actor JournalManager {
             return nil
         case .systemEvent(let sysEvent):
             return makeEntryFromSystemEvent(sysEvent)
+        case .oeAppEvent, .oeURLEvent, .oeActivityEvent, .oeTransitionEvent, .oeFileEvent:
+            return nil
         }
     }
 

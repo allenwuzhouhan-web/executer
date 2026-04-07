@@ -32,8 +32,6 @@ enum YouTubeExecutor {
         whichProcess.standardOutput = pipe
         whichProcess.standardError = FileHandle.nullDevice
         try? whichProcess.run()
-        whichProcess.waitUntilExit()
-
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !output.isEmpty && FileManager.default.isExecutableFile(atPath: output) {
@@ -308,13 +306,13 @@ struct SetupYTDLPTool: ToolDefinition {
                         do {
                             try process.run()
                             _ = pipe.fileHandleForReading.readDataToEndOfFile()
-                            _ = errPipe.fileHandleForReading.readDataToEndOfFile()
+                            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
                             process.waitUntilExit()
 
                             if process.terminationStatus == 0 {
                                 continuation.resume(returning: "yt-dlp installed successfully via Homebrew. Ready to use.\nRun setup_ffmpeg too if not already installed (needed for format merging).")
                             } else {
-                                let err = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                                let err = String(data: errData, encoding: .utf8) ?? ""
                                 continuation.resume(returning: "Failed to install yt-dlp via Homebrew: \(err.prefix(300))\nInstall manually: brew install yt-dlp")
                             }
                         } catch {

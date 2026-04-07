@@ -48,6 +48,11 @@ actor ContinuousPerceptionDaemon {
         AppObserver.shared.start()
         FileMonitor.shared.start()
         ClipboardObserver.shared.start()
+        // 2b. Start ObservationEngine observers (Belief Engine pipeline)
+        URLObserver.shared.start()
+        ActivityObserver.shared.start()
+        TransitionObserver.shared.start()
+        await ObservationStream.shared.wireObservationEngine()
 
         // 3. Filter through throttler
         let filteredStream = await throttler.filter(raw: rawStream)
@@ -65,8 +70,14 @@ actor ContinuousPerceptionDaemon {
 
         // 6. Start health monitoring
         startHealthCheck()
+        // 7. Start ObservationEngine background services
+        PatternRecognizer.shared.start()
+        DecayEngine.shared.start()
 
-        print("[Daemon] ContinuousPerceptionDaemon started — always-on observation active")
+        // 8. Start real-time cross-app synthesis
+        await CrossAppSynthesizer.shared.startConsuming()
+
+        print("[Daemon] ContinuousPerceptionDaemon started — always-on observation + belief engine active")
     }
 
     /// Stop the daemon and all associated tasks.
@@ -87,6 +98,14 @@ actor ContinuousPerceptionDaemon {
         AppObserver.shared.stop()
         FileMonitor.shared.stop()
         ClipboardObserver.shared.stop()
+        // Stop ObservationEngine observers and services
+        URLObserver.shared.stop()
+        ActivityObserver.shared.stop()
+        TransitionObserver.shared.stop()
+        PatternRecognizer.shared.stop()
+        DecayEngine.shared.stop()
+        ObservationStore.shared.shutdown()
+        BeliefStore.shared.shutdown()
 
         let throttlerStats = await throttler.passedCount
         print("[Daemon] Stopped — \(throttlerStats) events delivered to consumers")

@@ -12,6 +12,11 @@ enum ObservationEvent: Sendable {
     case clipboardFlow(ClipboardObservationEvent)
     case screenSample(ScreenSampleEvent)
     case systemEvent(SystemObservationEvent)
+    case oeAppEvent(OEAppEvent)
+    case oeURLEvent(OEURLEvent)
+    case oeActivityEvent(OEActivityEvent)
+    case oeTransitionEvent(OETransitionEvent)
+    case oeFileEvent(OEFileEvent)
 
     /// Timestamp of the event, regardless of source.
     var timestamp: Date {
@@ -21,6 +26,11 @@ enum ObservationEvent: Sendable {
         case .clipboardFlow(let f): return f.timestamp
         case .screenSample(let s): return s.timestamp
         case .systemEvent(let e): return e.timestamp
+        case .oeAppEvent(let e): return e.timestamp
+        case .oeURLEvent(let e): return e.timestamp
+        case .oeActivityEvent(let e): return e.timestamp
+        case .oeTransitionEvent(let e): return e.timestamp
+        case .oeFileEvent(let e): return e.timestamp
         }
     }
 
@@ -36,6 +46,9 @@ enum ObservationEvent: Sendable {
             case .appLaunched(let name), .appQuit(let name): return name
             default: return nil
             }
+        case .oeAppEvent(let e): return e.appName
+        case .oeURLEvent, .oeActivityEvent, .oeFileEvent: return nil
+        case .oeTransitionEvent(let e): return e.toApp
         }
     }
 
@@ -47,6 +60,8 @@ enum ObservationEvent: Sendable {
         case .clipboardFlow: return .clipboard
         case .screenSample: return .screenSampler
         case .systemEvent: return .system
+        case .oeAppEvent, .oeURLEvent, .oeActivityEvent, .oeTransitionEvent, .oeFileEvent:
+            return .observationEngine
         }
     }
 
@@ -56,6 +71,7 @@ enum ObservationEvent: Sendable {
         case clipboard
         case screenSampler
         case system
+        case observationEngine
     }
 }
 

@@ -450,6 +450,8 @@ actor TaskBoundaryDetector {
             case .appQuit(let name): return "quit \(name)"
             default: return ""
             }
+        case .oeAppEvent, .oeURLEvent, .oeActivityEvent, .oeTransitionEvent, .oeFileEvent:
+            return ""
         }
     }
 
@@ -465,6 +467,8 @@ actor TaskBoundaryDetector {
         case .screenSample(let s):
             return Array(s.visibleTextPreview.prefix(3))
         case .systemEvent:
+            return []
+        case .oeAppEvent, .oeURLEvent, .oeActivityEvent, .oeTransitionEvent, .oeFileEvent:
             return []
         }
     }

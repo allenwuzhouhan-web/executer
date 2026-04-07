@@ -69,6 +69,7 @@
 		6FCFBD863D408E52F8238DB0 /* CoworkingSuggestionPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC148B6845FA1E53CFBD9745 /* CoworkingSuggestionPipeline.swift */; };
 		5B927E8F07E2C3FC32E65FF5 /* InterruptionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E737F1C2F37E1AADE386C2B1 /* InterruptionPolicy.swift */; };
 		43795247FCAF4FB79ED09501 /* WorkStateEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C15F5FBC2B85A6090E3DB3C /* WorkStateEngine.swift */; };
+		DDF4CBAF1BA5CFE056E13D34 /* WorkflowCompressionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84709FB79070E89B50FF2D4F /* WorkflowCompressionBridge.swift */; };
 		13B70409796503BE1BB58FC2 /* APIKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12206B3EAF198D0E76125D8 /* APIKeyManager.swift */; };
 		B5CC8D47D0CF211A7F5E921F /* AgentLoop.swift in Sources */ = {isa = PBXBuildFile; fileRef = C48EE295FD8EDA374E2A7A64 /* AgentLoop.swift */; };
 		4C54AF64E3843676D8C0D318 /* AgentTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F7E3A8463048FBCB45E768D /* AgentTrace.swift */; };
@@ -330,8 +331,13 @@
 		96A566CB8CD65D9B53E8C83E /* OCRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CE91DE21ED526F939789D56 /* OCRService.swift */; };
 		922D48385296EBF97771412B /* ScreenCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE2F6FA16C969B77A2ABA0A /* ScreenCapture.swift */; };
 		4F8CB8C680DD55CCBE650715 /* VisionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B69563A7BCCAB938DF69B468 /* VisionEngine.swift */; };
+		623CED3B7B853C2B205892A4 /* CrossAppInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E53C852EAF9D5ACE387625E /* CrossAppInsight.swift */; };
+		20A438BCE788209D93E0D05C /* CrossAppSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BE480B82ABC54E26F02576C /* CrossAppSynthesizer.swift */; };
+		076EFA03054B62B03E7B3EAF /* MeetingIntelligence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55D0748A8784F53E7DFA7941 /* MeetingIntelligence.swift */; };
 		BC6755C189479BD1F8980BAF /* SynthesisEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E2818B0973067084B5168FC /* SynthesisEngine.swift */; };
 		BE5D0B432574D8E92E00ABE6 /* SynthesisInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = D77704F8499158AD83C487C4 /* SynthesisInsight.swift */; };
+		2EE0072E5333BB1B6FA28CEE /* SynthesisPrompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530D48CC7FC0AD3E7A9A2DC0 /* SynthesisPrompts.swift */; };
+		1A4F69AA5B6861593E237D33 /* SynthesisTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 951B734117FBFA400CAE290E /* SynthesisTools.swift */; };
 		FF5F0443D66B3A35FDEDDF4D /* PermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DD6F68AA13BD57D21B5FDA4 /* PermissionManager.swift */; };
 		BFF150C98A04405BFCB26B89 /* PermissionSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F4833DAA472AC5D1E3A3F5 /* PermissionSetupView.swift */; };
 		C5B50FEC1975B9D6373428DC /* AliasManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC906C48B65A59F47FB47433 /* AliasManager.swift */; };
@@ -541,6 +547,7 @@
 		FC148B6845FA1E53CFBD9745 /* CoworkingSuggestionPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoworkingSuggestionPipeline.swift; sourceTree = "<group>"; };
 		E737F1C2F37E1AADE386C2B1 /* InterruptionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterruptionPolicy.swift; sourceTree = "<group>"; };
 		8C15F5FBC2B85A6090E3DB3C /* WorkStateEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkStateEngine.swift; sourceTree = "<group>"; };
+		84709FB79070E89B50FF2D4F /* WorkflowCompressionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowCompressionBridge.swift; sourceTree = "<group>"; };
 		A12206B3EAF198D0E76125D8 /* APIKeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeyManager.swift; sourceTree = "<group>"; };
 		C48EE295FD8EDA374E2A7A64 /* AgentLoop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentLoop.swift; sourceTree = "<group>"; };
 		1F7E3A8463048FBCB45E768D /* AgentTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTrace.swift; sourceTree = "<group>"; };
@@ -802,8 +809,13 @@
 		3CE91DE21ED526F939789D56 /* OCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCRService.swift; sourceTree = "<group>"; };
 		DEE2F6FA16C969B77A2ABA0A /* ScreenCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCapture.swift; sourceTree = "<group>"; };
 		B69563A7BCCAB938DF69B468 /* VisionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionEngine.swift; sourceTree = "<group>"; };
+		3E53C852EAF9D5ACE387625E /* CrossAppInsight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossAppInsight.swift; sourceTree = "<group>"; };
+		6BE480B82ABC54E26F02576C /* CrossAppSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossAppSynthesizer.swift; sourceTree = "<group>"; };
+		55D0748A8784F53E7DFA7941 /* MeetingIntelligence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingIntelligence.swift; sourceTree = "<group>"; };
 		2E2818B0973067084B5168FC /* SynthesisEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynthesisEngine.swift; sourceTree = "<group>"; };
 		D77704F8499158AD83C487C4 /* SynthesisInsight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynthesisInsight.swift; sourceTree = "<group>"; };
+		530D48CC7FC0AD3E7A9A2DC0 /* SynthesisPrompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynthesisPrompts.swift; sourceTree = "<group>"; };
+		951B734117FBFA400CAE290E /* SynthesisTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynthesisTools.swift; sourceTree = "<group>"; };
 		7DD6F68AA13BD57D21B5FDA4 /* PermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionManager.swift; sourceTree = "<group>"; };
 		66F4833DAA472AC5D1E3A3F5 /* PermissionSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionSetupView.swift; sourceTree = "<group>"; };
 		FC906C48B65A59F47FB47433 /* AliasManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AliasManager.swift; sourceTree = "<group>"; };
@@ -1177,6 +1189,7 @@
 				FC148B6845FA1E53CFBD9745 /* CoworkingSuggestionPipeline.swift */,
 				E737F1C2F37E1AADE386C2B1 /* InterruptionPolicy.swift */,
 				8C15F5FBC2B85A6090E3DB3C /* WorkStateEngine.swift */,
+				84709FB79070E89B50FF2D4F /* WorkflowCompressionBridge.swift */,
 			);
 			path = Coworking;
 			sourceTree = "<group>";
@@ -1778,8 +1791,13 @@
 		C9EFB3ABEDD90A3B2F1206D7 /* Synthesis */ = {
 			isa = PBXGroup;
 			children = (
+				3E53C852EAF9D5ACE387625E /* CrossAppInsight.swift */,
+				6BE480B82ABC54E26F02576C /* CrossAppSynthesizer.swift */,
+				55D0748A8784F53E7DFA7941 /* MeetingIntelligence.swift */,
 				2E2818B0973067084B5168FC /* SynthesisEngine.swift */,
 				D77704F8499158AD83C487C4 /* SynthesisInsight.swift */,
+				530D48CC7FC0AD3E7A9A2DC0 /* SynthesisPrompts.swift */,
+				951B734117FBFA400CAE290E /* SynthesisTools.swift */,
 			);
 			path = Synthesis;
 			sourceTree = "<group>";
@@ -2143,6 +2161,7 @@
 				6FCFBD863D408E52F8238DB0 /* CoworkingSuggestionPipeline.swift in Sources */,
 				5B927E8F07E2C3FC32E65FF5 /* InterruptionPolicy.swift in Sources */,
 				43795247FCAF4FB79ED09501 /* WorkStateEngine.swift in Sources */,
+				DDF4CBAF1BA5CFE056E13D34 /* WorkflowCompressionBridge.swift in Sources */,
 				13B70409796503BE1BB58FC2 /* APIKeyManager.swift in Sources */,
 				B5CC8D47D0CF211A7F5E921F /* AgentLoop.swift in Sources */,
 				4C54AF64E3843676D8C0D318 /* AgentTrace.swift in Sources */,
@@ -2404,8 +2423,13 @@
 				96A566CB8CD65D9B53E8C83E /* OCRService.swift in Sources */,
 				922D48385296EBF97771412B /* ScreenCapture.swift in Sources */,
 				4F8CB8C680DD55CCBE650715 /* VisionEngine.swift in Sources */,
+				623CED3B7B853C2B205892A4 /* CrossAppInsight.swift in Sources */,
+				20A438BCE788209D93E0D05C /* CrossAppSynthesizer.swift in Sources */,
+				076EFA03054B62B03E7B3EAF /* MeetingIntelligence.swift in Sources */,
 				BC6755C189479BD1F8980BAF /* SynthesisEngine.swift in Sources */,
 				BE5D0B432574D8E92E00ABE6 /* SynthesisInsight.swift in Sources */,
+				2EE0072E5333BB1B6FA28CEE /* SynthesisPrompts.swift in Sources */,
+				1A4F69AA5B6861593E237D33 /* SynthesisTools.swift in Sources */,
 				FF5F0443D66B3A35FDEDDF4D /* PermissionManager.swift in Sources */,
 				BFF150C98A04405BFCB26B89 /* PermissionSetupView.swift in Sources */,
 				C5B50FEC1975B9D6373428DC /* AliasManager.swift in Sources */,

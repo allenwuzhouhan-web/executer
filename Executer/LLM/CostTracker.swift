@@ -1,9 +1,15 @@
 import Foundation
 
 /// Tracks API token usage and costs per provider.
-/// Notifies user when over budget but NEVER blocks execution.
+/// Notifies user when over budget but NEVER blocks execution for regular use.
+/// Session budgets (for overnight exploration) provide hard stops via isOverSessionBudget().
 final class CostTracker {
     static let shared = CostTracker()
+
+    // MARK: - Constants
+
+    /// Yuan-to-USD conversion rate (1 CNY ≈ $0.14 USD)
+    static let yuanToUSD: Double = 0.14
 
     // MARK: - Per-Provider Pricing (USD per 1M tokens)
 
@@ -12,6 +18,7 @@ final class CostTracker {
         "deepseek": (input: 0.14,  output: 0.28),   // DeepSeek Chat
         "gemini":   (input: 0.075, output: 0.30),    // Gemini Flash
         "kimi":     (input: 0.70,  output: 0.70),    // Kimi
+        "kimicn":   (input: 0.70,  output: 0.70),    // Kimi CN
         "minimax":  (input: 0.15,  output: 0.15),    // MiniMax
     ]
 
@@ -27,6 +34,14 @@ final class CostTracker {
     private var hasNotifiedToday = false
     private var agentCosts: [String: Double] = [:]      // agent_id → daily cost
     private var agentTokens: [String: Int] = [:]         // agent_id → daily total tokens
+
+    // MARK: - Session-Scoped Budget (for overnight exploration)
+
+    /// Per-provider USD spent during the current exploration session.
+    private var sessionProviderCostUSD: [String: Double] = [:]
+
+    /// The active agent ID — set by callers before LLM calls so record() tags the cost.
+    var activeAgentId: String = "general"
 
     private let lock = NSLock()
     private let defaults = UserDefaults.standard
@@ -88,6 +103,9 @@ final class CostTracker {
         agentCosts[agentId, default: 0] += callCost
         agentTokens[agentId, default: 0] += inputTokens + outputTokens
 
+        // Session-scoped per-provider tracking (for overnight exploration budgets)
+        sessionProviderCostUSD[providerKey, default: 0] += callCost
+
         // Persist
         defaults.set(dailyCostUSD, forKey: "cost_daily_total")
         defaults.set(monthlyCostUSD, forKey: "cost_monthly_total")
@@ -138,6 +156,36 @@ final class CostTracker {
         defer { lock.unlock() }
         return agentCosts.map { (agentId: $0.key, cost: $0.value, tokens: agentTokens[$0.key] ?? 0) }
             .sorted { $0.cost > $1.cost }
+    }
+
+    // MARK: - Session Budget (Overnight Exploration)
+
+    /// Reset session counters. Call at the start of an overnight exploration session.
+    func startExplorationSession() {
+        lock.lock()
+        sessionProviderCostUSD.removeAll()
+        lock.unlock()
+    }
+
+    /// Get the session cost for a specific provider, converted to yuan.
+    func sessionCostYuan(provider: String) -> Double {
+        lock.lock()
+        defer { lock.unlock() }
+        let usd = sessionProviderCostUSD[provider.lowercased()] ?? 0
+        return usd / Self.yuanToUSD
+    }
+
+    /// Hard-stop check: is the session over budget for a given provider?
+    func isOverSessionBudget(provider: String, budgetYuan: Double) -> Bool {
+        return sessionCostYuan(provider: provider) >= budgetYuan
+    }
+
+    /// Summary of all provider costs in the current session (in yuan).
+    func sessionCostSummary() -> [(provider: String, yuan: Double)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return sessionProviderCostUSD.map { ($0.key, $0.value / Self.yuanToUSD) }
+            .sorted { $0.yuan > $1.yuan }
     }
 
     // MARK: - Reset

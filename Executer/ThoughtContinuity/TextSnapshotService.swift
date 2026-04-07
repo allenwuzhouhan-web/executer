@@ -13,6 +13,7 @@ actor TextSnapshotService {
     private let changeThreshold = 0.20
 
     private let ownBundleId = Bundle.main.bundleIdentifier ?? "com.allenwu.executer"
+    private var lockObservers: [NSObjectProtocol] = []
 
     // MARK: - Lifecycle
 
@@ -21,18 +22,20 @@ actor TextSnapshotService {
         print("[TextSnapshot] Starting")
 
         // Listen for screen lock/unlock
-        DistributedNotificationCenter.default().addObserver(
+        let lockObs = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.apple.screenIsLocked"),
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { await self?.setPaused(true) }
         }
-        DistributedNotificationCenter.default().addObserver(
+        lockObservers.append(lockObs)
+        let unlockObs = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.apple.screenIsUnlocked"),
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { await self?.setPaused(false) }
         }
+        lockObservers.append(unlockObs)
 
         captureTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -45,6 +48,10 @@ actor TextSnapshotService {
     func stop() {
         captureTask?.cancel()
         captureTask = nil
+        for obs in lockObservers {
+            DistributedNotificationCenter.default().removeObserver(obs)
+        }
+        lockObservers.removeAll()
         print("[TextSnapshot] Stopped")
     }
 
@@ -122,8 +129,9 @@ actor TextSnapshotService {
                 return nil as String?
             }
             var titleValue: AnyObject?
-            // CFType cast always succeeds — safety comes from the nil guard above
-            guard AXUIElementCopyAttributeValue(wv as! AXUIElement, kAXTitleAttribute as CFString, &titleValue) == .success else {
+            // swiftlint:disable:next force_cast
+            let windowElement = wv as! AXUIElement // CFType cast — nil already excluded by guard above
+            guard AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &titleValue) == .success else {
                 return nil as String?
             }
             return titleValue as? String
@@ -154,8 +162,8 @@ actor TextSnapshotService {
         let focusResult = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedValue)
         guard focusResult == .success, let focused = focusedValue else { return nil }
 
-        // CFType cast always succeeds — safety comes from the nil guard above
-        let element = focused as! AXUIElement
+        // swiftlint:disable:next force_cast
+        let element = focused as! AXUIElement // CFType cast — nil already excluded by guard above
 
         // Check role — only capture text inputs
         var roleValue: AnyObject?

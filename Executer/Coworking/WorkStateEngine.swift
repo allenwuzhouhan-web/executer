@@ -165,6 +165,8 @@ actor WorkStateEngine {
             default:
                 break
             }
+        case .oeAppEvent, .oeURLEvent, .oeActivityEvent, .oeTransitionEvent, .oeFileEvent:
+            break
         }
 
         // Rebuild cached state

@@ -269,8 +269,11 @@ def extract_shape_info(shape, slide_width, slide_height):
                 for gd in avLst.findall('{http://schemas.openxmlformats.org/drawingml/2006/main}gd'):
                     if gd.get('name') == 'adj':
                         # Value is in 1/50000 of shape size
-                        raw = int(gd.get('fmla', 'val 16667').split()[-1])
-                        info["corner_radius_pct"] = round(raw / 50000 * 100, 1)
+                        try:
+                            raw = int(gd.get('fmla', 'val 16667').split()[-1])
+                            info["corner_radius_pct"] = round(raw / 50000 * 100, 1)
+                        except (ValueError, IndexError):
+                            info["corner_radius_pct"] = 33.3  # default roundRect radius
     except Exception:
         pass
 

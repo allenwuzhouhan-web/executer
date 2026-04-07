@@ -9,6 +9,23 @@ actor MCPServerManager {
     private var discoveredTools: [MCPToolWrapper] = []
     private let configURL: URL
 
+    /// Per-server connection status, published for UI observation.
+    private(set) var serverStatuses: [String: ServerStatus] = [:]
+
+    // MARK: - Status Model
+
+    enum ServerStatus: Equatable {
+        case disconnected
+        case connecting
+        case connected(toolCount: Int)
+        case error(String)
+
+        var isConnected: Bool {
+            if case .connected = self { return true }
+            return false
+        }
+    }
+
     // MARK: - Config Model
 
     enum TransportType: String, Codable {
@@ -77,6 +94,7 @@ actor MCPServerManager {
         }
         clients.removeAll()
         discoveredTools.removeAll()
+        serverStatuses.removeAll()
     }
 
     /// Get list of connected server names.
@@ -89,15 +107,95 @@ actor MCPServerManager {
         discoveredTools.map { $0.name }
     }
 
+    // MARK: - Single Server Connect / Disconnect (Runtime)
+
+    /// Connect a single server by config, register its tools, and return discovered tool count.
+    /// Used by the settings UI for live connect without app restart.
+    @discardableResult
+    func connectSingle(_ config: ServerConfig) async -> Int {
+        // Disconnect first if already connected
+        await disconnectSingle(named: config.name)
+
+        // Save to persistent config
+        addServer(config)
+
+        // Connect
+        await connectServer(config)
+
+        // Register new tools into ToolRegistry
+        let newTools = discoveredTools.filter { $0.name.hasPrefix("mcp_\(config.name)_") }
+        if !newTools.isEmpty {
+            await MainActor.run {
+                ToolRegistry.shared.registerMCPTools(newTools)
+            }
+        }
+        return newTools.count
+    }
+
+    /// Disconnect a single server and unregister its tools.
+    func disconnectSingle(named name: String) async {
+        if let client = clients[name] {
+            await client.disconnect()
+            clients.removeValue(forKey: name)
+            discoveredTools.removeAll { $0.name.hasPrefix("mcp_\(name)_") }
+            await MainActor.run {
+                ToolRegistry.shared.unregisterMCPTools(forServer: name)
+            }
+            print("[MCP] Disconnected \(name)")
+        }
+        serverStatuses[name] = .disconnected
+    }
+
+    /// Disconnect and remove a server from config entirely.
+    func removeSingle(named name: String) async {
+        await disconnectSingle(named: name)
+        removeServer(named: name)
+        serverStatuses.removeValue(forKey: name)
+    }
+
+    /// Reconnect all servers (hot-reload config).
+    func reconnectAll() async {
+        await shutdownAll()
+        await connectAll()
+        let tools = getDiscoveredTools()
+        if !tools.isEmpty {
+            await MainActor.run {
+                ToolRegistry.shared.registerMCPTools(tools)
+            }
+        }
+    }
+
+    /// Check if a server name is currently connected.
+    func isConnected(_ name: String) -> Bool {
+        serverStatuses[name]?.isConnected ?? false
+    }
+
+    /// Get the status for a server.
+    func status(for name: String) -> ServerStatus {
+        serverStatuses[name] ?? .disconnected
+    }
+
+    /// Get all server statuses (for UI snapshot).
+    func allStatuses() -> [String: ServerStatus] {
+        serverStatuses
+    }
+
+    /// Get tool count for a connected server.
+    func toolCount(for serverName: String) -> Int {
+        discoveredTools.filter { $0.name.hasPrefix("mcp_\(serverName)_") }.count
+    }
+
     // MARK: - Server Management
 
     private func connectServer(_ config: ServerConfig) async {
+        serverStatuses[config.name] = .connecting
         let client: any MCPTransport
 
         switch config.effectiveTransport {
         case .stdio:
             guard let command = config.command, let args = config.args else {
                 print("[MCP] stdio server \(config.name) missing command/args")
+                serverStatuses[config.name] = .error("Missing command/args")
                 return
             }
             let stdioClient = MCPClient(name: config.name)
@@ -106,6 +204,7 @@ actor MCPServerManager {
             } catch {
                 print("[MCP] Failed to connect stdio \(config.name): \(error.localizedDescription)")
                 await stdioClient.disconnect()
+                serverStatuses[config.name] = .error(error.localizedDescription)
                 return
             }
             client = stdioClient
@@ -113,6 +212,7 @@ actor MCPServerManager {
         case .sse:
             guard let urlStr = config.url, let url = URL(string: urlStr) else {
                 print("[MCP] SSE server \(config.name) missing/invalid url")
+                serverStatuses[config.name] = .error("Missing/invalid URL")
                 return
             }
             let httpClient = MCPHTTPClient(
@@ -124,6 +224,7 @@ actor MCPServerManager {
             } catch {
                 print("[MCP] Failed to connect SSE \(config.name): \(error.localizedDescription)")
                 await httpClient.disconnect()
+                serverStatuses[config.name] = .error(error.localizedDescription)
                 return
             }
             client = httpClient
@@ -131,6 +232,7 @@ actor MCPServerManager {
         case .streamableHTTP:
             guard let urlStr = config.url, let url = URL(string: urlStr) else {
                 print("[MCP] streamable-http server \(config.name) missing/invalid url")
+                serverStatuses[config.name] = .error("Missing/invalid URL")
                 return
             }
             let httpClient = MCPHTTPClient(
@@ -142,6 +244,7 @@ actor MCPServerManager {
             } catch {
                 print("[MCP] Failed to connect streamable-http \(config.name): \(error.localizedDescription)")
                 await httpClient.disconnect()
+                serverStatuses[config.name] = .error(error.localizedDescription)
                 return
             }
             client = httpClient
@@ -153,6 +256,7 @@ actor MCPServerManager {
             let wrappers = tools.map { MCPToolWrapper(serverName: config.name, tool: $0, client: client) }
             clients[config.name] = client
             discoveredTools.append(contentsOf: wrappers)
+            serverStatuses[config.name] = .connected(toolCount: tools.count)
 
             print("[MCP] \(config.name) [\(config.effectiveTransport)]: discovered \(tools.count) tools")
             for t in tools {
@@ -161,6 +265,7 @@ actor MCPServerManager {
         } catch {
             print("[MCP] Failed to discover tools for \(config.name): \(error.localizedDescription)")
             await client.disconnect()
+            serverStatuses[config.name] = .error("Tool discovery failed: \(error.localizedDescription)")
         }
     }
 
@@ -201,5 +306,42 @@ actor MCPServerManager {
         var configs = loadConfig()
         configs.removeAll { $0.name == name }
         saveConfig(configs)
+    }
+
+    // MARK: - Catalog Helpers
+
+    /// Build a ServerConfig from a catalog entry and user-provided credential values.
+    nonisolated func configFromCatalog(
+        _ entry: MCPCatalogEntry,
+        credentialValues: [String: String]
+    ) -> ServerConfig {
+        var env: [String: String] = [:]
+        var headers: [String: String] = [:]
+
+        for cred in entry.credentials {
+            guard let value = credentialValues[cred.id], !value.isEmpty else { continue }
+            if cred.isHeader {
+                headers[cred.id] = value
+            } else {
+                env[cred.id] = value
+            }
+        }
+
+        // Special handling: filesystem server appends allowed dirs to args
+        var args = entry.args ?? []
+        if entry.id == "filesystem", let dirs = credentialValues["ALLOWED_DIRS"] {
+            let paths = dirs.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+            args.append(contentsOf: paths)
+        }
+
+        return ServerConfig(
+            name: entry.id,
+            transport: entry.transport,
+            command: entry.command,
+            args: args.isEmpty ? nil : args,
+            env: env.isEmpty ? nil : env,
+            url: entry.url,
+            headers: headers.isEmpty ? nil : headers
+        )
     }
 }

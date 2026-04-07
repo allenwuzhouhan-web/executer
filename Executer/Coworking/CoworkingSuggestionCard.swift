@@ -55,7 +55,7 @@ struct CoworkingSuggestionCard: View {
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 10, weight: .semibold))
-                        Text(suggestion.actionCommand != nil ? "Do it" : "Got it")
+                        Text(acceptButtonLabel)
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                     }
                     .frame(maxWidth: .infinity)
@@ -104,9 +104,15 @@ struct CoworkingSuggestionCard: View {
     // MARK: - Actions
 
     private func accept() {
+        let hasAction = suggestion.actionCommand != nil && !suggestion.actionCommand!.isEmpty
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-            CoworkerAgent.shared.acceptSuggestion()
-            appState.inputBarState = .ready
+            CoworkerAgent.shared.acceptSuggestion(suggestion)
+            // Only reset to .ready if there's no action command.
+            // When there IS an action, submitCommand() sets .processing —
+            // overwriting that to .ready is why the card vanished with no feedback.
+            if !hasAction {
+                appState.inputBarState = .ready
+            }
         }
     }
 
@@ -119,6 +125,16 @@ struct CoworkingSuggestionCard: View {
 
     // MARK: - Type-specific styling
 
+    private var acceptButtonLabel: String {
+        if suggestion.actionCommand == nil { return "Got it" }
+        switch suggestion.type {
+        case .workspaceFocus: return "Help me"
+        case .contextualHelp: return "Help me"
+        case .workflowAutomation: return "Automate it"
+        default: return "Do it"
+        }
+    }
+
     private var iconForType: String {
         switch suggestion.type {
         case .goalNudge: return "target"
@@ -130,6 +146,8 @@ struct CoworkingSuggestionCard: View {
         case .contextualHelp: return "lightbulb.fill"
         case .routine: return "clock.fill"
         case .deadlineAlert: return "exclamationmark.triangle.fill"
+        case .synthesis: return "link.circle.fill"
+        case .workspaceFocus: return "squares.leading.rectangle"
         }
     }
 
@@ -144,6 +162,8 @@ struct CoworkingSuggestionCard: View {
         case .contextualHelp: return "Help"
         case .routine: return "Routine"
         case .deadlineAlert: return "Deadline"
+        case .synthesis: return "Connection"
+        case .workspaceFocus: return "Workspace"
         }
     }
 }
