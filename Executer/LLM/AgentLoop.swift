@@ -167,6 +167,37 @@ class AgentLoop {
         return documentKeywords.contains { lower.contains($0) }
     }
 
+    // MARK: - Multimodal Task Detection
+
+    /// Detect queries that benefit from a multimodal LLM (image/PDF visual understanding, OCR interpretation).
+    /// When detected and a Kimi API key is available, routes to Kimi instead of DeepSeek.
+    private static func isMultimodalQuery(_ command: String) -> Bool {
+        let lower = command.lowercased()
+
+        // Strong signals — user is asking the LLM to understand visual content
+        let strongKeywords = [
+            "this image", "this photo", "this picture", "this screenshot", "this diagram",
+            "this chart", "this graph", "look at this", "what's in this", "describe this",
+            "analyze this image", "read this image", "interpret this",
+            "what does this show", "what do you see", "explain this image",
+            "scanned document", "scanned pdf", "handwritten",
+            "image to text", "photo to text", "ocr this",
+        ]
+        if strongKeywords.contains(where: { lower.contains($0) }) { return true }
+
+        // Medium signals — only match when combined with an action verb suggesting understanding
+        let mediumKeywords = ["textbook", "this pdf", "this document"]
+        let understandingVerbs = ["read", "understand", "analyze", "extract", "summarize", "explain",
+                                  "split", "separate", "chapter", "section", "parse", "process"]
+        for keyword in mediumKeywords {
+            if lower.contains(keyword) && understandingVerbs.contains(where: { lower.contains($0) }) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     // MARK: - Complexity Classification
 
     static func classifyComplexity(_ command: String) -> TaskComplexity {
@@ -419,9 +450,17 @@ class AgentLoop {
 
                 // Route document creation commands to the document-specific provider if configured
                 let isDocumentTask = Self.isDocumentCreationCommand(fullCommand)
-                let service: LLMServiceProtocol = (isDocumentTask && manager.hasDocumentOverride)
-                    ? manager.documentService
-                    : manager.currentService
+                let isMultimodal = Self.isMultimodalQuery(fullCommand)
+
+                let service: LLMServiceProtocol
+                if isDocumentTask && manager.hasDocumentOverride {
+                    service = manager.documentService
+                } else if isMultimodal && manager.hasMultimodalProvider {
+                    service = manager.multimodalService
+                    print("[Agent] Multimodal query detected — routing to \(manager.multimodalProviderName)")
+                } else {
+                    service = manager.currentService
+                }
 
                 // Transform browser choice prefix into LLM-friendly instruction
                 var effectiveCommand = fullCommand

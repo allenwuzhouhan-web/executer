@@ -647,28 +647,49 @@ struct HttpRequestTool: ToolDefinition {
 struct RunScriptTool: ToolDefinition {
     let name = "run_script"
     let description = """
-        Write and run a script. For Python: uses a managed environment with pre-installed packages \
-        (PyPDF2, Pillow, openpyxl, requests, beautifulsoup4, python-pptx, python-docx, lxml, pyyaml, tabulate).
+        Write and execute a script immediately. This is your most powerful tool — use it for ANY task \
+        that involves file processing, data manipulation, computation, or automation beyond simple read/write.
 
-        Use for: PDF processing (split/merge/extract/watermark), CSV/Excel transforms, batch file operations, \
-        data conversion (JSON/XML/YAML), web scraping (requests + beautifulsoup4), image manipulation (Pillow), \
-        text processing, automation, quick computations.
+        ## Languages
+        - **python** (default choice): managed venv with pre-installed packages: \
+        PyPDF2, PyMuPDF (fitz — preferred for PDF split/merge/extract), pdfplumber (PDF tables), \
+        Pillow, pandas, numpy, matplotlib, openpyxl, requests, beautifulsoup4, lxml, html2text, \
+        python-pptx, python-docx, pyyaml, tabulate, Jinja2, chardet. Use `packages` param for extras.
+        - **node**: JavaScript/Node.js
+        - **ruby**: Ruby scripts
+        - **bash**: Shell scripts
+        - **cpp**: C++ (compiled with clang++, C++17, then executed)
+        - **c**: C (compiled with clang, then executed)
+        - **swift**: Swift scripts (interpreted via `swift` command)
+        - **go**: Go (compiled with `go build`, then executed)
+        - **typescript**: TypeScript via ts-node or tsx (requires installation)
+
+        ## When to use this tool
+        - PDF: split by chapter/page, merge, extract text/tables, add watermark, metadata
+        - Data: CSV/JSON/XML/YAML transforms, filtering, aggregation, format conversion
+        - Files: batch rename, organize by type, find duplicates, bulk convert, dedup
+        - Web: scrape pages, parse HTML, extract tables, download series of files
+        - Images: resize, crop, convert format, thumbnails, strip EXIF
+        - Text: regex across files, log analysis, report generation, search/replace
+        - Math: statistics, financial calculations, unit conversion, charting
+        - Performance: use cpp/c for compute-heavy tasks (algorithms, number crunching)
 
         ## Output
-        Print results to stdout. For structured data, use json.dumps(). \
-        Print a final summary line (e.g. "Split into 5 files at ~/Desktop/chapters/").
+        Print results to stdout. For files, print the output path. \
+        Print a final summary (e.g. "Created 12 chapter files in ~/Desktop/textbook_chapters/").
 
         ## File access
-        Use working_dir to set where the script runs. Use absolute paths for input files, \
-        or paths relative to working_dir. Output files should go in working_dir.
+        Use working_dir to set where the script runs (default: ~/Desktop). \
+        Use absolute paths for input files. Output files go in working_dir by default.
         """
     var parameters: [String: Any] {
         JSONSchema.object(properties: [
-            "language": JSONSchema.enumString(description: "Script language", values: ["python", "node", "ruby", "bash"]),
+            "language": JSONSchema.enumString(description: "Script language", values: ["python", "node", "ruby", "bash", "cpp", "c", "swift", "go", "typescript"]),
             "code": JSONSchema.string(description: "The script code to execute"),
             "timeout": JSONSchema.integer(description: "Timeout in seconds (default: 60, max: 300)", minimum: 1, maximum: 300),
             "working_dir": JSONSchema.string(description: "Working directory for the script. Default: ~/Desktop"),
             "packages": JSONSchema.string(description: "Additional pip packages to install before running (comma-separated). Python only."),
+            "args": JSONSchema.string(description: "Command-line arguments to pass to the script (space-separated). Accessed via sys.argv in Python, process.argv in Node."),
         ], required: ["language", "code"])
     }
 
@@ -679,6 +700,9 @@ struct RunScriptTool: ToolDefinition {
         let timeout = min(optionalInt("timeout", from: args) ?? 60, 300)
         let workingDir = optionalString("working_dir", from: args) ?? "~/Desktop"
         let packagesRaw = optionalString("packages", from: args)
+        let scriptArgs = optionalString("args", from: args)?
+            .components(separatedBy: " ")
+            .filter { !$0.isEmpty } ?? []
 
         // Resolve working directory
         let expandedDir = NSString(string: workingDir).expandingTildeInPath
@@ -686,17 +710,37 @@ struct RunScriptTool: ToolDefinition {
 
         // Python: use managed venv with packages
         if language == "python" {
-            return try await executePython(code: code, timeout: timeout, workingDir: expandedDir, packagesRaw: packagesRaw)
+            return try await executePython(code: code, timeout: timeout, workingDir: expandedDir, packagesRaw: packagesRaw, scriptArgs: scriptArgs)
         }
 
-        // Other languages: use AsyncShellRunner (pipe-safe) with system interpreters
+        // Compiled languages: write source → compile → run binary
+        if language == "cpp" || language == "c" {
+            return try await executeCompiled(code: code, language: language, timeout: timeout, workingDir: expandedDir)
+        }
+
+        // Swift: interpreted via `swift` command
+        if language == "swift" {
+            return try await executeSwift(code: code, timeout: timeout, workingDir: expandedDir)
+        }
+
+        // Go: compile with `go build` then run
+        if language == "go" {
+            return try await executeGo(code: code, timeout: timeout, workingDir: expandedDir)
+        }
+
+        // TypeScript: try tsx, then ts-node, then compile to JS
+        if language == "typescript" {
+            return try await executeTypeScript(code: code, timeout: timeout, workingDir: expandedDir)
+        }
+
+        // Interpreted languages: write to temp file and run
         let ext: String
         let runner: String
         switch language {
-        case "node": ext = "js"; runner = "/usr/local/bin/node"
+        case "node": ext = "js"; runner = Self.findExecutable("node", searchPaths: ["/opt/homebrew/bin/node", "/usr/local/bin/node"]) ?? "node"
         case "ruby": ext = "rb"; runner = "/usr/bin/ruby"
         case "bash": ext = "sh"; runner = "/bin/bash"
-        default: return "Unsupported language: \(language)"
+        default: return "Unsupported language: \(language). Supported: python, node, ruby, bash, cpp, c, swift, go, typescript."
         }
 
         let tempFile = NSTemporaryDirectory() + "executer_script_\(UUID().uuidString.prefix(8)).\(ext)"
@@ -705,14 +749,207 @@ struct RunScriptTool: ToolDefinition {
 
         let result = try await AsyncShellRunner.run(
             executable: runner,
-            arguments: [tempFile],
+            arguments: [tempFile] + scriptArgs,
             workingDirectory: expandedDir,
             timeout: timeout
         )
         return formatResult(result)
     }
 
-    private func executePython(code: String, timeout: Int, workingDir: String, packagesRaw: String?) async throws -> String {
+    // MARK: - Compiled Languages (C/C++)
+
+    private func executeCompiled(code: String, language: String, timeout: Int, workingDir: String) async throws -> String {
+        let ext = language == "cpp" ? "cpp" : "c"
+        let compiler = language == "cpp" ? "clang++" : "clang"
+        let stdFlag = language == "cpp" ? "-std=c++17" : "-std=c17"
+        let uid = UUID().uuidString.prefix(8)
+        let sourceFile = NSTemporaryDirectory() + "executer_\(uid).\(ext)"
+        let binaryFile = NSTemporaryDirectory() + "executer_\(uid)_bin"
+
+        try code.write(toFile: sourceFile, atomically: true, encoding: .utf8)
+        defer {
+            try? FileManager.default.removeItem(atPath: sourceFile)
+            try? FileManager.default.removeItem(atPath: binaryFile)
+        }
+
+        // Find compiler
+        guard let compilerPath = Self.findExecutable(compiler, searchPaths: [
+            "/usr/bin/\(compiler)", "/opt/homebrew/bin/\(compiler)", "/usr/local/bin/\(compiler)"
+        ]) else {
+            return "Error: \(compiler) not found. Install Xcode Command Line Tools: xcode-select --install"
+        }
+
+        // Compile
+        let compileResult = try await AsyncShellRunner.run(
+            executable: compilerPath,
+            arguments: [stdFlag, "-O2", "-o", binaryFile, sourceFile],
+            workingDirectory: workingDir,
+            timeout: 30
+        )
+        if compileResult.exitCode != 0 {
+            let errors = compileResult.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            return "Compilation failed:\n\(errors)"
+        }
+
+        // Make executable
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binaryFile)
+
+        // Run
+        let runResult = try await AsyncShellRunner.run(
+            executable: binaryFile,
+            arguments: [],
+            workingDirectory: workingDir,
+            timeout: timeout
+        )
+        return formatResult(runResult)
+    }
+
+    // MARK: - Swift (interpreted)
+
+    private func executeSwift(code: String, timeout: Int, workingDir: String) async throws -> String {
+        let uid = UUID().uuidString.prefix(8)
+        let sourceFile = NSTemporaryDirectory() + "executer_\(uid).swift"
+        try code.write(toFile: sourceFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: sourceFile) }
+
+        guard let swiftPath = Self.findExecutable("swift", searchPaths: [
+            "/usr/bin/swift", "/opt/homebrew/bin/swift", "/usr/local/bin/swift"
+        ]) else {
+            return "Error: swift not found. Install Xcode or Xcode Command Line Tools."
+        }
+
+        let result = try await AsyncShellRunner.run(
+            executable: swiftPath,
+            arguments: [sourceFile],
+            workingDirectory: workingDir,
+            timeout: timeout
+        )
+        return formatResult(result)
+    }
+
+    // MARK: - Go (compile + run)
+
+    private func executeGo(code: String, timeout: Int, workingDir: String) async throws -> String {
+        let uid = UUID().uuidString.prefix(8)
+        let tempDir = NSTemporaryDirectory() + "executer_go_\(uid)"
+        try FileManager.default.createDirectory(atPath: tempDir, withIntermediateDirectories: true)
+        let sourceFile = tempDir + "/main.go"
+        let binaryFile = tempDir + "/main"
+
+        try code.write(toFile: sourceFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: tempDir) }
+
+        guard let goPath = Self.findExecutable("go", searchPaths: [
+            "/opt/homebrew/bin/go", "/usr/local/go/bin/go", "/usr/local/bin/go"
+        ]) else {
+            return "Error: go not found. Install Go: brew install go"
+        }
+
+        // Initialize module
+        let initResult = try await AsyncShellRunner.run(
+            executable: goPath,
+            arguments: ["mod", "init", "executer_script"],
+            workingDirectory: tempDir,
+            timeout: 10
+        )
+        if initResult.exitCode != 0 {
+            return "Go mod init failed:\n\(initResult.stderr)"
+        }
+
+        // Resolve external imports if any (go mod tidy downloads dependencies)
+        let tidyResult = try await AsyncShellRunner.run(
+            executable: goPath,
+            arguments: ["mod", "tidy"],
+            workingDirectory: tempDir,
+            timeout: 30
+        )
+        // tidy failure is non-fatal for stdlib-only code (go.sum won't exist)
+        if tidyResult.exitCode != 0 && code.contains("\"github.com") {
+            return "Go mod tidy failed (dependency resolution):\n\(tidyResult.stderr)"
+        }
+
+        // Build
+        let buildResult = try await AsyncShellRunner.run(
+            executable: goPath,
+            arguments: ["build", "-o", binaryFile, "."],
+            workingDirectory: tempDir,
+            timeout: 60
+        )
+        if buildResult.exitCode != 0 {
+            return "Go build failed:\n\(buildResult.stderr)"
+        }
+
+        // Run
+        let runResult = try await AsyncShellRunner.run(
+            executable: binaryFile,
+            arguments: [],
+            workingDirectory: workingDir,
+            timeout: timeout
+        )
+        return formatResult(runResult)
+    }
+
+    // MARK: - TypeScript
+
+    private func executeTypeScript(code: String, timeout: Int, workingDir: String) async throws -> String {
+        let uid = UUID().uuidString.prefix(8)
+        let sourceFile = NSTemporaryDirectory() + "executer_\(uid).ts"
+        try code.write(toFile: sourceFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: sourceFile) }
+
+        // Try tsx first (fastest), then ts-node, then npx tsx
+        if let tsxPath = Self.findExecutable("tsx", searchPaths: ["/opt/homebrew/bin/tsx", "/usr/local/bin/tsx"]) {
+            let result = try await AsyncShellRunner.run(
+                executable: tsxPath,
+                arguments: [sourceFile],
+                workingDirectory: workingDir,
+                timeout: timeout
+            )
+            return formatResult(result)
+        }
+
+        if let tsNodePath = Self.findExecutable("ts-node", searchPaths: ["/opt/homebrew/bin/ts-node", "/usr/local/bin/ts-node"]) {
+            let result = try await AsyncShellRunner.run(
+                executable: tsNodePath,
+                arguments: [sourceFile],
+                workingDirectory: workingDir,
+                timeout: timeout
+            )
+            return formatResult(result)
+        }
+
+        // Fallback: npx tsx (auto-downloads if needed)
+        if let npxPath = Self.findExecutable("npx", searchPaths: ["/opt/homebrew/bin/npx", "/usr/local/bin/npx"]) {
+            let result = try await AsyncShellRunner.run(
+                executable: npxPath,
+                arguments: ["tsx", sourceFile],
+                workingDirectory: workingDir,
+                timeout: timeout
+            )
+            return formatResult(result)
+        }
+
+        return "Error: No TypeScript runner found. Install one: npm install -g tsx"
+    }
+
+    // MARK: - Executable Discovery
+
+    private static func findExecutable(_ name: String, searchPaths: [String]) -> String? {
+        for path in searchPaths {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+        // Fallback: `which`
+        let result = try? ShellRunner.run("which \(name)", timeout: 5)
+        if let result = result, result.exitCode == 0 {
+            let path = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !path.isEmpty { return path }
+        }
+        return nil
+    }
+
+    private func executePython(code: String, timeout: Int, workingDir: String, packagesRaw: String?, scriptArgs: [String] = []) async throws -> String {
         let python = PPTExecutor.findPython()
 
         // Install additional packages if requested
@@ -730,7 +967,7 @@ struct RunScriptTool: ToolDefinition {
 
         let result = try await AsyncShellRunner.run(
             executable: python,
-            arguments: [tempFile],
+            arguments: [tempFile] + scriptArgs,
             environment: [
                 "PYTHONIOENCODING": "utf-8",
                 "PYTHONUNBUFFERED": "1",

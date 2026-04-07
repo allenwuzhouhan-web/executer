@@ -476,8 +476,20 @@ enum PPTExecutor {
 
     /// Required Python packages for document engines.
     private static let requiredPackages = [
-        "python-pptx", "python-docx", "openpyxl", "PyPDF2", "Pillow", "chromadb",
-        "requests", "beautifulsoup4", "lxml", "pyyaml", "tabulate"
+        // Document engines
+        "python-pptx", "python-docx", "openpyxl",
+        // PDF processing (PyMuPDF is far superior to PyPDF2 — text extraction, splitting, merging, OCR-ready)
+        "PyPDF2", "PyMuPDF", "pdfplumber",
+        // Image processing
+        "Pillow",
+        // Data analysis
+        "pandas", "numpy", "matplotlib",
+        // Web & parsing
+        "requests", "beautifulsoup4", "lxml", "html2text",
+        // Formats & serialization
+        "pyyaml", "tabulate", "Jinja2", "chardet",
+        // Vector DB (existing)
+        "chromadb",
     ]
 
     /// Cached python path — detected once, reused.
@@ -563,13 +575,32 @@ enum PPTExecutor {
         }
     }
 
+    /// Fingerprint of the current required packages list — changes when packages are added/removed.
+    /// Stored in the venv dir to detect when the package set has been updated.
+    private static var packageFingerprint: String {
+        // Sort for stability, then hash — any change to requiredPackages triggers reinstall
+        requiredPackages.sorted().joined(separator: ",")
+    }
+
     /// Quick check that required packages are importable; install missing ones.
     private static func ensurePackages(venvDir: URL) {
         let venvPython = venvDir.appendingPathComponent("bin/python3").path
+        let fingerprintFile = venvDir.appendingPathComponent(".pkg_fingerprint").path
+
+        // Fast path: if fingerprint matches, we already installed this exact package set
+        if let stored = try? String(contentsOfFile: fingerprintFile, encoding: .utf8),
+           stored.trimmingCharacters(in: .whitespacesAndNewlines) == packageFingerprint {
+            venvReady = true
+            return
+        }
+
+        // Fingerprint mismatch or missing — verify key packages (old + new)
         let checkProcess = Process()
         let pipe = Pipe()
         checkProcess.executableURL = URL(fileURLWithPath: venvPython)
-        checkProcess.arguments = ["-c", "import pptx; import docx; import openpyxl; print('OK')"]
+        checkProcess.arguments = ["-c",
+            "import pptx; import docx; import openpyxl; import fitz; import pandas; import numpy; import matplotlib; import pdfplumber; print('OK')"
+        ]
         checkProcess.standardOutput = pipe
         checkProcess.standardError = FileHandle.nullDevice
         try? checkProcess.run()
@@ -577,20 +608,26 @@ enum PPTExecutor {
 
         let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         if out.contains("OK") {
+            // All good — write fingerprint so we skip next time
+            try? packageFingerprint.write(toFile: fingerprintFile, atomically: true, encoding: .utf8)
             venvReady = true
             return
         }
 
-        // Some packages missing — install them
-        print("[PPTExecutor] Reinstalling missing Python packages...")
+        // Some packages missing — install them all (pip handles already-installed gracefully)
+        print("[PPTExecutor] Installing missing Python packages...")
         let pipPath = venvDir.appendingPathComponent("bin/pip3").path
         let pipProcess = Process()
         pipProcess.executableURL = URL(fileURLWithPath: pipPath)
-        pipProcess.arguments = ["install"] + requiredPackages
+        pipProcess.arguments = ["install", "--quiet"] + requiredPackages
         pipProcess.standardOutput = FileHandle.nullDevice
         pipProcess.standardError = FileHandle.nullDevice
         try? pipProcess.run()
         pipProcess.waitUntilExit()
+
+        if pipProcess.terminationStatus == 0 {
+            try? packageFingerprint.write(toFile: fingerprintFile, atomically: true, encoding: .utf8)
+        }
         venvReady = true
     }
 

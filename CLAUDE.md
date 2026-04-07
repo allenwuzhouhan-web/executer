@@ -114,6 +114,21 @@ The document pipeline uses **Python engines invoked as subprocesses** from Swift
 2. Register in the `builders` dict inside `build_slide()` dispatcher
 3. Document in `CreatePresentationTool.description` in `PPTExecutor.swift`
 
+### Script Execution (`run_script` tool)
+- `Executer/Executors/SystemBashExecutor.swift` — `RunScriptTool` supports 9 languages: Python, Node, Ruby, Bash, C++, C, Swift, Go, TypeScript
+- **Python**: managed venv at `~/Library/Application Support/Executer/python_env` with 18+ pre-installed packages (PyMuPDF/fitz, pandas, numpy, matplotlib, Pillow, pdfplumber, etc.)
+- **C/C++**: compiles with clang/clang++ (C17/C++17, -O2), runs binary, cleans up temp files
+- **Go**: auto-creates temp module, runs `go mod tidy` for external deps, builds and runs
+- **TypeScript**: tries tsx → ts-node → npx tsx fallback chain
+- **Swift**: interpreted via `swift` command
+- `PPTExecutor.ensurePackages()` uses a fingerprint file (`.pkg_fingerprint`) to detect when the package set changes and auto-installs missing packages
+
+### Multimodal LLM Routing
+- `AgentLoop.isMultimodalQuery()` detects queries requiring visual understanding (images, scanned PDFs, textbooks, diagrams)
+- When detected + Kimi API key available → auto-routes to Kimi instead of DeepSeek
+- `LLMServiceManager.multimodalService` — tries Kimi international, then Kimi CN, then falls back to currentService
+- Two-tier keyword detection: strong signals (direct visual refs) always match; medium signals ("textbook", "this pdf") require an understanding verb
+
 ### Python Resource Deployment
 All Python scripts are copied from the app bundle to `~/Library/Application Support/Executer/` on first use via `PPTExecutor.ensureResource()`. When modifying Python scripts during development, delete the App Support copies to force re-copy.
 

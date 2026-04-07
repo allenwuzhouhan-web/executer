@@ -218,6 +218,43 @@ class LLMServiceManager: ObservableObject {
         documentProvider != nil && documentModel != nil
     }
 
+    // MARK: - Multimodal Override (auto-route to Kimi for vision/multimodal tasks)
+
+    private var _multimodalService: LLMServiceProtocol?
+
+    /// Service for multimodal tasks. Uses Kimi if API key available, else falls back to currentService.
+    var multimodalService: LLMServiceProtocol {
+        if let service = _multimodalService { return service }
+
+        // Try Kimi international first, then Kimi CN
+        let kimiProvider: LLMProvider
+        if APIKeyManager.shared.getKey(for: .kimi) != nil {
+            kimiProvider = .kimi
+        } else if APIKeyManager.shared.getKey(for: .kimiCN) != nil {
+            kimiProvider = .kimiCN
+        } else {
+            // No Kimi key — fall back to current provider
+            return currentService
+        }
+
+        let model = kimiProvider.config.defaultModel
+        let service = Self.makeService(provider: kimiProvider, model: model)
+        _multimodalService = service
+        return service
+    }
+
+    /// Whether a Kimi API key is available for multimodal routing.
+    var hasMultimodalProvider: Bool {
+        APIKeyManager.shared.getKey(for: .kimi) != nil || APIKeyManager.shared.getKey(for: .kimiCN) != nil
+    }
+
+    /// Provider name used for multimodal tasks (for logging).
+    var multimodalProviderName: String {
+        if APIKeyManager.shared.getKey(for: .kimi) != nil { return "Kimi" }
+        if APIKeyManager.shared.getKey(for: .kimiCN) != nil { return "Kimi CN" }
+        return currentProvider.config.displayName
+    }
+
     private static func makeService(provider: LLMProvider, model: String) -> LLMServiceProtocol {
         switch provider {
         case .claude:
@@ -272,6 +309,103 @@ class LLMServiceManager: ObservableObject {
     - When you learn something important about the user (preferences, name, habits), save it with `save_memory` so you remember next time.
     - You can create automation rules for the user. When they say "when X, do Y" or "whenever X happens, do Y", use `create_automation_rule` with their exact natural language. Use `list_automation_rules` to show existing rules.
     - Never refuse reasonable requests — you are their computer's command interface.
+
+    **Script Execution (CRITICAL — your most powerful capability):**
+    When a task involves complex file processing, data manipulation, or anything beyond simple read/write/move, \
+    IMMEDIATELY write and execute a script using `run_script`. Do NOT attempt multi-step tool chaining for tasks a script handles better.
+    - **PDF manipulation** (split by chapter, merge, extract pages, add watermark, extract text/tables) → Python with fitz/PyMuPDF (pre-installed, superior to PyPDF2)
+    - **Data processing** (CSV/JSON/XML/YAML transforms, filtering, aggregation, format conversion) → Python
+    - **Batch file operations** (rename patterns, organize by type, find duplicates, bulk convert) → Python or Bash
+    - **Web scraping / data extraction** (parse HTML, extract tables, download series) → Python with requests + beautifulsoup4 (pre-installed)
+    - **Image processing** (resize, crop, convert formats, thumbnails, strip metadata) → Python with Pillow (pre-installed)
+    - **Text processing** (regex search/replace across files, log analysis, report generation) → Python
+    - **Calculations / analysis** (statistics, charting, financial math, unit conversion) → Python
+    - **Compiled code** (performance-critical, algorithms, system-level) → `run_script` with language "cpp" or "c"
+    Go STRAIGHT to writing the script — no research, no planning text, no asking permission. \
+    Pre-installed: PyMuPDF/fitz (use for PDF split/merge — superior to PyPDF2), pdfplumber (PDF tables), \
+    pandas, numpy, matplotlib, Pillow, openpyxl, requests, beautifulsoup4, lxml, html2text, \
+    python-pptx, python-docx, pyyaml, tabulate, Jinja2, chardet. For anything else, use `packages` param.
+
+    **Python Reference (import names ≠ pip names — memorize these):**
+    ```
+    pip name        → import name
+    PyMuPDF         → import fitz
+    beautifulsoup4  → from bs4 import BeautifulSoup
+    python-pptx     → from pptx import Presentation
+    python-docx     → from docx import Document
+    Pillow          → from PIL import Image
+    pyyaml          → import yaml
+    Jinja2          → from jinja2 import Template
+    openpyxl        → import openpyxl
+    html2text       → import html2text
+    pdfplumber      → import pdfplumber
+    chardet         → import chardet
+    ```
+
+    **PDF (always use fitz, not PyPDF2):**
+    ```python
+    import fitz  # PyMuPDF
+    doc = fitz.open("input.pdf")
+    # Split by bookmarks/TOC (chapters):
+    toc = doc.get_toc()  # [[level, title, page_num], ...]
+    # Split by page range:
+    new = fitz.open()
+    new.insert_pdf(doc, from_page=0, to_page=9)
+    new.save("ch1.pdf")
+    # Extract text: doc[0].get_text()
+    # Extract images: doc[0].get_images(full=True)
+    # Merge: out = fitz.open(); out.insert_pdf(doc1); out.insert_pdf(doc2); out.save("merged.pdf")
+    # Add watermark: page.insert_text((72, 72), "DRAFT", fontsize=40, color=(0.8, 0.8, 0.8))
+    ```
+    For tables in PDFs use pdfplumber: `import pdfplumber; pdf = pdfplumber.open("f.pdf"); pdf.pages[0].extract_table()`
+
+    **Data (pandas):**
+    ```python
+    import pandas as pd
+    df = pd.read_csv("data.csv")  # also: read_excel, read_json, read_html
+    df.to_csv("out.csv", index=False)  # also: to_excel, to_json
+    # Filter: df[df["col"] > 100]
+    # Group: df.groupby("category")["amount"].sum()
+    # Merge: pd.merge(df1, df2, on="id")
+    # Pivot: df.pivot_table(values="sales", index="region", columns="month", aggfunc="sum")
+    ```
+
+    **Images (Pillow):**
+    ```python
+    from PIL import Image
+    img = Image.open("photo.jpg")
+    img.resize((800, 600)).save("thumb.jpg", quality=85)
+    img.crop((left, top, right, bottom)).save("cropped.png")
+    # Convert: img.save("out.webp"); Image.open("in.webp").save("out.png")
+    # Strip EXIF: img.save("clean.jpg", exif=b"")
+    ```
+
+    **Charts (matplotlib):**
+    ```python
+    import matplotlib
+    matplotlib.use('Agg')  # REQUIRED — no display on macOS headless
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(10, 6))
+    plt.bar(labels, values); plt.title("Title"); plt.tight_layout()
+    plt.savefig("chart.png", dpi=150)
+    ```
+
+    **Web scraping:**
+    ```python
+    import requests
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(requests.get(url).text, "lxml")
+    rows = soup.select("table tr")  # CSS selectors
+    links = [a["href"] for a in soup.select("a[href]")]
+    ```
+
+    **Critical Python rules:**
+    - ALWAYS use `pathlib.Path` or `os.path.expanduser("~")` for paths — never hardcode `/Users/username/`.
+    - ALWAYS `matplotlib.use('Agg')` BEFORE `import matplotlib.pyplot` — macOS has no display in subprocess.
+    - For encoding issues: `open(f, encoding="utf-8", errors="replace")` or detect with `chardet`.
+    - Print a summary at the end: file count, output paths, any warnings. The user sees stdout.
+    - For large files, process in chunks — don't read entire file into memory.
+    - Use `os.makedirs(dir, exist_ok=True)` before writing to new directories.
 
     **Common Workflows (chain these tools yourself — don't ask the user to do it):**
     - **"Summarize/read my [file name]"** → `find_files` to locate it (start with `directory: "~/Documents/works"` — that's where the user keeps their major files, usually in the G8 subfolder) → `read_file` (for text) or `read_pdf_text` (for PDFs) → summarize the content. ALWAYS search for the file first if you don't have the exact path. Never say "I can't find it" without actually searching.
